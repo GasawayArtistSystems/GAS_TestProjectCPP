@@ -1,0 +1,28 @@
+{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "1.0.0",
+    "FriendlyName": "GAS Pre Pro Tools",
+    "Description": "Pre-production and shot-planning tools for filmmakers using Unreal Engine.",
+    "Category": "Editor",
+    "CreatedBy": "Gasaway Artist Systems, LLC",
+    "CreatedByURL": "https://gaspreprotools.com",
+    "DocsURL": "",
+    "SupportURL": "",
+    "MarketplaceURL": "",
+    "CanContainContent": true,
+    "IsBetaVersion": true,
+    "Modules": [
+        {
+            "Name": "GAS_PreProTools",
+            "Type": "Runtime",
+            "LoadingPhase": "Default"
+        },
+        {
+            "Name": "GAS_PreProToolsEditor",
+            "Type": "Editor",
+            "LoadingPhase": "Default"
+        }
+    ]
+
+}
