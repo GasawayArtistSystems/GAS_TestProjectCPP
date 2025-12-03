@@ -1,0 +1,58 @@
+###############################
+# Unreal Engine .gitignore
+# For plugins & C++ development
+###############################
+
+# Ignore all intermediate build files
+Intermediate/
+Saved/
+DerivedDataCache/
+Binaries/
+
+# Ignore Visual Studio project files
+.vs/
+*.VC.db
+*.VC.opendb
+*.sdf
+*.suo
+*.opensdf
+
+# Build artifacts
+*.log
+*.pdb
+*.tmp
+
+# Ignore Unreal-generated project files
+*.target
+*.csproj
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Don't include compiled shaders, temp data
+Plugins/*/Intermediate/
+Plugins/*/Binaries/
+
+# Ignore build-specific folders inside plugin
+Source/*/Private/*
+Source/*/Public/*.generated.*
+
+# Ignore macOS or Unix junk (in case)
+.DS_Store
+*.swp
+
+# Ignore backup files
+*.bak
+*.old
+*.orig
+
+# Ignore compressed or packaged files
+*.zip
+*.7z
+*.tar
+*.gz
+
+# Ignore user-specific UE files
+Saved/Backup/
+Saved/Config/CrashReportClient/
+Saved/Logs/

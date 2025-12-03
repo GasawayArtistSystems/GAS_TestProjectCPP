@@ -12,17 +12,21 @@
     "MarketplaceURL": "",
     "CanContainContent": true,
     "IsBetaVersion": true,
-    "Modules": [
-        {
-            "Name": "GAS_PreProTools",
-            "Type": "Runtime",
-            "LoadingPhase": "Default"
-        },
-        {
-            "Name": "GAS_PreProToolsEditor",
-            "Type": "Editor",
-            "LoadingPhase": "Default"
-        }
-    ]
+    "SupportedTargetPlatforms": [
+        "Win64"
+    ],
+
+	"Modules": [
+	  {
+		"Name": "GAS_PreProTools",
+		"Type": "Runtime",
+		"LoadingPhase": "Default"
+	  },
+	  {
+		"Name": "GAS_PreProToolsEditor",
+		"Type": "Editor",
+		"LoadingPhase": "Default"
+	  }
+	]
 
 }

@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "GAS_FDXImporter.h"
+
 
 // Forward declarations
 class SGASScriptPanel;
@@ -11,17 +13,11 @@ class SImage;
 
 struct FShotEntry
 {
-    int32 StartLineIndex = 0;
-    int32 EndLineIndex = 0;
-    float ShotX = 0.f;
-    FString ShotType = TEXT("Unknown");   // later: “Medium”, “Closeup”, etc.
+    int32 StartParagraph = 0;
+    int32 EndParagraph = 0;
+    FString ShotType = TEXT("Unknown");
 };
 
-
-/**
- * Main Script Tab for GAS Pre Pro Tools
- * Handles shot-marking and script display.
- */
 class SGAS_ScriptTab : public SCompoundWidget
 {
 public:
@@ -31,8 +27,11 @@ public:
 
     void Construct(const FArguments& InArgs);
 
-    // User clicks a script line (start/end shot)
-    void OnScriptLineClicked(int32 LineIndex, float ClickX);
+    void OnScriptParagraphClicked(int32 ParagraphIndex);
+
+    FReply OnImportScript();
+
+
 
 private:
 
@@ -43,24 +42,23 @@ private:
     // Toggles shot marking mode
     FReply OnToggleShotMarking();
 
-    // Toggles scene/dialog numbering
-    FReply OnToggleNumbering();
+    // Remove old numbering toggle
+    // FReply OnToggleNumbering();  <-- DELETE THIS LINE
 
     // =========================================================
     // Rebuild UI Panels
     // =========================================================
 
-    // Rebuilds the right-side shot list panel
+    // Right-side shot list
     void RebuildShotList();
 
-    // 🔹 Rebuild script panel (used after numbering changes)
-    void RebuildScriptList();
+    void LoadScriptFromFDX(const FString& FilePath);
 
-    // Compute scene & dialogue numbering arrays
-    void ComputeLineNumbers(
-        TArray<FString>& OutSceneNumbers,
-        TArray<FString>& OutDialogueNumbers
-    );
+    void SaveScriptToJson();
+    void LoadScriptFromJsonIfExists();
+
+    float CachedScriptPanelWidth = 1200.f; // fallback width
+
 
 private:
 
@@ -68,31 +66,33 @@ private:
     // Script + Shot Data
     // =========================================================
 
-    TArray<FString> ScriptLines;         // Full screenplay text
-    TArray<FShotEntry> ShotList;         // Shot ranges (start/end line numbers + X position)
+    // Parsed screenplay paragraphs (raw from importer)
+    TArray<FScriptParagraph> ParsedParagraphs;
 
-    bool bIsMarkingShot = false;         // Whether user is picking start→end
-    int32 PendingStartLineIndex = INDEX_NONE;
-    float PendingStartX = 0.f;           // X for the first click of a shot
+    // Paragraph-based shot markers
+    TArray<int32> ShotStartParagraphs;
+    TArray<int32> ShotEndParagraphs;
 
-    bool bShowNumbering = false;
-    bool bShowSceneAndDialogueNumbers = false;
+    // Shot metadata
+    TArray<FShotEntry> ShotList;
 
-    // =========================================================
-    // Scene & Dialogue Numbering Data
-    // =========================================================
+    bool bIsMarkingShot = false;
+    int32 PendingStartParagraph = INDEX_NONE;
 
-    TArray<FString> SceneNums;           // One array entry per script line
-    TArray<FString> DialogueNums;        // One array entry per script line
+    bool bIsShotMarkingActive = false;
+
+
+    // Remove numbering flags
+    // bool bShowNumbering = false;
+    // bool bShowSceneAndDialogueNumbers = false;
 
     // =========================================================
     // Slate UI References
     // =========================================================
 
-    TSharedPtr<SVerticalBox> ShotListContainer; // Right-side shot list
-    TSharedPtr<STextBlock>   ShotModeButtonLabel; // Begin / Cancel
-    TSharedPtr<SGASScriptPanel> ScriptPanel;      // Middle panel that draws lines
-    TSharedPtr<SImage> ShotMarkingIcon;           // Camera icon image
+    TSharedPtr<SVerticalBox> ShotListContainer;
+    TSharedPtr<STextBlock> ShotModeButtonLabel;
+    TSharedPtr<SGASScriptPanel> ScriptPanel;
+    TSharedPtr<SImage> ShotMarkingIcon;
     TSharedPtr<SImage> NumberingIcon;
-
 };

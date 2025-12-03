@@ -1,4 +1,5 @@
 using UnrealBuildTool;
+using System.IO;
 
 public class GAS_PreProTools : ModuleRules
 {
@@ -11,8 +12,18 @@ public class GAS_PreProTools : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "Slate",
-            "SlateCore"
+            "Json",
+            "JsonUtilities"
         });
+
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            "Projects",
+            "Slate",
+            "SlateCore",
+            "ApplicationCore"
+        });
+
+        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));
     }
 }

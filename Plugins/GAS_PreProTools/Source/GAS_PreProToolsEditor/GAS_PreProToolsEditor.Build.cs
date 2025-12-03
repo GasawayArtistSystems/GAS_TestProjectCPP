@@ -6,34 +6,31 @@ public class GAS_PreProToolsEditor : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        PublicDependencyModuleNames.AddRange(
-            new string[]
-            {
-                "Core",
-                "CoreUObject",
-                "Engine",
-                "UnrealEd",
-                "Slate",
-                "SlateCore",
-                "EditorSubsystem",
-                "EditorFramework",
-                "ToolMenus",
-                "LevelEditor"
-            }
-        );
+        PublicDependencyModuleNames.AddRange(new string[]
+        {
+            "Core",
+            "CoreUObject",
+            "Engine",
+            "GAS_PreProTools",
+            "Slate",
+            "SlateCore",
+            "EditorSubsystem",
+            "UnrealEd",
+            "InputCore"
+        });
 
-        PrivateDependencyModuleNames.AddRange(
-            new string[]
-            {
-        "InputCore",
-        "Projects",
-        "ApplicationCore",
-        "EditorStyle",
-        "PropertyEditor"
-            }
-        );
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            "Projects",
+            "ApplicationCore",
+            "DesktopPlatform",
+            "EditorFramework",
+            "ToolMenus",
+            "Json",
+            "JsonUtilities"
+        });
 
-
-
+        PublicIncludePaths.Add(ModuleDirectory + "/Public");
+        PrivateIncludePaths.Add(ModuleDirectory + "/Private");
     }
 }

@@ -1,171 +1,160 @@
-#include "SGASScriptPanel.h"
-
-#include "Widgets/Text/STextBlock.h"
-#include "Widgets/SBoxPanel.h"
-#include "Widgets/SOverlay.h"
+ï»¿#include "SGASScriptPanel.h"
+#include "ScriptLayoutEngine.h"
+#include "GAS_FDXImporter.h"
+#include "GASPreProProject.h"
 #include "Rendering/DrawElements.h"
+#include "Framework/Text/SlateTextLayout.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Styling/SlateTypes.h"
+#include "Styling/CoreStyle.h"
+#include "Styling/SlateBrush.h"
+#include "Styling/AppStyle.h"
+#include "Fonts/SlateFontInfo.h"
+#include "Internationalization/Text.h"
+#include "Widgets/Text/STextBlock.h"
+#include "Widgets/Layout/SScrollBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Input/Reply.h"
 #include "Input/Events.h"
 
-//
-// ============================================================
+// ============================================================================
 // Construct
-// ============================================================
+// ============================================================================
+
+static_assert(true, "USING THIS SGASScriptPanel.cpp FILE");
+
 void SGASScriptPanel::Construct(const FArguments& InArgs)
 {
-    ScriptLines = InArgs._ScriptLines;
-    ShotStartLines = InArgs._ShotStartLines;
-    ShotEndLines = InArgs._ShotEndLines;
-    ShotXs = InArgs._ShotXs;
+    OnParagraphClicked = InArgs._OnParagraphClicked;
 
-    SceneNumbers = InArgs._SceneNumbers;
-    DialogueNumbers = InArgs._DialogueNumbers;
+    RenderedParagraphs.Empty();
+    ShotStartParagraphs.Empty();
+    ShotEndParagraphs.Empty();
+    HoveredShotIndex = INDEX_NONE;
+    SelectedShotIndex = INDEX_NONE;
 
-    // ---------------------------------------------------------
-    // Build TEXT column
-    // ---------------------------------------------------------
-    SAssignNew(LinesBox, SVerticalBox);
-
-    for (int32 i = 0; i < ScriptLines.Num(); ++i)
-    {
-        LinesBox->AddSlot()
-            .AutoHeight()
-            .Padding(FMargin(40.f, 2.f))  // space left for numbers
+    ChildSlot[
+        SNew(SBox)
+            .WidthOverride(800.f)
             [
-                SNew(STextBlock)
-                    .Text(FText::FromString(ScriptLines[i]))
-                    .AutoWrapText(true)
-            ];
-    }
-
-    // ---------------------------------------------------------
-    // Build overlay: text + (later) tooltip heads
-    // ---------------------------------------------------------
-    SAssignNew(RootOverlay, SOverlay)
-
-        + SOverlay::Slot()
-        [
-            LinesBox.ToSharedRef()
-        ];
-
-
-    ChildSlot
-        [
-            RootOverlay.ToSharedRef()
-        ];
+                SNew(SScrollBox)
+                    + SScrollBox::Slot()
+                    [
+                        // Dummy area until SetRenderedScript is called
+                        SNew(STextBlock).Text(FText::FromString(TEXT("Loading script...")))
+                    ]
+            ]
+    ];
 }
 
-//
-// ============================================================
-// SetShots — parent updates overlays
-// ============================================================
-void SGASScriptPanel::SetShots(const TArray<int32>& Starts,
-    const TArray<int32>& Ends,
-    const TArray<float>& Xs)
+// ============================================================================
+// Supply computed paragraphs
+// ============================================================================
+void SGASScriptPanel::SetRenderedScript(const TArray<FRenderedParagraph>& InParagraphs)
 {
-    ShotStartLines = Starts;
-    ShotEndLines = Ends;
-    ShotXs = Xs;
+    RenderedParagraphs = InParagraphs;
+    UE_LOG(LogTemp, Warning, TEXT("SCRIPT PANEL RECEIVED %d PARAGRAPHS"), RenderedParagraphs.Num());
 
-    if (RootOverlay.IsValid())
+    // Compute total scroll height
+    if (RenderedParagraphs.Num() > 0)
     {
-        RootOverlay->ClearChildren();
+        const FRenderedParagraph& Last = RenderedParagraphs.Last();
+        CachedTotalHeight = Last.TopY + Last.Height + 200.f;
+    }
+    else
+    {
+        CachedTotalHeight = 0.f;
+    }
 
-        // Add text lines back
-        RootOverlay->AddSlot()
-            [
-                LinesBox.ToSharedRef()
-            ];
+    Invalidate(EInvalidateWidget::LayoutAndVolatility);
+}
 
-        // Tooltip hitboxes (ShotTooltips must match ShotStartLines length)
-        for (int32 i = 0; i < ShotStartLines.Num(); i++)
+// ============================================================================
+// Scroll to a paragraph (if wrapped in a ScrollBox externally)
+// ============================================================================
+void SGASScriptPanel::ScrollToParagraph(int32 ParagraphIndex)
+{
+    // No internal scrollbox reference here (optional future feature)
+}
+
+// ============================================================================
+// Mouse Down â€” detect paragraph or marker hit
+// ============================================================================
+FReply SGASScriptPanel::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
+{
+    FVector2D Local = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+    float MouseX = Local.X;
+    float MouseY = Local.Y;
+
+    // 1. Detect paragraph click
+    for (int32 i = 0; i < RenderedParagraphs.Num(); i++)
+    {
+        const FRenderedParagraph& P = RenderedParagraphs[i];
+
+        if (MouseY >= P.TopY && MouseY <= (P.TopY + P.Height))
         {
-            float Y1 = ShotStartLines[i] * (LineHeight + 4.f) + TopPadding;
-            float X = ShotXs[i];
-
-            FVector2D BoxSize(60.f, 22.f);
-            FVector2D BoxPos(X - BoxSize.X * 0.5f,
-                Y1 - BoxSize.Y - 6.f);
-
-            FString Tooltip = ShotTooltips.IsValidIndex(i)
-                ? ShotTooltips[i]
-                : FString::Printf(TEXT("Shot %03d — Unknown"), i + 1);
-
-            RootOverlay->AddSlot()
-                .ZOrder(10 + i)
-                .HAlign(HAlign_Left)
-                .VAlign(VAlign_Top)
-                .Padding(BoxPos.X, BoxPos.Y, 0, 0)
-                [
-                    SNew(SBox)
-                        .WidthOverride(BoxSize.X)
-                        .HeightOverride(BoxSize.Y)
-                        .Visibility(EVisibility::Visible)
-                        .ToolTipText(FText::FromString(Tooltip))
-                ];
-
+            if (OnParagraphClicked.IsBound())
+            {
+                OnParagraphClicked.Execute(i);
+                return FReply::Handled();
+            }
         }
 
-
     }
 
-    Invalidate(EInvalidateWidget::LayoutAndVolatility);
-}
+    // 2. Detect shot marker hit (right side of panel)
+    float MarkerXMin = MyGeometry.GetLocalSize().X - 60.f;
+    float MarkerXMax = MyGeometry.GetLocalSize().X;
 
-void SGASScriptPanel::SetShotTooltips(const TArray<FString>& InTooltips)
-{
-    ShotTooltips = InTooltips;
-    Invalidate(EInvalidateWidget::LayoutAndVolatility);
-}
-
-
-//
-// ============================================================
-// SetSceneNumbers — parent updates numbering arrays
-// ============================================================
-void SGASScriptPanel::SetSceneNumbers(const TArray<FString>& InScenes,
-    const TArray<FString>& InDialogues)
-{
-    SceneNumbers = InScenes;
-    DialogueNumbers = InDialogues;
-
-    Invalidate(EInvalidateWidget::LayoutAndVolatility);
-}
-
-//
-// ============================================================
-// Mouse detection — convert click to line + X
-// ============================================================
-FReply SGASScriptPanel::OnMouseButtonDown(const FGeometry& MyGeometry,
-    const FPointerEvent& MouseEvent)
-{
-    if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+    for (int32 i = 0; i < ShotStartParagraphs.Num(); i++)
     {
-        FVector2D LocalPos = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+        if (!RenderedParagraphs.IsValidIndex(ShotStartParagraphs[i]) ||
+            !RenderedParagraphs.IsValidIndex(ShotEndParagraphs[i]))
+        {
+            continue;
+        }
 
-        float AdjustedY = LocalPos.Y - TopPadding;
-        AdjustedY = FMath::Max(0.f, AdjustedY);
+        const FRenderedParagraph& StartP = RenderedParagraphs[ShotStartParagraphs[i]];
+        const FRenderedParagraph& EndP = RenderedParagraphs[ShotEndParagraphs[i]];
 
-        int32 LineIndex = FMath::FloorToInt(AdjustedY / (LineHeight + 4.f));
-        float ClickX = LocalPos.X;
+        float Y1 = StartP.TopY;
+        float Y2 = EndP.TopY + EndP.Height;
 
-        if (OnLineClicked.IsBound())
-            OnLineClicked.Execute(LineIndex, ClickX);
+        bool bInX = (MouseX >= MarkerXMin && MouseX <= MarkerXMax);
+        bool bInY = (MouseY >= Y1 && MouseY <= Y2);
 
-        return FReply::Handled();
+        if (bInX && bInY)
+        {
+            SelectedShotIndex = i;
+            return FReply::Handled();
+        }
     }
 
     return FReply::Unhandled();
 }
 
-//
-// ============================================================
-// OnPaint — draws:
-//   • dim overlay
-//   • shot lines, ticks, labels
-//   • scene numbers + dialogue numbers
-// ============================================================
-int32 SGASScriptPanel::OnPaint(const FPaintArgs& Args,
+// ============================================================================
+// Desired Size (vertical grows based on paginated paragraphs)
+// ============================================================================
+FVector2D SGASScriptPanel::ComputeDesiredSize(float LayoutScaleMultiplier) const
+{
+    float TotalHeight = 0.f;
+
+    // Sum paragraph heights
+    for (const FRenderedParagraph& P : RenderedParagraphs)
+    {
+        TotalHeight += P.Height + 10.f;   // add your vertical spacing
+    }
+
+    // Guarantee a minimum width, but height reflects entire script
+    return FVector2D(800.f, TotalHeight);
+}
+
+// ============================================================================
+// ON PAINT â€” render the paragraphs, wrapped lines, alignment, and shot markers
+// ============================================================================
+int32 SGASScriptPanel::OnPaint(
+    const FPaintArgs& Args,
     const FGeometry& AllottedGeometry,
     const FSlateRect& MyCullingRect,
     FSlateWindowElementList& OutDrawElements,
@@ -173,117 +162,137 @@ int32 SGASScriptPanel::OnPaint(const FPaintArgs& Args,
     const FWidgetStyle& InWidgetStyle,
     bool bParentEnabled) const
 {
-    // Draw text normally
-    int32 TextLayer = SCompoundWidget::OnPaint(
-        Args, AllottedGeometry, MyCullingRect,
-        OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+    const float PanelWidth = AllottedGeometry.GetLocalSize().X;
 
-    int32 OverlayLayer = TextLayer + 10;
+    // Screenplay formatting constants (from ScriptLayoutEngine.h)
+    const float PageWidth = GFD_PageWidth;
+    const float MarginLeft = GFD_MarginLeft;
+    const float MarginRight = GFD_MarginRight;
+    const float LineHeight = GFD_LineHeight;
 
-    // ---------------------------------------------------------
-    // Draw Scene & Dialogue Numbers to the LEFT of the text
-    // ---------------------------------------------------------
-    for (int32 i = 0; i < ScriptLines.Num(); i++)
+    // How much space does the text column have?
+    const float UsableWidth = PageWidth - MarginLeft - MarginRight;
+
+    // Clip drawing to widget bounds
+    OutDrawElements.PushClip(FSlateClippingZone(AllottedGeometry.GetLayoutBoundingRect()));
+
+    if (RenderedParagraphs.Num() == 0)
     {
-        float Y = i * (LineHeight + 4.f) + TopPadding;
-
-        FString Scene = (SceneNumbers.IsValidIndex(i)) ? SceneNumbers[i] : TEXT("");
-        FString Dial = (DialogueNumbers.IsValidIndex(i)) ? DialogueNumbers[i] : TEXT("");
-
-        FString Combined;
-        if (!Scene.IsEmpty())
-            Combined = Scene;
-        else if (!Dial.IsEmpty())
-            Combined = Dial;
-
-        if (!Combined.IsEmpty())
-        {
-            FVector2D Pos(NumberXOffset, Y);
-            FSlateDrawElement::MakeText(
-                OutDrawElements,
-                OverlayLayer + 2,
-                AllottedGeometry.ToPaintGeometry(
-                    FVector2D(100.f, LineHeight),
-                    FSlateLayoutTransform(Pos)),
-                Combined,
-                FCoreStyle::GetDefaultFontStyle("Regular", 10),
-                ESlateDrawEffect::None,
-                FLinearColor::Gray
-            );
-        }
+        OutDrawElements.PopClip();
+        return LayerId;
     }
 
-    // ---------------------------------------------------------
-    // Draw shot overlays
-    // ---------------------------------------------------------
-    for (int32 i = 0; i < ShotStartLines.Num(); i++)
+    // Standard font
+    const FSlateFontInfo FontInfo = FAppStyle::Get().GetFontStyle("NormalFont");
+
+    // Keep text ABOVE the UI (avoids flicker/overlap)
+    int32 TextLayer = LayerId + 900;
+
+    // ------------------------------------------------------------------------
+    // DRAW EACH PARAGRAPH
+    // ------------------------------------------------------------------------
+    for (const FRenderedParagraph& P : RenderedParagraphs)
     {
-        int32 StartLine = ShotStartLines[i];
-        int32 EndLine = ShotEndLines[i];
-        float LineX = ShotXs[i];
+        float Y = P.TopY;
 
-        float Y1 = StartLine * (LineHeight + 4.f) + TopPadding;
-        float Y2 = (EndLine + 1) * (LineHeight + 4.f) + TopPadding;
+        for (int32 i = 0; i < P.Lines.Num(); i++)
+        {
+            const FString& Line = P.Lines[i];
 
-        FLinearColor ShotColor(0.0f, 0.85f, 0.95f, 1.0f);
+            FVector2D DrawPos(MarginLeft + P.IndentLeft, Y);
 
-        // Vertical line
-        FSlateDrawElement::MakeLines(
+            // --- Draw text ---
+            FPaintGeometry TextGeo = AllottedGeometry.ToPaintGeometry(
+                FVector2f(1.f, 1.f),
+                FSlateLayoutTransform(DrawPos)
+            );
+
+            FSlateDrawElement::MakeText(
+                OutDrawElements,
+                TextLayer + 1,
+                TextGeo,
+                FText::FromString(Line),
+                FontInfo,
+                ESlateDrawEffect::None,
+                FLinearColor::White
+            );
+
+            // Advance only ONE line normally
+            Y += LineHeight;
+
+            // SPECIAL CASE: Character â†’ Dialogue should NOT add extra vertical space
+            if (P.BlockType == EGASBlockType::Character)
+            {
+                // Do NOT add extra spacing after CHARACTER name
+                // The default +LineHeight above is the only line we want.
+            }
+        }
+
+
+        TextLayer++;
+    }
+
+    // ------------------------------------------------------------------------
+    // SHOT MARKERS (UNCHANGED)
+    // ------------------------------------------------------------------------
+    int32 MarkerLayer = TextLayer + 200;
+
+    for (int32 i = 0; i < ShotStartParagraphs.Num(); i++)
+    {
+        const int32 StartIdx = ShotStartParagraphs[i];
+        const int32 EndIdx = ShotEndParagraphs[i];
+
+        if (!RenderedParagraphs.IsValidIndex(StartIdx) ||
+            !RenderedParagraphs.IsValidIndex(EndIdx))
+        {
+            continue;
+        }
+
+        const FRenderedParagraph& Start = RenderedParagraphs[StartIdx];
+        const FRenderedParagraph& End = RenderedParagraphs[EndIdx];
+
+        float Y1 = Start.TopY + 4.f;
+        float Y2 = End.TopY + End.Height - 4.f;
+        float X = PanelWidth - 40.f;
+
+        // Circles
+        FSlateDrawElement::MakeBox(
             OutDrawElements,
-            OverlayLayer + 3,
-            AllottedGeometry.ToPaintGeometry(),
-            { FVector2D(LineX, Y1), FVector2D(LineX, Y2) },
+            MarkerLayer,
+            AllottedGeometry.ToPaintGeometry(
+                FVector2D(16.f, 16.f),
+                FSlateLayoutTransform(FVector2D(X, Y1))),
+            FAppStyle::Get().GetBrush("Icons.Circle"),
             ESlateDrawEffect::None,
-            ShotColor,
-            true,
-            3.f);
-
-        // Start tick
-        float TickHalf = 12.f;
-        FSlateDrawElement::MakeLines(
-            OutDrawElements,
-            OverlayLayer + 4,
-            AllottedGeometry.ToPaintGeometry(),
-            { FVector2D(LineX - TickHalf, Y1), FVector2D(LineX + TickHalf, Y1) },
-            ESlateDrawEffect::None,
-            ShotColor,
-            true,
-            2.f);
-
-        // End tick
-        FSlateDrawElement::MakeLines(
-            OutDrawElements,
-            OverlayLayer + 4,
-            AllottedGeometry.ToPaintGeometry(),
-            { FVector2D(LineX - TickHalf, Y2), FVector2D(LineX + TickHalf, Y2) },
-            ESlateDrawEffect::None,
-            ShotColor,
-            true,
-            2.f);
-
-        // Floating label box
-        FVector2D BoxSize(60.f, 22.f);
-        FVector2D BoxPos(LineX - BoxSize.X * 0.5f, Y1 - BoxSize.Y - 6.f);
+            FLinearColor::Blue
+        );
 
         FSlateDrawElement::MakeBox(
             OutDrawElements,
-            OverlayLayer + 5,
-            AllottedGeometry.ToPaintGeometry(BoxSize, FSlateLayoutTransform(BoxPos)),
-            FCoreStyle::Get().GetDefaultBrush(),
+            MarkerLayer,
+            AllottedGeometry.ToPaintGeometry(
+                FVector2D(16.f, 16.f),
+                FSlateLayoutTransform(FVector2D(X, Y2))),
+            FAppStyle::Get().GetBrush("Icons.Circle"),
             ESlateDrawEffect::None,
-            ShotColor);
+            FLinearColor::Blue
+        );
 
-        FString Label = FString::Printf(TEXT("S%03d"), i + 1);
-
-        FSlateDrawElement::MakeText(
+        // Connecting line
+        FSlateDrawElement::MakeLines(
             OutDrawElements,
-            OverlayLayer + 6,
-            AllottedGeometry.ToPaintGeometry(BoxSize, FSlateLayoutTransform(BoxPos)),
-            Label,
-            FCoreStyle::GetDefaultFontStyle("Regular", 10),
+            MarkerLayer + 1,
+            AllottedGeometry.ToPaintGeometry(),
+            { FVector2D(X + 8.f, Y1 + 8.f), FVector2D(X + 8.f, Y2 + 8.f) },
             ESlateDrawEffect::None,
-            FLinearColor::Black);
+            FLinearColor::Blue,
+            true,
+            2.f
+        );
     }
 
-    return OverlayLayer + 20;
+    OutDrawElements.PopClip();
+    return TextLayer;
 }
+
+
