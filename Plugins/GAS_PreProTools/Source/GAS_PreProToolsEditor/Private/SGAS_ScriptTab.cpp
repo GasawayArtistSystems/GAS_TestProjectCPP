@@ -1,6 +1,9 @@
 ﻿#include "SGAS_ScriptTab.h"
 #include "SGASScriptPanel.h"
 
+#include "GAS_FDXImporter.h"
+#include "ScriptLayoutEngine.h"
+
 #include "Widgets/Layout/SSplitter.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -9,41 +12,27 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Images/SImage.h"
 
+#include "DesktopPlatformModule.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Misc/Paths.h"
+#include "Misc/FileHelper.h"
+
 #include "GAS_PreProToolsStyle.h"
+
+// JSON persistence is temporarily disabled; we keep FileManager for GetScriptJsonPath.
+#include "HAL/FileManager.h"
+
+
 
 
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
 {
-    // -------------------------------------------------------------
-    // Dummy script lines for now — will be replaced by importer
-    // -------------------------------------------------------------
-    ScriptLines.Empty();
-    ScriptLines.Add(TEXT("INT. LIVING ROOM - NIGHT"));
-    ScriptLines.Add(TEXT("Raya stands at the window, listening."));
-    ScriptLines.Add(TEXT("AARON"));
-    ScriptLines.Add(TEXT("    You really think this is going to work?"));
-    ScriptLines.Add(TEXT("    She doesn’t answer. The house creaks."));
-    ScriptLines.Add(TEXT("SASHA (O.S.)"));
-    ScriptLines.Add(TEXT("    Raya? You okay in there?"));
-
-    ShotList.Empty();
-    SceneNums.Empty();
-    DialogueNums.Empty();
-
-    // -------------------------------------------------------------
-    // Build initial numbering arrays
-    // -------------------------------------------------------------
-    ComputeLineNumbers(SceneNums, DialogueNums);
-
-    // -------------------------------------------------------------
-    // Build UI Layout
-    // -------------------------------------------------------------
     ChildSlot
         [
             SNew(SSplitter)
 
                 // =======================================================
-                // LEFT PANEL (button strip: shot marking + numbering)
+                // LEFT PANEL — Buttons
                 // =======================================================
                 +SSplitter::Slot()
                 .Value(0.05f)
@@ -53,15 +42,14 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                         [
                             SNew(SVerticalBox)
 
-                                // --- Button: Shot Marking -----------------------
+                                // --- Shot Marking Button --------------------------------
                                 + SVerticalBox::Slot()
                                 .AutoHeight()
                                 .Padding(0, 0, 0, 8)
                                 [
                                     SNew(SButton)
-                                        .OnClicked(this, &SGAS_ScriptTab::OnToggleShotMarking)
+                                        .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnToggleShotMarking))
                                         .ToolTipText(FText::FromString(TEXT("Begin/End Shot Marking")))
-                                        .ContentPadding(FMargin(0))
                                         [
                                             SNew(SBox)
                                                 .WidthOverride(30.f)
@@ -71,34 +59,25 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                                         .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.CameraIcon"))
                                                 ]
                                         ]
-
                                 ]
 
-                            // --- Button: Toggle Scene/Dialogue Numbers ------
+                            // --- Import Script (.fdx) --------------------------------
                             + SVerticalBox::Slot()
                                 .AutoHeight()
                                 [
                                     SNew(SButton)
-                                        .OnClicked(this, &SGAS_ScriptTab::OnToggleNumbering)
-                                        .ToolTipText(FText::FromString(TEXT("Toggle Scene & Dialogue Numbers")))
-                                        .ContentPadding(FMargin(0))
+                                        .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnImportScript))
+                                        .ToolTipText(FText::FromString(TEXT("Import Final Draft Script")))
                                         [
-                                            SNew(SBox)
-                                                .WidthOverride(30.f)
-                                                .HeightOverride(30.f)
-                                                [
-                                                    SAssignNew(NumberingIcon, SImage)
-                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.NumberIcon"))
-
-                                                ]
+                                            SNew(STextBlock)
+                                                .Text(FText::FromString(TEXT("Import Script")))
                                         ]
-
                                 ]
                         ]
                 ]
 
             // =======================================================
-            // MIDDLE PANEL (script + lines + overlays)
+            // MIDDLE PANEL — Script View
             // =======================================================
             +SSplitter::Slot()
                 .Value(0.55f)
@@ -110,19 +89,15 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                 + SScrollBox::Slot()
                                 [
                                     SAssignNew(ScriptPanel, SGASScriptPanel)
-                                        .ScriptLines(ScriptLines)
-                                        .ShotStartLines(TArray<int32>())
-                                        .ShotEndLines(TArray<int32>())
-                                        .ShotXs(TArray<float>())
-                                        .SceneNumbers(SceneNums)
-                                        .DialogueNumbers(DialogueNums)
-                                ]
+                                        .OnParagraphClicked(FOnParagraphClicked::CreateSP(
+                                            this, &SGAS_ScriptTab::OnScriptParagraphClicked))
 
+                                ]
                         ]
                 ]
 
             // =======================================================
-            // RIGHT PANEL (shot list)
+            // RIGHT PANEL — Shot List
             // =======================================================
             +SSplitter::Slot()
                 .Value(0.35f)
@@ -134,215 +109,193 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                         ]
                 ]
         ];
-    // 🔹 FIX: bind click event
-    if (ScriptPanel.IsValid())
-    {
-        ScriptPanel->OnLineClicked.BindSP(this, &SGAS_ScriptTab::OnScriptLineClicked);
-    }
+
     RebuildShotList();
+
+    // Try to auto-load last saved script (if any)
+    LoadScriptFromJsonIfExists();
+}
+
+// Simple helpers to convert paragraph type to/from string for JSON
+
+static FString ParagraphTypeToString(EParagraphType Type)
+{
+    switch (Type)
+    {
+    case EParagraphType::SceneHeading:   return TEXT("SceneHeading");
+    case EParagraphType::Action:         return TEXT("Action");
+    case EParagraphType::Character:      return TEXT("Character");
+    case EParagraphType::Dialogue:       return TEXT("Dialogue");
+    case EParagraphType::Parenthetical:  return TEXT("Parenthetical");
+    case EParagraphType::Transition:     return TEXT("Transition");
+    default:                             return TEXT("Unknown");
+    }
+}
+
+static EParagraphType ParagraphTypeFromString(const FString& Str)
+{
+    if (Str == TEXT("SceneHeading"))   return EParagraphType::SceneHeading;
+    if (Str == TEXT("Action"))         return EParagraphType::Action;
+    if (Str == TEXT("Character"))      return EParagraphType::Character;
+    if (Str == TEXT("Dialogue"))       return EParagraphType::Dialogue;
+    if (Str == TEXT("Parenthetical"))  return EParagraphType::Parenthetical;
+    if (Str == TEXT("Transition"))     return EParagraphType::Transition;
+    return EParagraphType::Unknown;
+}
+
+// Where we'll store/load the JSON
+static FString GetScriptJsonPath()
+{
+    const FString Folder = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("GAS_Scripts"));
+    IFileManager::Get().MakeDirectory(*Folder, /*Tree=*/true);
+    return FPaths::Combine(Folder, TEXT("LastScript.json"));
+}
+
+
+// ============================================================================
+// IMPORT SCRIPT — BUTTON HANDLER
+// ============================================================================
+FReply SGAS_ScriptTab::OnImportScript()
+{
+    IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+
+    if (!DesktopPlatform) return FReply::Handled();
+
+    TArray<FString> OutFiles;
+
+    const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+
+    bool bOpened = DesktopPlatform->OpenFileDialog(
+        ParentWindow,
+        TEXT("Select Final Draft Script"),
+        FPaths::ProjectDir(),
+        TEXT(""),
+        TEXT("Final Draft Files (*.fdx)|*.fdx"),
+        EFileDialogFlags::None,
+        OutFiles
+    );
+
+    if (bOpened && OutFiles.Num() > 0)
+    {
+        LoadScriptFromFDX(OutFiles[0]);
+    }
+
+    return FReply::Handled();
+}
+
+
+FReply SGAS_ScriptTab::OnToggleShotMarking()
+{
+    // Simple toggle for now – we'll wire this into real behavior later.
+    bIsShotMarkingActive = !bIsShotMarkingActive;
+
+    UE_LOG(LogTemp, Log, TEXT("Shot marking %s"),
+        bIsShotMarkingActive ? TEXT("ENABLED") : TEXT("DISABLED"));
+
+    return FReply::Handled();
 }
 
 
 
-//
-// -------------------------------------------------------------
-// User clicks on a line in the script panel
-// -------------------------------------------------------------
-void SGAS_ScriptTab::OnScriptLineClicked(int32 LineIndex, float ClickX)
+// ============================================================================
+// LOAD SCRIPT (.FDX) — parse, layout, send to panel
+// ============================================================================
+void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
 {
-    if (!bIsMarkingShot)
-        return;
+    // -------------------------
+    // Import paragraphs
+    // -------------------------
+    ParsedParagraphs.Empty();
+    GAS_FDXImporter::ImportFDX(FilePath, ParsedParagraphs);
 
-    // FIRST CLICK → Start
-    if (PendingStartLineIndex == INDEX_NONE)
+    if (ParsedParagraphs.Num() == 0)
     {
-        PendingStartLineIndex = LineIndex;
-        PendingStartX = ClickX;
+        UE_LOG(LogTemp, Error, TEXT("FDX import failed or empty"));
         return;
     }
 
-    // SECOND CLICK → End
-    const int32 Start = FMath::Min(PendingStartLineIndex, LineIndex);
-    const int32 End = FMath::Max(PendingStartLineIndex, LineIndex);
+    // -------------------------
+    // Layout into Final Draft formatting
+    // -------------------------
+    float PanelWidth = 1100.f; // safe default
+    if (ScriptPanel.IsValid())
+    {
+        PanelWidth = ScriptPanel->GetCachedGeometry().GetLocalSize().X;
+        if (PanelWidth < 200.f)
+            PanelWidth = 1100.f; // fallback
+    }
+
+    TArray<FRenderedParagraph> Rendered =
+        ScriptLayoutEngine::LayoutScript(ParsedParagraphs, PanelWidth);
+
+    // -------------------------
+    // Send to panel
+    // -------------------------
+    ScriptPanel->SetRenderedScript(Rendered);
+
+    // Shots cleared, since script changed
+    ShotList.Empty();
+    ShotStartParagraphs.Empty();
+    ShotEndParagraphs.Empty();
+    ScriptPanel->SetShotMarkers(ShotStartParagraphs, ShotEndParagraphs);
+
+    RebuildShotList();
+
+    // Persist script + (currently empty) shots
+    SaveScriptToJson();
+}
+
+
+
+// ============================================================================
+// PARAGRAPH CLICKED — shot marking logic
+// ============================================================================
+void SGAS_ScriptTab::OnScriptParagraphClicked(int32 ParagraphIndex)
+{
+    if (!bIsMarkingShot) return;
+
+    // If no start yet, set it
+    if (PendingStartParagraph == INDEX_NONE)
+    {
+        PendingStartParagraph = ParagraphIndex;
+        return;
+    }
+
+    // End paragraph clicked → finalize shot
+    int32 Start = PendingStartParagraph;
+    int32 End = ParagraphIndex;
+
+    if (End < Start)
+        Swap(Start, End);
 
     FShotEntry NewShot;
-    NewShot.StartLineIndex = Start;
-    NewShot.EndLineIndex = End;
-    NewShot.ShotX = PendingStartX;
+    NewShot.StartParagraph = Start;
+    NewShot.EndParagraph = End;
+    NewShot.ShotType = TEXT("Unknown");
 
     ShotList.Add(NewShot);
 
-    // reset marking
-    PendingStartLineIndex = INDEX_NONE;
-    PendingStartX = 0.f;
+    ShotStartParagraphs.Add(Start);
+    ShotEndParagraphs.Add(End);
+
+    if (ScriptPanel.IsValid())
+    {
+        ScriptPanel->SetShotMarkers(ShotStartParagraphs, ShotEndParagraphs);
+    }
+
+    PendingStartParagraph = INDEX_NONE;
 
     RebuildShotList();
-    RebuildScriptList();
+
+    // Save updated shots
+    SaveScriptToJson();
 }
 
 
 
-//
-// -------------------------------------------------------------
-// Toggle Shot-Marking Mode
-// -------------------------------------------------------------
-FReply SGAS_ScriptTab::OnToggleShotMarking()
-{
-    bIsMarkingShot = !bIsMarkingShot;
-
-    if (ShotModeButtonLabel.IsValid())
-    {
-        ShotModeButtonLabel->SetText(
-            bIsMarkingShot ?
-            FText::FromString(TEXT("Cancel Shot Marking")) :
-            FText::FromString(TEXT("Begin Shot Marking"))
-        );
-    }
-
-    if (ShotMarkingIcon.IsValid())
-    {
-        FLinearColor ActiveColor(0.1f, 0.5f, 1.0f, 1.0f);  // blue
-        FLinearColor NormalColor(1.f, 1.f, 1.f, 1.f);      // white
-
-        ShotMarkingIcon->SetColorAndOpacity(
-            bIsMarkingShot ? ActiveColor : NormalColor
-        );
-    }
-
-    return FReply::Handled();
-}
-
-
-
-//
-// -------------------------------------------------------------
-// Toggle numbering
-// -------------------------------------------------------------
-FReply SGAS_ScriptTab::OnToggleNumbering()
-{
-    bShowNumbering = !bShowNumbering;
-
-    if (NumberingIcon.IsValid())
-    {
-        FLinearColor ActiveColor(0.1f, 0.5f, 1.0f, 1.0f);  // blue
-        FLinearColor NormalColor(1.f, 1.f, 1.f, 1.f);
-
-        NumberingIcon->SetColorAndOpacity(
-            bShowNumbering ? ActiveColor : NormalColor
-        );
-    }
-
-    if (bShowNumbering)
-        ComputeLineNumbers(SceneNums, DialogueNums);
-
-    RebuildScriptList();
-    return FReply::Handled();
-}
-
-
-
-
-//
-// -------------------------------------------------------------
-// Compute scene & dialogue numbering
-// -------------------------------------------------------------
-void SGAS_ScriptTab::ComputeLineNumbers(
-    TArray<FString>& OutScenes,
-    TArray<FString>& OutDialogues)
-{
-    OutScenes.SetNum(ScriptLines.Num());
-    OutDialogues.SetNum(ScriptLines.Num());
-
-    int32 SceneCounter = 10;
-    int32 DialogueCounter = 1;
-
-    for (int32 i = 0; i < ScriptLines.Num(); i++)
-    {
-        FString Line = ScriptLines[i];
-
-        // --- Scene Headings ---
-        if (Line.StartsWith(TEXT("INT.")) ||
-            Line.StartsWith(TEXT("EXT.")))
-        {
-            OutScenes[i] = FString::Printf(TEXT("%03d"), SceneCounter);
-            SceneCounter += 10;
-            DialogueCounter = 1; // reset on new scene
-            continue;
-        }
-
-        // --- Dialogue character name (detect uppercase names but NOT INT./EXT.) ---
-        bool bIsAllCaps = (Line.ToUpper() == Line);
-        bool bHasLetters = Line.Contains(TEXT("A")) || Line.Contains(TEXT("E")) || Line.Contains(TEXT("I")) ||
-            Line.Contains(TEXT("O")) || Line.Contains(TEXT("U"));  // crude but safe
-        bool bIsSceneHeading = Line.StartsWith(TEXT("INT.")) || Line.StartsWith(TEXT("EXT."));
-
-        bool bIsCharacterName =
-            bIsAllCaps &&
-            bHasLetters &&
-            !bIsSceneHeading &&
-            !Line.Contains(TEXT("."));   // exclude "SASHA (O.S.)"
-
-        if (bIsCharacterName)
-        {
-            OutDialogues[i] = FString::Printf(TEXT("%d"), DialogueCounter);
-            DialogueCounter++;
-        }
-
-    }
-}
-
-
-
-//
-// -------------------------------------------------------------
-// Update the script panel (shot lines + numbering)
-// -------------------------------------------------------------
-void SGAS_ScriptTab::RebuildScriptList()
-{
-    if (!ScriptPanel.IsValid())
-        return;
-
-    // Prepare arrays to feed the script panel
-    TArray<int32> StartLines;
-    TArray<int32> EndLines;
-    TArray<float> Xs;
-
-    for (const FShotEntry& S : ShotList)
-    {
-        StartLines.Add(S.StartLineIndex);
-        EndLines.Add(S.EndLineIndex);
-        Xs.Add(S.ShotX);
-    }
-
-    // -----------------------------------------
-    // NEW: Build tooltip strings
-    // -----------------------------------------
-    TArray<FString> TooltipList;
-
-    for (int32 i = 0; i < ShotList.Num(); i++)
-    {
-        FString ShotNum = FString::Printf(TEXT("Shot %03d"), i + 1);
-        FString ShotType = ShotList[i].ShotType;     // defaults to "Unknown"
-
-        TooltipList.Add(FString::Printf(TEXT("%s — %s"), *ShotNum, *ShotType));
-    }
-
-    ScriptPanel->SetShotTooltips(TooltipList);
-
-    // -----------------------------------------
-    // Send everything to the script panel
-    // -----------------------------------------
-    ScriptPanel->SetShots(StartLines, EndLines, Xs);
-    ScriptPanel->SetSceneNumbers(SceneNums, DialogueNums);
-}
-
-
-
-
-//
-// -------------------------------------------------------------
-// Build the right-hand shot list (simple, placeholder)
-// -------------------------------------------------------------
+// ============================================================================
+// Build Shot List UI
+// ============================================================================
 void SGAS_ScriptTab::RebuildShotList()
 {
     if (!ShotListContainer.IsValid())
@@ -359,10 +312,27 @@ void SGAS_ScriptTab::RebuildShotList()
             [
                 SNew(STextBlock)
                     .Text(FText::FromString(
-                        FString::Printf(TEXT("Shot %03d   (Lines %d–%d)"),
+                        FString::Printf(TEXT("Shot %03d   (P %d–%d)"),
                             i + 1,
-                            S.StartLineIndex + 1,
-                            S.EndLineIndex + 1)))
+                            S.StartParagraph + 1,
+                            S.EndParagraph + 1)))
             ];
     }
 }
+
+
+void SGAS_ScriptTab::SaveScriptToJson()
+{
+    // TEMP: JSON saving disabled so we can get the plugin compiling cleanly.
+    // Later we’ll re-enable this with a UE 5.6–compatible Json setup.
+    UE_LOG(LogTemp, Verbose, TEXT("SaveScriptToJson() stubbed – not saving script/shots this build."));
+}
+
+
+void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
+{
+    // TEMP: JSON loading disabled so we start from a fresh state each run.
+    // Later this can reload the last script and shots from disk.
+    UE_LOG(LogTemp, Verbose, TEXT("LoadScriptFromJsonIfExists() stubbed – not loading script/shots this build."));
+}
+

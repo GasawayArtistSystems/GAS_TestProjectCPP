@@ -1,11 +1,11 @@
 #include "GASPreProProject.h"
 
-/*-----------------------------------------
-    ADD SCENE
-------------------------------------------*/
+// Why: create stable defaults, assign runtime GUIDs when adding entities.
+
 FGuid UGASPreProProject::AddScene(const FString& Label, const FString& Heading)
 {
     FGASScene NewScene;
+    NewScene.SceneID = FGuid::NewGuid();
     NewScene.SceneLabel = Label;
     NewScene.HeadingText = Heading;
 
@@ -13,27 +13,21 @@ FGuid UGASPreProProject::AddScene(const FString& Label, const FString& Heading)
     return NewScene.SceneID;
 }
 
-/*-----------------------------------------
-    ADD SHOT
-------------------------------------------*/
 FGuid UGASPreProProject::AddShot(const FString& Label)
 {
     FGASShot NewShot;
+    NewShot.ShotID = FGuid::NewGuid();
     NewShot.ShotLabel = Label;
 
     Shots.Add(NewShot);
     return NewShot.ShotID;
 }
 
-/*-----------------------------------------
-    ADD SHOT MARKER
-------------------------------------------*/
 void UGASPreProProject::AddShotMarker(
     const FGuid& ShotID,
     const FGuid& StartBlockID,
     const FGuid& EndBlockID,
-    const FString& Notes
-)
+    const FString& Notes)
 {
     FGASShotMarker Marker;
     Marker.ShotID = ShotID;

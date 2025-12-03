@@ -1,3 +1,4 @@
+// File: GAS_PreProToolsEditor/Public/GASPreProProject.h
 #pragma once
 
 #include "CoreMinimal.h"
@@ -15,6 +16,7 @@ enum class EGASBlockType : uint8
     Dialogue,
     Parenthetical,
     SceneHeading,
+    Character,
     Transition,
     General
 };
@@ -22,27 +24,27 @@ enum class EGASBlockType : uint8
 USTRUCT(BlueprintType)
 struct FGASScriptBlock
 {
-    GENERATED_BODY();
+    GENERATED_BODY()
 
-    // Stable ID for this block
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FGuid BlockID;
 
-    // The text content
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString Text;
 
-    // Parsed type (Action, Dialogue, etc.)
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EGASBlockType BlockType = EGASBlockType::General;
+    EGASBlockType BlockType;
 
-    // Internal: Scene this block belongs to
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FGuid SceneID;
 
+    // MUST be deterministic for the CDO; assign real GUIDs at creation sites.
     FGASScriptBlock()
+        : BlockID(FGuid())           // zero GUID by default
+        , Text(TEXT(""))
+        , BlockType(EGASBlockType::General)
+        , SceneID(FGuid())
     {
-        BlockID = FGuid::NewGuid();
     }
 };
 
@@ -53,30 +55,30 @@ struct FGASScriptBlock
 USTRUCT(BlueprintType)
 struct FGASScene
 {
-    GENERATED_BODY();
+    GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FGuid SceneID;
 
-    // User-facing label such as: "010", "20", "3", "EXT1"
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SceneLabel;
+    FString SceneLabel;     // e.g. "010", "20", "3", "EXT1"
 
-    // Raw scene heading text from script
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString HeadingText;
+    FString HeadingText;    // Raw scene heading
 
-    // List of script blocks that belong to this scene
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGuid> BlockIDs;
+    TArray<FGuid> BlockIDs; // Blocks that belong to this scene
 
-    // Shots that START in this scene
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGuid> ShotIDs;
+    TArray<FGuid> ShotIDs;  // Shots that START in this scene
 
     FGASScene()
+        : SceneID(FGuid())          // zero GUID by default
+        , SceneLabel(TEXT(""))
+        , HeadingText(TEXT(""))
+        , BlockIDs()
+        , ShotIDs()
     {
-        SceneID = FGuid::NewGuid();
     }
 };
 
@@ -87,26 +89,26 @@ struct FGASScene
 USTRUCT(BlueprintType)
 struct FGASShot
 {
-    GENERATED_BODY();
+    GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FGuid ShotID;
 
-    // Label such as "010", "20", "A", "20B"
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ShotLabel;
+    FString ShotLabel;  // e.g. "010", "20", "A", "20B"
 
-    // MS / CU / Insert / etc.
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ShotType;
+    FString ShotType;   // MS / CU / Insert / etc.
 
-    // User notes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString Notes;
+    FString Notes;      // User notes
 
     FGASShot()
+        : ShotID(FGuid())           // zero GUID by default
+        , ShotLabel(TEXT(""))
+        , ShotType(TEXT(""))
+        , Notes(TEXT(""))
     {
-        ShotID = FGuid::NewGuid();
     }
 };
 
@@ -117,22 +119,27 @@ struct FGASShot
 USTRUCT(BlueprintType)
 struct FGASShotMarker
 {
-    GENERATED_BODY();
-
-    // Which shot this marker represents
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGuid ShotID;
-
-    // Covers a range in the script
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGuid StartBlockID;
+    GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGuid EndBlockID;
+    FGuid ShotID;           // Which shot this marker represents
 
-    // Optional metadata for overlay UI
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString Notes;
+    FGuid StartBlockID;     // Range start in the script
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGuid EndBlockID;       // Range end in the script
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString Notes;          // Optional metadata for overlay UI
+
+    FGASShotMarker()
+        : ShotID(FGuid())
+        , StartBlockID(FGuid())
+        , EndBlockID(FGuid())
+        , Notes(TEXT(""))
+    {
+    }
 };
 
 /*-----------------------------------------
@@ -145,11 +152,9 @@ class GAS_PREPROTOOLSEDITOR_API UGASPreProProject : public UDataAsset
     GENERATED_BODY()
 
 public:
-
     /*-----------------------------------------
         SCRIPT STORAGE
     ------------------------------------------*/
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
     TArray<FGASScriptBlock> ScriptBlocks;
 
@@ -159,7 +164,6 @@ public:
     /*-----------------------------------------
         SHOTS + MARKERS
     ------------------------------------------*/
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shots")
     TArray<FGASShot> Shots;
 
@@ -167,15 +171,11 @@ public:
     TArray<FGASShotMarker> ShotMarkers;
 
 public:
-
     /*-----------------------------------------
         ADDERS
     ------------------------------------------*/
-
     FGuid AddScene(const FString& Label, const FString& Heading);
-
     FGuid AddShot(const FString& Label);
-
     void AddShotMarker(
         const FGuid& ShotID,
         const FGuid& StartBlockID,

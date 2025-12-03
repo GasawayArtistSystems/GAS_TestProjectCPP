@@ -2,48 +2,51 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Widgets/DeclarativeSyntaxSupport.h"
+#include "Input/Reply.h"
+#include "Delegates/DelegateCombinations.h"
+
+// Forward declarations
+DECLARE_DELEGATE_OneParam(FOnParagraphClicked, int32);
+struct FRenderedParagraph;
+struct FScriptParagraph;
+
 
 /**
- * Custom panel that displays:
- *  - Script lines
- *  - Shot overlays (vertical lines)
- *  - Scene numbers & Dialogue numbers
+ * SGASScriptPanel
+ *
+ * Final Draft–style screenplay renderer.
+ * Renders paragraphs based on computed layout (indentation, wrapping, page breaks).
+ * Line-based system removed — now fully paragraph-based.
  */
 class SGASScriptPanel : public SCompoundWidget
 {
 public:
 
     SLATE_BEGIN_ARGS(SGASScriptPanel) {}
-        SLATE_ARGUMENT(TArray<FString>, ScriptLines)
-        SLATE_ARGUMENT(TArray<int32>, ShotStartLines)
-        SLATE_ARGUMENT(TArray<int32>, ShotEndLines)
-        SLATE_ARGUMENT(TArray<float>, ShotXs)
-        SLATE_ARGUMENT(TArray<FString>, SceneNumbers)
-        SLATE_ARGUMENT(TArray<FString>, DialogueNumbers)
+        SLATE_EVENT(FOnParagraphClicked, OnParagraphClicked)
     SLATE_END_ARGS()
 
-        void Construct(const FArguments& InArgs);
+    void Construct(const FArguments& InArgs);
 
-        // Called when the user clicks inside the panel
-        virtual FReply OnMouseButtonDown(
-            const FGeometry& MyGeometry,
-            const FPointerEvent& MouseEvent) override;
+    /** Supply the formatted, paginated paragraphs */
+    void SetRenderedScript(const TArray<FRenderedParagraph>& InParagraphs);
 
-        // Update shot overlays from tab
-        void SetShots(const TArray<int32>& Starts,
-            const TArray<int32>& Ends,
-            const TArray<float>& Xs);
+    /** Scroll to a given paragraph */
+    void ScrollToParagraph(int32 ParagraphIndex);
 
-        // Update scene & dialogue numbers at runtime
-        void SetSceneNumbers(const TArray<FString>& InScenes,
-            const TArray<FString>& InDialogues);
+    /** Set start/end paragraph indices for each shot */
+    void SetShotMarkers(const TArray<int32>& InStarts, const TArray<int32>& InEnds)
+    {
+        ShotStartParagraphs = InStarts;
+        ShotEndParagraphs = InEnds;
+        Invalidate(EInvalidateWidget::LayoutAndVolatility);
+    }
 
-        void SetShotTooltips(const TArray<FString>& InTooltips);
+private:
 
-
-protected:
-    virtual int32 OnPaint(
-        const FPaintArgs& Args,
+    /** Rendering */
+    virtual int32 OnPaint(const FPaintArgs& Args,
         const FGeometry& AllottedGeometry,
         const FSlateRect& MyCullingRect,
         FSlateWindowElementList& OutDrawElements,
@@ -51,36 +54,32 @@ protected:
         const FWidgetStyle& InWidgetStyle,
         bool bParentEnabled) const override;
 
+    virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override;
+
+    /** Hit testing: detect which paragraph was clicked */
+    virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry,
+        const FPointerEvent& MouseEvent) override;
+
 private:
 
-    // Script text
-    TArray<FString> ScriptLines;
+    /** All paragraphs after Final Draft layout / pagination */
+    TArray<FRenderedParagraph> RenderedParagraphs;
 
-    // Shot overlays
-    TArray<int32> ShotStartLines;
-    TArray<int32> ShotEndLines;
-    TArray<float> ShotXs;
+    /** Event callback for paragraph click */
+    FOnParagraphClicked OnParagraphClicked;
 
-    // Tooltip data (Shot Number + Shot Type)
-    TArray<FString> ShotTooltips;
+    /** Cached scroll offset (if using external scroll box) */
+    mutable float CachedTotalHeight = 0.f;
 
-    // Numbering
-    TArray<FString> SceneNumbers;
-    TArray<FString> DialogueNumbers;
+    // ------------------------------------------------------
+    // Shot Marking Data (Paragraph-Based)
+    // ------------------------------------------------------
 
-    // Layout constants
-    float LineHeight = 20.f;
-    float TopPadding = 30.f;
-    float NumberXOffset = -8.f;    // left margin for numbers
+    // Start and end paragraph indices for each shot
+    TArray<int32> ShotStartParagraphs;
+    TArray<int32> ShotEndParagraphs;
 
-    // Script lines container
-    TSharedPtr<SVerticalBox> LinesBox;
-    // Overlay root (text + tooltips + shot overlays)
-    TSharedPtr<SOverlay> RootOverlay;
-
-
-    // Delegate back to parent tab
-public:
-    DECLARE_DELEGATE_TwoParams(FOnLineClicked, int32, float);
-    FOnLineClicked OnLineClicked;
+    // Hover + selection state for markers
+    mutable int32 HoveredShotIndex = INDEX_NONE;
+    mutable int32 SelectedShotIndex = INDEX_NONE;
 };
