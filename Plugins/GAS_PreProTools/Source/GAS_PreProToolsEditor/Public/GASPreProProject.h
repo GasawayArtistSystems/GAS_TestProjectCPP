@@ -1,25 +1,18 @@
-// File: GAS_PreProToolsEditor/Public/GASPreProProject.h
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "ScriptModel.h"
 #include "GASPreProProject.generated.h"
 
-/*-----------------------------------------
-    SCRIPT BLOCK
-------------------------------------------*/
-
-UENUM()
-enum class EGASBlockType : uint8
-{
-    Action,
-    Dialogue,
-    Parenthetical,
-    SceneHeading,
-    Character,
-    Transition,
-    General
-};
+/*
+===============================================================================
+ SCRIPT DATA MODEL
+ ------------------------------------------------------------------------------
+ These structs represent the authoritative script content.
+ They are order-sensitive and form the backbone of the document.
+===============================================================================
+*/
 
 USTRUCT(BlueprintType)
 struct FGASScriptBlock
@@ -38,9 +31,9 @@ struct FGASScriptBlock
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FGuid SceneID;
 
-    // MUST be deterministic for the CDO; assign real GUIDs at creation sites.
+    // Deterministic default for CDO
     FGASScriptBlock()
-        : BlockID(FGuid())           // zero GUID by default
+        : BlockID(FGuid())
         , Text(TEXT(""))
         , BlockType(EGASBlockType::General)
         , SceneID(FGuid())
@@ -48,9 +41,13 @@ struct FGASScriptBlock
     }
 };
 
-/*-----------------------------------------
-    SCENE
-------------------------------------------*/
+/*
+===============================================================================
+ SCENE ORGANIZATION
+ ------------------------------------------------------------------------------
+ Scenes group script blocks and define structural boundaries.
+===============================================================================
+*/
 
 USTRUCT(BlueprintType)
 struct FGASScene
@@ -61,30 +58,33 @@ struct FGASScene
     FGuid SceneID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SceneLabel;     // e.g. "010", "20", "3", "EXT1"
+    FString SceneLabel;     // e.g. "010", "20", "EXT1"
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString HeadingText;    // Raw scene heading
+    FString HeadingText;    // Raw scene heading text
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGuid> BlockIDs; // Blocks that belong to this scene
+    TArray<FGuid> BlockIDs; // Blocks belonging to this scene
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FGuid> ShotIDs;  // Shots that START in this scene
 
     FGASScene()
-        : SceneID(FGuid())          // zero GUID by default
+        : SceneID(FGuid())
         , SceneLabel(TEXT(""))
         , HeadingText(TEXT(""))
-        , BlockIDs()
-        , ShotIDs()
     {
     }
 };
 
-/*-----------------------------------------
-    SHOT
-------------------------------------------*/
+/*
+===============================================================================
+ SHOTS + MARKERS
+ ------------------------------------------------------------------------------
+ Shots and markers are overlays that reference script blocks.
+ They do NOT own script text.
+===============================================================================
+*/
 
 USTRUCT(BlueprintType)
 struct FGASShot
@@ -95,16 +95,16 @@ struct FGASShot
     FGuid ShotID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ShotLabel;  // e.g. "010", "20", "A", "20B"
+    FString ShotLabel;  // "10", "A", "20B"
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString ShotType;   // MS / CU / Insert / etc.
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString Notes;      // User notes
+    FString Notes;
 
     FGASShot()
-        : ShotID(FGuid())           // zero GUID by default
+        : ShotID(FGuid())
         , ShotLabel(TEXT(""))
         , ShotType(TEXT(""))
         , Notes(TEXT(""))
@@ -112,26 +112,22 @@ struct FGASShot
     }
 };
 
-/*-----------------------------------------
-    SHOT MARKER
-------------------------------------------*/
-
 USTRUCT(BlueprintType)
 struct FGASShotMarker
 {
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGuid ShotID;           // Which shot this marker represents
+    FGuid ShotID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGuid StartBlockID;     // Range start in the script
+    FGuid StartBlockID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGuid EndBlockID;       // Range end in the script
+    FGuid EndBlockID;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString Notes;          // Optional metadata for overlay UI
+    FString Notes;
 
     FGASShotMarker()
         : ShotID(FGuid())
@@ -142,9 +138,15 @@ struct FGASShotMarker
     }
 };
 
-/*-----------------------------------------
-    PROJECT ASSET
-------------------------------------------*/
+/*
+===============================================================================
+ PROJECT (DOCUMENT)
+ ------------------------------------------------------------------------------
+ This asset represents an open Pre-Pro project.
+ It owns the script, scenes, shots, and markers.
+ Dirty state and save/load responsibility live here.
+===============================================================================
+*/
 
 UCLASS(BlueprintType)
 class GAS_PREPROTOOLSEDITOR_API UGASPreProProject : public UDataAsset
@@ -152,11 +154,13 @@ class GAS_PREPROTOOLSEDITOR_API UGASPreProProject : public UDataAsset
     GENERATED_BODY()
 
 public:
+
     /*-----------------------------------------
-        SCRIPT STORAGE
+        SCRIPT CONTENT
     ------------------------------------------*/
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
-    TArray<FGASScriptBlock> ScriptBlocks;
+    TArray<FGASBlock> ScriptBlocks;
+
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
     TArray<FGASScene> Scenes;
@@ -170,16 +174,31 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shots")
     TArray<FGASShotMarker> ShotMarkers;
 
-public:
     /*-----------------------------------------
-        ADDERS
+        MUTATION API
+        (These will mark the project dirty)
     ------------------------------------------*/
     FGuid AddScene(const FString& Label, const FString& Heading);
     FGuid AddShot(const FString& Label);
+
     void AddShotMarker(
         const FGuid& ShotID,
         const FGuid& StartBlockID,
         const FGuid& EndBlockID,
         const FString& Notes = TEXT("")
     );
+
+    /*-----------------------------------------
+        DIRTY STATE API
+    ------------------------------------------*/
+    void MarkDirty();
+    void ClearDirty();
+    bool IsDirty() const;
+
+private:
+
+    /*-----------------------------------------
+        DIRTY STATE
+    ------------------------------------------*/
+    bool bIsDirty = false;
 };

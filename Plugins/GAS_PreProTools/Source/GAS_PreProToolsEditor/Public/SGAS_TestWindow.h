@@ -11,6 +11,9 @@ enum class EGASMainTab : uint8
     Edit
 };
 
+class UGASPreProProject;
+
+
 class SGAS_TestWindow : public SCompoundWidget
 {
 public:
@@ -27,9 +30,13 @@ private:
     TSharedRef<SWidget> CreateShotsTabContent();
     TSharedRef<SWidget> CreateEditTabContent();
 
-private:
     EGASMainTab ActiveTab = EGASMainTab::Script;
 
     // Where the active tab's content is placed
     TSharedPtr<class SBox> ContentBox;
+
+    FText GetScriptTabLabel() const;
+
+    UGASPreProProject* ActiveProject = nullptr;
 };
+

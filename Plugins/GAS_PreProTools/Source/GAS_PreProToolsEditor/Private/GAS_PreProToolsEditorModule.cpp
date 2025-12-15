@@ -81,15 +81,9 @@ void FGAS_PreProToolsEditorModule::RegisterTabSpawner()
     // Main window tab
     FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
         "GAS_TestWindow",
-        FOnSpawnTab::CreateLambda([](const FSpawnTabArgs& Args)
-            {
-                return SNew(SDockTab)
-                    .TabRole(ETabRole::NomadTab)
-                    [
-                        SNew(SGAS_TestWindow)
-                    ];
-            })
+        FOnSpawnTab::CreateRaw(this, &FGAS_PreProToolsEditorModule::SpawnMainToolTab)
     )
+
         .SetDisplayName(FText::FromString("GAS Pre Pro Tools"))
         .SetMenuType(ETabSpawnerMenuType::Hidden);
 
@@ -98,15 +92,67 @@ void FGAS_PreProToolsEditorModule::RegisterTabSpawner()
         "GAS_ScriptTab",
         FOnSpawnTab::CreateLambda([](const FSpawnTabArgs& Args)
             {
-                return SNew(SDockTab)
-                    .TabRole(ETabRole::NomadTab)
-                    [
-                        SNew(SGAS_ScriptTab)
-                    ];
+                TSharedRef<SGAS_ScriptTab> ScriptTabWidget =
+                    SNew(SGAS_ScriptTab);
+
+                TSharedRef<SDockTab> DockTab =
+                    SNew(SDockTab)
+                    .TabRole(ETabRole::NomadTab);
+
+                DockTab->SetContent(ScriptTabWidget);
+                return DockTab;
+
+
             })
     )
-        .SetDisplayName(FText::FromString("GAS Script"))
         .SetMenuType(ETabSpawnerMenuType::Hidden);
+
+}
+
+TSharedRef<SDockTab> FGAS_PreProToolsEditorModule::SpawnMainToolTab(
+    const FSpawnTabArgs& Args)
+{
+    TSharedRef<SDockTab> DockTab =
+        SNew(SDockTab)
+        .TabRole(ETabRole::NomadTab)
+        [
+            SNew(SGAS_TestWindow)
+        ];
+
+    MainToolDockTab = DockTab;
+
+    UE_LOG(LogTemp, Warning, TEXT("MAIN TOOL TAB: DockTab captured"));
+
+    return DockTab;
+}
+
+void FGAS_PreProToolsEditorModule::MarkToolDirty()
+{
+    UE_LOG(LogTemp, Warning, TEXT("MAIN TOOL TAB: MarkToolDirty CALLED"));
+
+    if (MainToolDockTab.IsValid())
+    {
+        MainToolDockTab.Pin()->SetLabel(
+            FText::FromString(TEXT("GAS Pre Pro Tools*"))
+        );
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("MAIN TOOL TAB: DockTab INVALID"));
+    }
+}
+
+
+void FGAS_PreProToolsEditorModule::ClearToolDirty()
+{
+    UE_LOG(LogTemp, Warning, TEXT("MAIN TOOL TAB: ClearToolDirty CALLED"));
+
+    if (MainToolDockTab.IsValid())
+    {
+        MainToolDockTab.Pin()->SetLabel(
+            FText::FromString(TEXT("GAS Pre Pro Tools"))
+        );
+    }
 }
 
 

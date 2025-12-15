@@ -1,11 +1,15 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "Delegates/Delegate.h"
+#include "ScriptModel.h"
 #include "Widgets/SCompoundWidget.h"
 #include "GAS_FDXImporter.h"
 
 
+
 // Forward declarations
+class UGASPreProProject;
 class SGASScriptPanel;
 class SVerticalBox;
 class STextBlock;
@@ -13,10 +17,11 @@ class SImage;
 
 struct FShotEntry
 {
-    int32 StartParagraph = 0;
-    int32 EndParagraph = 0;
-    FString ShotType = TEXT("Unknown");
+    int32 StartParagraph;
+    int32 EndParagraph;
+    FString ShotType;
 };
+
 
 class SGAS_ScriptTab : public SCompoundWidget
 {
@@ -30,7 +35,20 @@ public:
     void OnScriptParagraphClicked(int32 ParagraphIndex);
 
     FReply OnImportScript();
+    FReply OnSaveScript();
 
+
+    void ClearScript();
+
+    // =========================================================
+    // Project Ownership Handoff
+    // =========================================================
+    DECLARE_DELEGATE_OneParam(FOnProjectLoaded, UGASPreProProject*);
+    FOnProjectLoaded OnProjectLoaded;
+
+    void MarkScriptDirty();
+    void ClearScriptDirty();
+    bool IsScriptDirty() const;
 
 
 private:
@@ -42,8 +60,8 @@ private:
     // Toggles shot marking mode
     FReply OnToggleShotMarking();
 
-    // Remove old numbering toggle
-    // FReply OnToggleNumbering();  <-- DELETE THIS LINE
+    FReply OnToggleEditMode();
+
 
     // =========================================================
     // Rebuild UI Panels
@@ -59,32 +77,33 @@ private:
 
     float CachedScriptPanelWidth = 1200.f; // fallback width
 
+    FGASScript LoadedScript;
+    bool bHasLoadedScript = false;
+
+    FReply OnClearScriptConfirm();
+    FReply OnClearScriptClicked();
+
 
 private:
 
     // =========================================================
     // Script + Shot Data
     // =========================================================
-
-    // Parsed screenplay paragraphs (raw from importer)
-    TArray<FScriptParagraph> ParsedParagraphs;
-
-    // Paragraph-based shot markers
-    TArray<int32> ShotStartParagraphs;
-    TArray<int32> ShotEndParagraphs;
-
-    // Shot metadata
     TArray<FShotEntry> ShotList;
+
 
     bool bIsMarkingShot = false;
     int32 PendingStartParagraph = INDEX_NONE;
 
     bool bIsShotMarkingActive = false;
+    bool bIsEditMode = false;
 
+    bool bIsScriptDirty = false;
 
-    // Remove numbering flags
-    // bool bShowNumbering = false;
-    // bool bShowSceneAndDialogueNumbers = false;
+    // =========================================================
+    // Project / Document
+    // =========================================================
+    UGASPreProProject* ActiveProject = nullptr;
 
     // =========================================================
     // Slate UI References
@@ -95,4 +114,10 @@ private:
     TSharedPtr<SGASScriptPanel> ScriptPanel;
     TSharedPtr<SImage> ShotMarkingIcon;
     TSharedPtr<SImage> NumberingIcon;
+
+
+
+
+
+
 };

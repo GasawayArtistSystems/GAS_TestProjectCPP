@@ -1,52 +1,69 @@
-#pragma once
+ï»¿#pragma once
 
 #include "CoreMinimal.h"
-#include "GAS_FDXImporter.h"
-#include "GASPreProProject.h" 
+#include "ScriptModel.h"
+#include "GASPreProProject.h"
+#include "ScriptFormatRules.h"
 #include "ScriptLayoutEngine.generated.h"
-
-
-// ============================================================================
-// Final Draft Formatting Constants (Shared across ScriptLayoutEngine + Panels)
-// ============================================================================
-
-static constexpr float GFD_LineHeight = 13.2f;
-
-static constexpr float GFD_MarginLeft = 108.f;   // 1.5"
-static constexpr float GFD_MarginRight = 72.f;    // 1"
-static constexpr float GFD_MarginTop = 72.f;
-static constexpr float GFD_MarginBottom = 72.f;
-
-static constexpr float GFD_PageWidth = 612.f;   // 8.5"
-static constexpr float GFD_PageHeight = 792.f;   // 11"
-
 
 USTRUCT()
 struct FRenderedParagraph
 {
     GENERATED_BODY()
 
+    // Which original FGASBlock this paragraph belongs to
     UPROPERTY()
-    FText SourceText;
+    FString BlockId;
 
+    // Paragraph index in the rendered sequence
+    UPROPERTY()
+    int32 ParagraphIndex = -1;
+
+    // What type of block this is (Action, Dialogue, etc.)
+    UPROPERTY()
+    EGASBlockType BlockType = EGASBlockType::None;
+
+    // Wrapped lines
+    UPROPERTY()
+    TArray<FString> Lines;
+
+    // Position + size
     UPROPERTY()
     float TopY = 0.f;
 
     UPROPERTY()
     float Height = 0.f;
 
+    // Indentation
     UPROPERTY()
     float IndentLeft = 0.f;
 
     UPROPERTY()
     float IndentRight = 0.f;
 
-    // NEW: the actual wrapped text lines we’ll render
+    // (Optional future use)
     UPROPERTY()
-    TArray<FString> Lines;
+    FText SourceText;
+
+    // ================================
+    // NEW: Page break + pagination data
+    // ================================
+
+    // The page this paragraph belongs to (1 = first page)
+    UPROPERTY()
+    int32 PageNumber = 1;
+
+    // True if this paragraph begins a new page
+    UPROPERTY()
+    bool bStartsPage = false;
+
+    // True if the user explicitly forced a page break here
+    UPROPERTY()
+    bool bUserForcedPageBreak = false;
 
     UPROPERTY()
-    EGASBlockType BlockType;
+    bool bAutoBreakCausedHere = false;
+
 };
 
 
@@ -55,26 +72,36 @@ class ScriptLayoutEngine
 {
 public:
 
-    /**
-     * Computes full screenplay layout: positions, heights, page breaks.
-     * Returns array of renderable paragraphs.
-     */
     static TArray<FRenderedParagraph> LayoutScript(
-        const TArray<FScriptParagraph>& InParagraphs,
+        const TArray<FGASBlock>& Blocks,
+        float PanelWidth,
+        const TArray<int32>& UserPageBreaks,
+        const TArray<FString>& SuppressedAutoBreakBlockIds
+    );
+
+
+
+
+    // backward compatibility for older calls
+    static TArray<FRenderedParagraph> LayoutScript(
+        const TArray<FGASBlock>& Blocks,
         float PanelWidth
     );
 
-private:
 
+private:
     // Formatting helpers
     static float GetLeftIndent(EGASBlockType Type);
     static float GetRightIndent(EGASBlockType Type);
-
+    static float GetAvailableWidth(EGASBlockType Type);
 
     static float ComputeParagraphHeight(
         const FString& Text,
-        float AvailableWidth
-    );
+        float IndentLeft,
+        float IndentRight,
+        const FSlateFontInfo& FontInfo);
 
-    static bool StartsNewBlock(EParagraphType Type);
-};
+    static bool BlocksMustStayTogether(EGASBlockType A, EGASBlockType B);
+
+}
+;
