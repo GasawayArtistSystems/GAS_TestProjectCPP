@@ -25,12 +25,16 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                         .Padding(2.f, 0.f)
                         [
                             SNew(SButton)
-                                .Text(FText::FromString(TEXT("Script")))
+                                .Text_Lambda([this]()
+                                    {
+                                        return GetScriptTabLabel();
+                                    })
                                 .OnClicked_Lambda([this]()
                                     {
                                         SetActiveTab(EGASMainTab::Script);
                                         return FReply::Handled();
                                     })
+
                         ]
 
                     + SHorizontalBox::Slot()
@@ -120,12 +124,28 @@ void SGAS_TestWindow::SetActiveTab(EGASMainTab NewTab)
 
 TSharedRef<SWidget> SGAS_TestWindow::CreateScriptTabContent()
 {
+    TSharedRef<SGAS_ScriptTab> ScriptTab =
+        SNew(SGAS_ScriptTab);
+
+    // ------------------------------------------------------------
+    // Receive project ownership from the Script tab
+    // ------------------------------------------------------------
+    ScriptTab->OnProjectLoaded.BindLambda(
+        [this](UGASPreProProject* InProject)
+        {
+            ActiveProject = InProject;
+
+            UE_LOG(LogTemp, Warning, TEXT("Window received ActiveProject"));
+        }
+    );
+
     return SNew(SBorder)
         .Padding(4.f)
         [
-            SNew(SGAS_ScriptTab)
+            ScriptTab
         ];
 }
+
 
 TSharedRef<SWidget> SGAS_TestWindow::CreateShotListTabContent()
 {
@@ -156,3 +176,17 @@ TSharedRef<SWidget> SGAS_TestWindow::CreateEditTabContent()
                 .Text(FText::FromString(TEXT("Edit tab (coming soon)")))
         ];
 }
+
+
+FText SGAS_TestWindow::GetScriptTabLabel() const
+{
+    UE_LOG(LogTemp, Warning, TEXT("GetScriptTabLabel called"));
+
+    const bool bDirty =
+        (ActiveProject && ActiveProject->IsDirty());
+
+    return FText::FromString(
+        bDirty ? TEXT("Script*") : TEXT("Script")
+    );
+}
+

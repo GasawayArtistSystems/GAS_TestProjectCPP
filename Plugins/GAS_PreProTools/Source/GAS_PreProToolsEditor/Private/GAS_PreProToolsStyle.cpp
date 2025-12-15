@@ -1,4 +1,5 @@
 #include "GAS_PreProToolsStyle.h"
+#include "Templates/SharedPointer.h"
 #include "Interfaces/IPluginManager.h"
 #include "Styling/SlateStyle.h"
 #include "Styling/SlateStyleRegistry.h"
@@ -17,6 +18,34 @@ void FGAS_PreProToolsStyle::Initialize()
     FString PluginBaseDir = IPluginManager::Get().FindPlugin("GAS_PreProTools")->GetBaseDir();
     StyleInstance->SetContentRoot(PluginBaseDir / TEXT("Resources"));
 
+    // Register Courier New font
+    FString FontPath = StyleInstance->RootToContentDir(TEXT("Fonts/cour.ttf"));
+
+    // Proper UE 5.6 constructor: takes *path + size*
+    FSlateFontInfo FontInfo(*FontPath, 12);
+
+    // (Optional but recommended)
+    FontInfo.TypefaceFontName = FName("Regular");
+
+    StyleInstance->Set("GAS.ScriptFont", FontInfo);
+
+
+    FButtonStyle ToolButtonStyle = FButtonStyle()
+        .SetNormal(FSlateNoResource())
+        .SetHovered(FSlateNoResource())
+        .SetPressed(FSlateNoResource())
+        .SetDisabled(FSlateNoResource())
+        .SetNormalForeground(FSlateColor::UseForeground())
+        .SetHoveredForeground(FSlateColor::UseForeground())
+        .SetPressedForeground(FSlateColor::UseForeground())
+        .SetDisabledForeground(FSlateColor::UseForeground());
+   
+
+    StyleInstance->Set("GAS.ToolButton", ToolButtonStyle);
+
+
+
+
     // Register CameraIcon_40.png as a brush
     StyleInstance->Set(
         "GAS.CameraIcon",
@@ -31,6 +60,24 @@ void FGAS_PreProToolsStyle::Initialize()
         new FSlateImageBrush(
             StyleInstance->RootToContentDir(TEXT("NumberIcon_40.png")),
             FVector2D(40.0f, 40.0f)
+        )
+    );
+
+    // Register SaveIcon_40.png as a brush
+    StyleInstance->Set(
+        "GAS.SaveIcon",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("SaveIcon_40.png")),
+            FVector2D(40.0f, 40.0f)
+        )
+    );
+
+    // Register EditIcon_40.png as a brush
+    StyleInstance->Set(
+        "GAS.EditIcon",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("EditIcon_40.png")),
+            FVector2D(40.f, 40.f)
         )
     );
 

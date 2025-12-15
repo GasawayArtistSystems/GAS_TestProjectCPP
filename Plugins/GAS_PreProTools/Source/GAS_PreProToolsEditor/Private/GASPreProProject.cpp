@@ -37,3 +37,18 @@ void UGASPreProProject::AddShotMarker(
 
     ShotMarkers.Add(Marker);
 }
+
+void UGASPreProProject::MarkDirty()
+{
+    bIsDirty = true;
+}
+
+void UGASPreProProject::ClearDirty()
+{
+    bIsDirty = false;
+}
+
+bool UGASPreProProject::IsDirty() const
+{
+    return bIsDirty;
+}

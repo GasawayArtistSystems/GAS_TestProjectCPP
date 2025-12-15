@@ -21,7 +21,9 @@ public class GAS_PreProTools : ModuleRules
             "Projects",
             "Slate",
             "SlateCore",
-            "ApplicationCore"
+            "ApplicationCore",
+            "Json",
+            "JsonUtilities"
         });
 
         PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));

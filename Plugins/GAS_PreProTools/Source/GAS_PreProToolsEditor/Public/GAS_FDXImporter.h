@@ -1,46 +1,38 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "GASPreProProject.h"     // For FGASBlock, EGASBlockType
 #include "GAS_FDXImporter.generated.h"
 
-UENUM(BlueprintType)
-enum class EParagraphType : uint8
-{
-    Unknown = 0,
-    SceneHeading,
-    Action,
-    Character,
-    Dialogue,
-    Parenthetical,
-    Transition
-};
-
-USTRUCT(BlueprintType)
-struct GAS_PREPROTOOLSEDITOR_API FScriptParagraph
+UCLASS()
+class GAS_PREPROTOOLSEDITOR_API UGAS_FDXImporter : public UObject
 {
     GENERATED_BODY()
 
-    UPROPERTY()
-    FString Text;
-
-    UPROPERTY()
-    FString TypeString;
-
-    UPROPERTY()
-    EParagraphType ParagraphType = EParagraphType::Unknown;
-
-    // TEMP legacy compatibility
-    UPROPERTY()
-    FString Type;
-};
-
-class GAS_PREPROTOOLSEDITOR_API GAS_FDXImporter
-{
 public:
-    static bool ImportFDX(const FString& FilePath, TArray<FScriptParagraph>& OutParagraphs);
+
+    // NEW — returns a full FGASScript containing Blocks + Scenes + Markers
+    UFUNCTION(BlueprintCallable, Category = "FDX")
+    static bool ImportFDXToScript(const FString& FilePath, FGASScript& OutScript);
 
 private:
-    static void ExtractRawParagraphBlocks(const FString& XmlText, TArray<FString>& OutBlocks);
-    static bool ParseParagraphBlock(const FString& Block, FScriptParagraph& OutPara);
-    static EParagraphType MapFDXType(const FString& TypeString);
+
+    // Extract <Paragraph> elements from xml text
+    static void ExtractRawParagraphBlocks(
+        const FString& XmlText,
+        TArray<FString>& OutBlocks);
+
+    static bool ConvertFDXBlockToGAS(const FString& Block, FGASBlock& OutBlock);
+
+
+    // Map FDX paragraph type (Action, Dialogue, Scene Heading, etc.)
+    static EGASBlockType MapFDXType(const FString& TypeString);
+
+    static void GetFDXSections(
+        const FString& XmlText,
+        int32& OutTitlePageStart,
+        int32& OutTitlePageEnd,
+        int32& OutContentStart,
+        int32& OutContentEnd);
+
 };
