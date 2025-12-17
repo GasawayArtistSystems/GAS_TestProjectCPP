@@ -122,6 +122,33 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                 ]
 
 
+                            // --- Scene Number Toggle --------------------------------
+                            +SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(0, 8, 0, 0)
+                                [
+                                    SNew(SBox)
+                                        .WidthOverride(48.f)
+                                        .HeightOverride(48.f)
+                                        [
+                                            SNew(SButton)
+                                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                                .HAlign(HAlign_Center)
+                                                .VAlign(VAlign_Center)
+                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnToggleSceneNumbers))
+                                                [
+                                                    SNew(SImage)
+                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SceneNumberIcon"))
+                                                        .ColorAndOpacity_Lambda([this]()
+                                                            {
+                                                                return bShowSceneNumbers
+                                                                    ? FLinearColor(0.3f, 1.f, 0.3f, 1.f) // green = active
+                                                                    : FLinearColor::White;
+                                                            })
+                                                ]
+                                        ]
+                                ]
+
                             // --- Import Script --------------------------------------
                             + SVerticalBox::Slot()
                                 .AutoHeight()
@@ -315,6 +342,21 @@ FReply SGAS_ScriptTab::OnSaveScript()
     return FReply::Handled();
 }
 
+FReply SGAS_ScriptTab::OnToggleSceneNumbers()
+{
+    bShowSceneNumbers = !bShowSceneNumbers;
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("SCRIPT TAB: Scene numbers %s"),
+        bShowSceneNumbers ? TEXT("ON") : TEXT("OFF"));
+
+    if (ScriptPanel.IsValid())
+    {
+        ScriptPanel->SetShowSceneNumbers(bShowSceneNumbers);
+    }
+
+    return FReply::Handled();
+}
 
 
 FReply SGAS_ScriptTab::OnToggleShotMarking()

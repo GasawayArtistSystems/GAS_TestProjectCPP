@@ -7,113 +7,77 @@ namespace ScriptFormat
     // ------------------------------------------------------------------------
     // Line + Page Metrics
     // ------------------------------------------------------------------------
-    static constexpr float LineHeight = 17.5f;
-    static constexpr float PageWidth = 830.f;
-    static constexpr float PageHeight = 792.f;
-
+    static constexpr float LineHeight = 17.5f;           // Courier 12 FD line height
+    static constexpr float EditorColumnWidth = 820.f;   // FD column width
+    static constexpr float MarginLeft = 5.f;
+    static constexpr float MarginRight = 72.f;
     static constexpr float MarginTop = 72.f;
     static constexpr float MarginBottom = 72.f;
+
+    static constexpr float PageWidth = 612.f;
+    static constexpr float PageHeight = 792.f;
 
     static constexpr float LinesPerPageFudge = 1.0f;
 
     // ------------------------------------------------------------------------
-    // Absolute Column Layout (Final Draft–style)
+    // Indentation
     // ------------------------------------------------------------------------
-    static constexpr float PageLeft = 140.f;
-
-    // Relative to printable area (DO NOT include PageLeft)
-    static constexpr float SceneCol = 0.f;
-    static constexpr float ActionCol = 0.f;
-    static constexpr float DialogueCol = 105.f;
-    static constexpr float ParentheticalCol = 148.f;
-    static constexpr float CharacterCol = 210.f;
-    static constexpr float TransitionRightPadding = 42.f;
-
-    // Dual dialogue columns (Final Draft)
-    static constexpr float DualCharLeftCol = DialogueCol + 30.f;
-    static constexpr float DualCharRightCol = DialogueCol + 320.f;
-
-    static constexpr float DualDialogueTextLeftCol = DialogueCol;
-    // Extra indent for left-side dual dialogue text (Final Draft nuance)
-    static constexpr float DualDialogueTextLeftOffset = 0.f;
-
-    static constexpr float DualDialogueTextRightCol = DialogueCol + 220.f;
-
-
-
-
-    // Dual dialogue
-    static constexpr float DualDialogueOffset = 216.f; // ~3"
+    static constexpr float IndentScene = 144.f;
+    static constexpr float IndentAction = 144.f;
+    static constexpr float IndentChar = 355.f;
+    static constexpr float IndentDialogue = 240.f;
+    static constexpr float IndentParen = 298.f;
+    static constexpr float IndentTrans = 650.f;
 
     inline float GetLeftIndent(EGASBlockType T)
     {
         switch (T)
         {
         case EGASBlockType::SceneHeading:
-            return SceneCol;
+            return IndentScene;
 
         case EGASBlockType::Action:
-            return ActionCol;
+            return IndentAction;
 
         case EGASBlockType::Character:
-            return CharacterCol;
+            return IndentChar;
 
         case EGASBlockType::Dialogue:
-            return DialogueCol;
+            return IndentDialogue;
 
         case EGASBlockType::Parenthetical:
-            return ParentheticalCol;
+            return IndentParen;
 
         case EGASBlockType::Transition:
-            return 0.f; // handled specially
-
+            return IndentTrans;
 
         default:
-            return ActionCol;
+            return IndentAction;
+        }
+    }
+
+
+    inline float GetRightIndent(EGASBlockType T)
+    {
+        switch (T)
+        {
+        case EGASBlockType::Dialogue:
+        case EGASBlockType::Parenthetical:
+        case EGASBlockType::Character:
+            return 90.f;   // tighter right margin
+
+        default:
+            return 60.f;
         }
     }
 
 
     inline float GetAvailableWidth(EGASBlockType T)
     {
-        // Right margin fixed at 1"
-        constexpr float PageRight = PageWidth - 72.f;
+        float Base = EditorColumnWidth - GetLeftIndent(T) - GetRightIndent(T);
 
-        float Left = GetLeftIndent(T);
-        float Right = PageRight;
-
-        // Dialogue & parentheticals have tighter width
-        if (T == EGASBlockType::Dialogue || T == EGASBlockType::Parenthetical)
-        {
-            Right -= 36.f; // tighten slightly
-        }
-
-        return Right - Left;
+        return Base;
     }
-
-
-    // ------------------------------------------------------------------------
-    // LEGACY COMPATIBILITY (DO NOT USE FOR NEW CODE)
-    // ------------------------------------------------------------------------
-
-    // These exist ONLY so older layout code compiles.
-    // They now map to absolute-column math.
-
-        static constexpr float MarginLeft = PageLeft;
-        static constexpr float MarginRight = 72.f; // page right margin (1")
-
-        // Editor column width = printable width
-        static constexpr float EditorColumnWidth =
-            PageWidth - MarginLeft - MarginRight;
-
-
-    inline float GetRightIndent(EGASBlockType /*T*/)
-    {
-        // Legacy API — Final Draft does NOT use right indents.
-        // Kept only so ScriptLayoutEngine continues to compile.
-        return 0.f;
-    }
-
 
 
     // ------------------------------------------------------------------------
@@ -124,8 +88,7 @@ namespace ScriptFormat
         return (
             T == EGASBlockType::SceneHeading ||
             T == EGASBlockType::Character ||
-            T == EGASBlockType::Transition ||
-            T == EGASBlockType::Shot
+            T == EGASBlockType::Transition
             );
     }
 

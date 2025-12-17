@@ -180,7 +180,6 @@ TSharedRef<SWidget> SGAS_TestWindow::CreateEditTabContent()
 
 FText SGAS_TestWindow::GetScriptTabLabel() const
 {
-    UE_LOG(LogTemp, Warning, TEXT("GetScriptTabLabel called"));
 
     const bool bDirty =
         (ActiveProject && ActiveProject->IsDirty());
