@@ -54,6 +54,12 @@ public:
     void SetRenderedScript(const TArray<FRenderedParagraph>& InParagraphs);
     void SetShotMarkers(const TArray<FGASMarker>& Markers);
 
+    void SetShowSceneNumbers(bool bInShow)
+    {
+        bShowSceneNumbers = bInShow;
+        bNeedsRedraw = true;
+    }
+
     // =========================================================
     // View / Navigation
     // =========================================================
@@ -143,6 +149,8 @@ private:
     // When ON: clicks resolve paragraphs for editing via dialogs.
     // Inline editing is NOT implemented yet.
     // =============================================================
+
+    bool bShowSceneNumbers = false;
 
     bool bEditMode = false;
 

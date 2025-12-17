@@ -54,11 +54,11 @@ void FGAS_PreProToolsStyle::Initialize()
             FVector2D(40.0f, 40.0f)
         )
     );
-    // Register NumberIcon_40.png as a brush
+    // Register SceneNumberIcon_40.png as a brush
     StyleInstance->Set(
-        "GAS.NumberIcon",
+        "GAS.SceneNumberIcon",
         new FSlateImageBrush(
-            StyleInstance->RootToContentDir(TEXT("NumberIcon_40.png")),
+            StyleInstance->RootToContentDir(TEXT("SceneNumberIcon_40.png")),
             FVector2D(40.0f, 40.0f)
         )
     );

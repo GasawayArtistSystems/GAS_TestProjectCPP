@@ -45,6 +45,9 @@ struct FRenderedParagraph
     UPROPERTY()
     FText SourceText;
 
+    UPROPERTY()
+    TMap<FString, FString> SourceMetadata;
+
     // ================================
     // NEW: Page break + pagination data
     // ================================

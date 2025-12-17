@@ -38,6 +38,8 @@ public:
     FReply OnSaveScript();
 
 
+
+
     void ClearScript();
 
     // =========================================================
@@ -51,6 +53,8 @@ public:
     bool IsScriptDirty() const;
 
 
+
+
 private:
 
     // =========================================================
@@ -62,7 +66,7 @@ private:
 
     FReply OnToggleEditMode();
 
-
+    FReply OnToggleSceneNumbers();
     // =========================================================
     // Rebuild UI Panels
     // =========================================================
@@ -97,8 +101,9 @@ private:
 
     bool bIsShotMarkingActive = false;
     bool bIsEditMode = false;
-
     bool bIsScriptDirty = false;
+
+    bool bShowSceneNumbers = false;
 
     // =========================================================
     // Project / Document
@@ -114,6 +119,9 @@ private:
     TSharedPtr<SGASScriptPanel> ScriptPanel;
     TSharedPtr<SImage> ShotMarkingIcon;
     TSharedPtr<SImage> NumberingIcon;
+
+
+    
 
 
 

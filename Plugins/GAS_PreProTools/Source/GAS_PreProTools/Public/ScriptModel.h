@@ -12,6 +12,7 @@ enum class EGASBlockType : uint8
     None            UMETA(DisplayName = "None"),
     SceneHeading    UMETA(DisplayName = "Scene Heading"),
     Action          UMETA(DisplayName = "Action"),
+    Shot            UMETA(DisplayName = "Shot"),
     Character       UMETA(DisplayName = "Character"),
     Parenthetical   UMETA(DisplayName = "Parenthetical"),
     Dialogue        UMETA(DisplayName = "Dialogue"),
@@ -29,6 +30,19 @@ enum class EGASMarkerType : uint8
     Comment         UMETA(DisplayName = "Comment"),
     Bookmark        UMETA(DisplayName = "Bookmark")
 };
+
+// ------------------------------------------------------------
+// DUAL DIALOG
+// ------------------------------------------------------------
+
+UENUM(BlueprintType)
+enum class EGASDualRole : uint8
+{
+    None,
+    Left,
+    Right
+};
+
 
 // ------------------------------------------------------------
 // SCRIPT BLOCK (REPLACES FScriptParagraph)
@@ -51,6 +65,12 @@ struct FGASBlock
     FString Speaker;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FString> CharacterExtensions;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float IndentLeft = 0.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -61,6 +81,19 @@ struct FGASBlock
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TMap<FString, FString> Metadata;
+
+    // ------------------------------------------------------------
+    // Dual Dialogue
+    // ------------------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsDualDialogue = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EGASDualRole DualRole = EGASDualRole::None;
+
+    // Was explicitly wrapped in <DualDialogue> in FDX
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsExplicitDualDialogue = false;
 
     FGASBlock() {}
 };

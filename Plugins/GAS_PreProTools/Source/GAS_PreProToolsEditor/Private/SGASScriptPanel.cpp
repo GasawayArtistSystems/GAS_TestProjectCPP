@@ -196,6 +196,33 @@ int32 SGASScriptPanel::OnPaint(
             );
         }
 
+        // ------------------------------------------------------------
+        // Draw SCENE NUMBER (optional, margin only — no layout impact)
+        // ------------------------------------------------------------
+        if (bShowSceneNumbers &&
+            P.BlockType == EGASBlockType::SceneHeading)
+        {
+            const FString* SceneNum =
+                P.SourceMetadata.Find("SceneNumber");
+
+            if (SceneNum)
+            {
+                FSlateDrawElement::MakeText(
+                    OutDrawElements,
+                    LayerId,
+                    AllottedGeometry.ToPaintGeometry(
+                        FVector2D(ScriptFormat::PageLeft + P.IndentLeft - 50.f, P.TopY),
+                        FVector2D::UnitVector
+                    ),
+                    FText::FromString(*SceneNum),
+                    FontInfo,
+                    ESlateDrawEffect::None,
+                    FLinearColor(0.65f, 0.65f, 0.65f, 1.f)
+                );
+            }
+        }
+
+
         // ----------------------------------------------
         // Draw lines at TRUE layout coordinates
         // ----------------------------------------------
@@ -207,7 +234,7 @@ int32 SGASScriptPanel::OnPaint(
                 OutDrawElements,
                 LayerId,
                 AllottedGeometry.ToPaintGeometry(
-                    FVector2D(P.IndentLeft, LineY),   // <<< USE REAL INDENT
+                    FVector2D(ScriptFormat::PageLeft + P.IndentLeft, LineY),
                     FVector2D::UnitVector
                 ),
                 FText::FromString(Ln),
