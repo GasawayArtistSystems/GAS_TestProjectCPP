@@ -48,24 +48,12 @@ struct FRenderedParagraph
     UPROPERTY()
     TMap<FString, FString> SourceMetadata;
 
-    // ================================
-    // NEW: Page break + pagination data
-    // ================================
-
-    // The page this paragraph belongs to (1 = first page)
-    UPROPERTY()
-    int32 PageNumber = 1;
-
-    // True if this paragraph begins a new page
     UPROPERTY()
     bool bStartsPage = false;
 
-    // True if the user explicitly forced a page break here
     UPROPERTY()
-    bool bUserForcedPageBreak = false;
+    int32 PageNumber = 1;
 
-    UPROPERTY()
-    bool bAutoBreakCausedHere = false;
 
 };
 
@@ -78,17 +66,12 @@ public:
     static TArray<FRenderedParagraph> LayoutScript(
         const TArray<FGASBlock>& Blocks,
         float PanelWidth,
-        const TArray<int32>& UserPageBreaks,
-        const TArray<FString>& SuppressedAutoBreakBlockIds
+        const TArray<FGASUserPageBreak>& PageBreaks
     );
 
-
-
-
-    // backward compatibility for older calls
-    static TArray<FRenderedParagraph> LayoutScript(
-        const TArray<FGASBlock>& Blocks,
-        float PanelWidth
+    static bool HasPageBreakAfter(
+        int32 ParagraphIndex,
+        const TArray<FGASUserPageBreak>& PageBreaks
     );
 
 

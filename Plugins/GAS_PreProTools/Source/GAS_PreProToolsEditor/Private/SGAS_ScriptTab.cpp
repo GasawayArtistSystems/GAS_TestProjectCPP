@@ -18,10 +18,15 @@
 
 #include "DesktopPlatformModule.h"
 #include "Framework/Application/SlateApplication.h"
+#include "UObject/SavePackage.h"
+#include "UObject/Package.h"
+#include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 
 #include "GAS_PreProToolsStyle.h"
+#include "GASScriptAsset.h"
+
 
 // JSON persistence is temporarily disabled; we keep FileManager for GetScriptJsonPath.
 #include "HAL/FileManager.h"
@@ -31,6 +36,9 @@
 
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
 {
+
+    UE_LOG(LogTemp, Error, TEXT("=== GAS SCRIPT TAB CONSTRUCTED @ %s ==="), *FDateTime::Now().ToString());
+
     ChildSlot
         [
             SNew(SHorizontalBox)
@@ -68,62 +76,8 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                         ]
                                 ]
 
-                            // --- Edit Mode Toggle -----------------------------------
-                            + SVerticalBox::Slot()
-                                .AutoHeight()
-                                [
-                                    SNew(SBox)
-                                        .WidthOverride(48.f)
-                                        .HeightOverride(48.f)
-                                        [
-                                            SNew(SButton)
-                                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
-                                                .HAlign(HAlign_Center)
-                                                .VAlign(VAlign_Center)
-                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnToggleEditMode))
-                                                .ToolTipText_Lambda([this]()
-                                                    {
-                                                        return bIsEditMode
-                                                            ? FText::FromString("Exit Edit Mode")
-                                                            : FText::FromString("Enter Edit Mode");
-                                                    })
-                                                [
-                                                    SNew(SImage)
-                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.EditIcon"))
-                                                        .ColorAndOpacity_Lambda([this]()
-                                                            {
-                                                                return bIsEditMode
-                                                                    ? FLinearColor(0.2f, 0.9f, 0.2f, 1.f)   // green when editing
-                                                                    : FLinearColor::White;                // normal when not
-                                                            })
-                                                ]
-                                        ]
-                                ]
-
-
-                            // --- Save Script --------------------------------------
-                            + SVerticalBox::Slot()
-                                .AutoHeight()
-                                [
-                                    SNew(SBox)
-                                        .WidthOverride(48.f)
-                                        .HeightOverride(48.f)
-                                        [
-                                            SNew(SButton)
-                                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
-                                                .HAlign(HAlign_Center)
-                                                .VAlign(VAlign_Center)
-                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnSaveScript))
-                                                [
-                                                    SNew(SImage)
-                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SaveIcon"))
-                                                ]
-                                        ]
-                                ]
-
-
                             // --- Scene Number Toggle --------------------------------
-                            +SVerticalBox::Slot()
+                            + SVerticalBox::Slot()
                                 .AutoHeight()
                                 .Padding(0, 8, 0, 0)
                                 [
@@ -149,6 +103,131 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                         ]
                                 ]
 
+                            // --- Save Script --------------------------------------
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                [
+                                    SNew(SBox)
+                                        .WidthOverride(48.f)
+                                        .HeightOverride(48.f)
+                                        [
+                                            SNew(SButton)
+                                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                                .HAlign(HAlign_Center)
+                                                .VAlign(VAlign_Center)
+                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnSaveScript))
+                                                .ToolTipText(FText::FromString("Save Script"))
+                                                [
+                                                    SNew(SImage)
+                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SaveIcon"))
+                                                ]
+                                        ]
+
+                                ]
+                            // --- Divider --------------------------------------------
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(0, 12, 0, 12)
+                                [
+                                    SNew(SBorder)
+                                        .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+                                        .BorderBackgroundColor(FLinearColor(0.15f, 0.15f, 0.15f, 1.f))
+                                        .Padding(FMargin(0.f, 1.f))
+                                ]
+
+                            // --- Edit Mode Toggle -----------------------------------
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                [
+                                    SNew(SBox)
+                                        .WidthOverride(48.f)
+                                        .HeightOverride(48.f)
+                                        [
+                                            SNew(SButton)
+                                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                                .HAlign(HAlign_Center)
+                                                .VAlign(VAlign_Center)
+
+                                                .IsEnabled_Lambda([this]()
+                                                    {
+                                                        return CurrentScript.Blocks.Num() > 0;
+                                                    })
+
+                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnToggleEditMode))
+                                                .ToolTipText_Lambda([this]()
+                                                    {
+                                                        return bIsEditMode
+                                                            ? FText::FromString("Exit Edit Mode")
+                                                            : FText::FromString("Enter Edit Mode");
+                                                    })
+                                                [
+                                                    SNew(SImage)
+                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.EditIcon"))
+                                                        .ColorAndOpacity_Lambda([this]()
+                                                            {
+                                                                return bIsEditMode
+                                                                    ? FLinearColor(0.2f, 0.9f, 0.2f, 1.f)   // green when editing
+                                                                    : FLinearColor::White;                // normal when not
+                                                            })
+                                                ]
+                                        ]
+                                ]
+
+                            // --- Add Mode Toggle -----------------------------------
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                [
+                                    SNew(SBox)
+                                        .WidthOverride(48.f)
+                                        .HeightOverride(48.f)
+                                        [
+                                            SNew(SButton)
+                                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                                .HAlign(HAlign_Center)
+                                                .VAlign(VAlign_Center)
+
+                                                .IsEnabled_Lambda([this]()
+                                                    {
+                                                        return CurrentScript.Blocks.Num() > 0;
+                                                    })
+
+                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnToggleAddMode))
+                                                .ToolTipText_Lambda([this]()
+                                                    {
+                                                        return bIsAddMode
+                                                            ? FText::FromString("Exit Add Mode")
+                                                            : FText::FromString("Enter Add Mode");
+                                                    })
+                                                [
+                                                    SNew(SImage)
+                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.EditAddIcon")) // you’ll add this icon
+                                                        .ColorAndOpacity_Lambda([this]()
+                                                            {
+                                                                return bIsAddMode
+                                                                    ? FLinearColor(0.2f, 0.6f, 1.0f, 1.f)  // blue when adding
+                                                                    : FLinearColor::White;
+                                                            })
+                                                ]
+                                        ]
+                                ]
+
+
+
+
+
+
+                            // --- Divider --------------------------------------------
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(0, 12, 0, 12)
+                                [
+                                    SNew(SBorder)
+                                        .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+                                        .BorderBackgroundColor(FLinearColor(0.15f, 0.15f, 0.15f, 1.f))
+                                        .Padding(FMargin(0.f, 1.f))
+                                ]
+
+
                             // --- Import Script --------------------------------------
                             + SVerticalBox::Slot()
                                 .AutoHeight()
@@ -159,12 +238,73 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                         .HAlign(HAlign_Center)
                                         .VAlign(VAlign_Center)
                                         .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnImportScript))
+                                        .ToolTipText(FText::FromString("Import Script"))
                                         [
-                                            SNew(STextBlock)
-                                                .Text(FText::FromString("Import"))
+                                            SNew(SImage)
+                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.ImportScript"))
                                         ]
+
                                 ]
 
+                            // --- Generate Page Breaks -------------------------------
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(0, 8, 0, 0)
+                                [
+                                    SNew(SButton)
+                                        .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                        .HAlign(HAlign_Center)
+                                        .VAlign(VAlign_Center)
+
+                                        // Enabled ONLY when no page breaks exist
+                                        .IsEnabled_Lambda([this]()
+                                            {
+                                                return CurrentScript.Blocks.Num() > 0
+                                                    && CurrentScript.UserPageBreaks.Num() == 0;
+                                            })
+
+
+
+
+                                        // Tooltip explains state
+                                        .ToolTipText_Lambda([this]()
+                                            {
+                                                if (CurrentScript.Blocks.Num() == 0)
+                                                {
+                                                    return FText::FromString("No script loaded.");
+                                                }
+
+                                                if (CurrentScript.UserPageBreaks.Num() == 0)
+                                                {
+                                                    return FText::FromString(
+                                                        "Generate approximate page breaks.\n"
+                                                        "Page breaks can be edited afterward."
+                                                    );
+                                                }
+                                                else
+                                                {
+                                                    return FText::FromString(
+                                                        "Page breaks already exist.\n"
+                                                        "Clear them to regenerate."
+                                                    );
+                                                }
+                                            })
+
+
+
+
+                                        .OnClicked(FOnClicked::CreateSP(
+                                            this,
+                                            &SGAS_ScriptTab::OnGeneratePageBreaks
+                                        ))
+                                        [
+                                            SNew(SImage)
+                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.PageBreakIcon"))
+                                        ]
+
+                                ]
+
+                            
                             // --- Clear Script ---------------------------------------
                             + SVerticalBox::Slot()
                                 .AutoHeight()
@@ -175,10 +315,12 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                         .HAlign(HAlign_Center)
                                         .VAlign(VAlign_Center)
                                         .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnClearScriptConfirm))
+                                        .ToolTipText(FText::FromString("Clear Script"))
                                         [
-                                            SNew(STextBlock)
-                                                .Text(FText::FromString("Clear"))
+                                            SNew(SImage)
+                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.ClearIcon"))
                                         ]
+
                                 ]
                         ]
                 ]
@@ -203,8 +345,6 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                         + SScrollBox::Slot()
                                         [
                                             SAssignNew(ScriptPanel, SGASScriptPanel)
-                                                .OnParagraphClicked(FOnParagraphClicked::CreateSP(
-                                                    this, &SGAS_ScriptTab::OnScriptParagraphClicked))
 
                                         ]
                                 ]
@@ -238,17 +378,41 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                 });
         }
 
+        // ------------------------------------------------------------
+        // Wire paragraph click → edit handling
+        // ------------------------------------------------------------
+        if (ScriptPanel.IsValid())
+        {
+            ScriptPanel->OnParagraphClicked =
+                FOnParagraphClicked::CreateSP(
+                    this, &SGAS_ScriptTab::OnScriptParagraphClicked
+                );
+
+        }
 
 
-        
+        RebuildShotList();
+        LoadScriptFromJsonIfExists();
 
-    RebuildShotList();
+        if (ScriptPanel.IsValid())
+        {
+            ScriptPanel->SetScript(&CurrentScript);
+
+            TArray<FRenderedParagraph> Rendered =
+                ScriptLayoutEngine::LayoutScript(
+                    CurrentScript.Blocks,
+                    CachedScriptPanelWidth,
+                    CurrentScript.UserPageBreaks
+                );
+
+            ScriptPanel->SetRenderedScript(Rendered);
+        }
+
+        RebuildShotList();
+
+
 }
 
-
-
-
-// Simple helpers to convert paragraph type to/from string for JSON
 
 static FString ParagraphTypeToString(EGASBlockType Type)
 {
@@ -290,7 +454,10 @@ static FString GetScriptJsonPath()
 FReply SGAS_ScriptTab::OnImportScript()
 {
     IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-    if (!DesktopPlatform) return FReply::Handled();
+    if (!DesktopPlatform)
+    {
+        return FReply::Handled();
+    }
 
     TArray<FString> OutFiles;
 
@@ -307,23 +474,6 @@ FReply SGAS_ScriptTab::OnImportScript()
         OutFiles
     );
 
-    // ------------------------------------------------------------
-    // Create a new project and hand ownership to the window
-    // ------------------------------------------------------------
-    UGASPreProProject* NewProject = NewObject<UGASPreProProject>();
-
-    // Transfer script blocks into the project (authoritative copy)
-    NewProject->ScriptBlocks = LoadedScript.Blocks;
-
-    // Freshly imported project is clean
-    NewProject->ClearDirty();
-
-    // Notify owner (SGAS_TestWindow)
-    if (OnProjectLoaded.IsBound())
-    {
-        OnProjectLoaded.Execute(NewProject);
-    }
-
     if (bOpened && OutFiles.Num() > 0)
     {
         LoadScriptFromFDX(OutFiles[0]);
@@ -331,6 +481,7 @@ FReply SGAS_ScriptTab::OnImportScript()
 
     return FReply::Handled();
 }
+
 
 // ============================================================================
 // SAVE SCRIPT — BUTTON HANDLER
@@ -353,10 +504,13 @@ FReply SGAS_ScriptTab::OnToggleSceneNumbers()
     if (ScriptPanel.IsValid())
     {
         ScriptPanel->SetShowSceneNumbers(bShowSceneNumbers);
+
+        ScriptPanel->RebuildLayout();
     }
 
     return FReply::Handled();
 }
+
 
 
 FReply SGAS_ScriptTab::OnToggleShotMarking()
@@ -370,8 +524,6 @@ FReply SGAS_ScriptTab::OnToggleShotMarking()
     return FReply::Handled();
 }
 
-
-
 // ============================================================================
 // LOAD SCRIPT (.FDX) — parse, layout, send to panel
 // ============================================================================
@@ -380,7 +532,8 @@ void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
     // --------------------------------------------------------------------
     // 0. Confirm overwrite if script already loaded
     // --------------------------------------------------------------------
-    if (bHasLoadedScript)
+    if (CurrentScript.Blocks.Num() > 0)
+
     {
         const FText Title = FText::FromString("Replace script?");
         const FText Message = FText::FromString(
@@ -388,21 +541,23 @@ void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
             "This will overwrite the current script, page breaks, and markers."
         );
 
-        EAppReturnType::Type Response =
-            FMessageDialog::Open(EAppMsgType::YesNo, Message, &Title);
-
-        if (Response == EAppReturnType::No)
+        if (FMessageDialog::Open(EAppMsgType::YesNo, Message, &Title)
+            == EAppReturnType::No)
+        {
             return;
+        }
     }
 
     // --------------------------------------------------------------------
-    // 1. Clear previous script state COMPLETELY
+    // 1. Clear previous script state
     // --------------------------------------------------------------------
-    LoadedScript = FGASScript();                 // wipe JSON model
-    ScriptPanel->SetScript(&LoadedScript);       // clear panel reference
-    ScriptPanel->SetRenderedScript({});          // wipe rendering
-    ScriptPanel->SetShotMarkers({});             // wipe markers
-    RebuildShotList();                           // clear shot list UI
+    if (ScriptPanel.IsValid())
+    {
+        ScriptPanel->SetRenderedScript({});
+        ScriptPanel->SetShotMarkers({});
+    }
+
+    RebuildShotList();
 
     // --------------------------------------------------------------------
     // 2. Import FDX into a temporary FGASScript
@@ -414,15 +569,33 @@ void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
         return;
     }
 
-    // Store imported script as current JSON model
-    LoadedScript = Script;
-    LoadedScript.UserPageBreakParagraphs.Empty();
-    ScriptPanel->SetScript(&LoadedScript);
-    
+
+    // Overwrite current in-memory script (JSON-authoritative)
+    CurrentScript = FGASScript();
 
 
     // --------------------------------------------------------------------
-    // 3. Determine panel width for layout
+    // 4. Populate authoritative in-memory script (JSON-backed)
+    // --------------------------------------------------------------------
+    CurrentScript = Script;
+    CurrentScript.UserPageBreaks.Empty();
+
+    if (ScriptPanel.IsValid())
+    {
+        ScriptPanel->SetScript(&CurrentScript);
+    }
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("AFTER IMPORT: Blocks=%d  PageBreaks=%d"),
+        CurrentScript.Blocks.Num(),
+        CurrentScript.UserPageBreaks.Num()
+    );
+
+
+    // --------------------------------------------------------------------
+    // 5. Layout script
     // --------------------------------------------------------------------
     float PanelWidth = 1100.f;
     if (ScriptPanel.IsValid())
@@ -432,51 +605,116 @@ void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
             PanelWidth = 1100.f;
     }
 
-    // --------------------------------------------------------------------
-    // 4. Layout script using NEW engine
-    //     NOTE: On first load, UserPageBreakParagraphs is EMPTY
-    //     so auto-page-breaks will be applied normally.
-    // --------------------------------------------------------------------
     TArray<FRenderedParagraph> Rendered =
         ScriptLayoutEngine::LayoutScript(
-            LoadedScript.Blocks,
+            CurrentScript.Blocks,
             PanelWidth,
-            LoadedScript.UserPageBreakParagraphs,
-            LoadedScript.SuppressedAutoBreakBlockIds
+            CurrentScript.UserPageBreaks
         );
 
 
-    // Send paragraphs to UI
     ScriptPanel->SetRenderedScript(Rendered);
 
     // --------------------------------------------------------------------
-    // 5. Clear markers on load (FDX has none)
+    // 6. Clear markers (FDX has none)
     // --------------------------------------------------------------------
-    LoadedScript.Markers.Empty();
-    ScriptPanel->SetShotMarkers(LoadedScript.Markers);
 
-    // Rebuild right-side UI
     RebuildShotList();
 
-    UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: LoadScriptFromFDX finished, marking dirty"));
-
+    UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: LoadScriptFromFDX finished"));
     MarkScriptDirty();
 
 
-    // --------------------------------------------------------------------
-    // 6. Save JSON for persistence
-    // --------------------------------------------------------------------
-    //SaveScriptToJson();
-
-    // --------------------------------------------------------------------
-    // 7. Mark script as loaded
-    // --------------------------------------------------------------------
-    bHasLoadedScript = true;
 
     UE_LOG(LogTemp, Log, TEXT("Successfully loaded script from FDX: %s"), *FilePath);
-
-
 }
+
+
+
+FReply SGAS_ScriptTab::OnGeneratePageBreaks()
+{
+    UE_LOG(LogTemp, Warning, TEXT("Generate Page Breaks clicked"));
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("Blocks=%d  ExistingPageBreaks=%d"),
+        CurrentScript.Blocks.Num(),
+        CurrentScript.UserPageBreaks.Num());
+
+
+
+    // Safety: button should be disabled if breaks exist
+    if (CurrentScript.UserPageBreaks.Num() > 0)
+    {
+        return FReply::Handled();
+    }
+
+    // ------------------------------------------------------------
+    // Generate approximate page breaks (one-time bootstrap)
+    // ------------------------------------------------------------
+    {
+        int32 LinesOnPage = 0;
+        const int32 ApproxLinesPerPage = 55;
+
+        // Paragraph index in vertical flow (ignores right-side dual dialogue)
+        int32 FlowParagraphIndex = -1;
+
+        for (int32 i = 0; i < CurrentScript.Blocks.Num(); ++i)
+        {
+            const FGASBlock& Block = CurrentScript.Blocks[i];
+
+            // Ignore right-side dual dialogue (does not advance vertical flow)
+            if (Block.bIsDualDialogue && Block.DualRole == EGASDualRole::Right)
+            {
+                continue;
+            }
+
+            // This block counts as a paragraph in vertical flow
+            FlowParagraphIndex++;
+
+            const int32 EstimatedLines = 3;
+            LinesOnPage += EstimatedLines;
+
+            // Insert page break AFTER previous paragraph
+            if (LinesOnPage >= ApproxLinesPerPage && FlowParagraphIndex > 0)
+            {
+                UE_LOG(LogTemp, Warning,
+                    TEXT("PAGE BREAK TRIGGER: FlowParagraphIndex=%d LinesOnPage=%d"),
+                    FlowParagraphIndex,
+                    LinesOnPage);
+
+                FGASUserPageBreak NewBreak;
+                NewBreak.AfterParagraphIndex = FlowParagraphIndex - 1;
+
+                CurrentScript.UserPageBreaks.Add(NewBreak);
+
+                UE_LOG(LogTemp, Warning,
+                    TEXT("PAGE BREAK ADDED: AfterParagraphIndex=%d  TotalNow=%d"),
+                    NewBreak.AfterParagraphIndex,
+                    CurrentScript.UserPageBreaks.Num());
+
+                LinesOnPage = 0;
+            }
+        }
+    }
+
+    // Force relayout / redraw using new page breaks
+    if (ScriptPanel.IsValid())
+    {
+        TArray<FRenderedParagraph> Rendered =
+            ScriptLayoutEngine::LayoutScript(
+                CurrentScript.Blocks,
+                CachedScriptPanelWidth,
+                CurrentScript.UserPageBreaks
+            );
+
+        ScriptPanel->SetRenderedScript(Rendered);
+    }
+
+
+
+    return FReply::Handled();
+}
+
 
 void SGAS_ScriptTab::MarkScriptDirty()
 {
@@ -507,58 +745,64 @@ bool SGAS_ScriptTab::IsScriptDirty() const
 
 void SGAS_ScriptTab::ClearScript()
 {
-    LoadedScript = FGASScript();
+    // Clear authoritative in-memory script
+    CurrentScript = FGASScript();
 
     if (ScriptPanel.IsValid())
     {
-        ScriptPanel->SetScript(&LoadedScript);
+        ScriptPanel->SetScript(&CurrentScript);
         ScriptPanel->SetRenderedScript({});
-        ScriptPanel->SetShotMarkers({});
     }
 
-    // Clear any manual page breaks
-    LoadedScript.UserPageBreakParagraphs.Empty();
-
     RebuildShotList();
-    bHasLoadedScript = false;
 
     UE_LOG(LogTemp, Warning, TEXT("SCRIPT CLEARED"));
 }
+
 
 FReply SGAS_ScriptTab::OnToggleEditMode()
 {
     bIsEditMode = !bIsEditMode;
 
+    UE_LOG(LogTemp, Error,
+        TEXT("EDIT MODE TOGGLED: %s"),
+        bIsEditMode ? TEXT("ON") : TEXT("OFF")
+    );
+
     if (ScriptPanel.IsValid())
     {
         ScriptPanel->SetEditMode(bIsEditMode);
     }
-
-    UE_LOG(LogTemp, Warning,
-        TEXT("SCRIPT EDIT MODE: %s"),
-        bIsEditMode ? TEXT("ON") : TEXT("OFF"));
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("EDIT MODE: ScriptPanel INVALID"));
+    }
 
     return FReply::Handled();
 }
 
 
+
 // ============================================================================
 // PARAGRAPH CLICKED — shot marking logic
 // ============================================================================
-void SGAS_ScriptTab::OnScriptParagraphClicked(int32 ParagraphIndex)
-{// Make sure index is valid
-    if (!LoadedScript.Blocks.IsValidIndex(ParagraphIndex))
+void SGAS_ScriptTab::OnScriptParagraphClicked(int32 BlockIndex)
+{
+    UE_LOG(LogTemp, Error, TEXT("SCRIPT TAB: Paragraph clicked index=%d"), BlockIndex);
+
+    // Make sure index is valid
+    if (!CurrentScript.Blocks.IsValidIndex(BlockIndex))
         return;
 
-    const FGASBlock& Block = LoadedScript.Blocks[ParagraphIndex];
-
-    // Shot marking logic
+    // -------------------------------------------------
+    // SHOT MARKING MODE
+    // -------------------------------------------------
     if (bIsMarkingShot)
     {
         if (PendingStartParagraph == INDEX_NONE)
         {
             // selecting start of shot
-            PendingStartParagraph = ParagraphIndex;
+            PendingStartParagraph = BlockIndex;
         }
         else
         {
@@ -567,26 +811,37 @@ void SGAS_ScriptTab::OnScriptParagraphClicked(int32 ParagraphIndex)
             Marker.Id = FGuid::NewGuid().ToString();
             Marker.MarkerType = EGASMarkerType::ShotMarker;
 
-            // temporary shot ID until UI supports naming
-            Marker.ShotId = FString::Printf(TEXT("SHOT_%d"), LoadedScript.Markers.Num() + 1);
+            Marker.ShotId = FString::Printf(
+                TEXT("SHOT_%d"),
+                CurrentScript.Markers.Num() + 1
+            );
 
-            // Map start block → BlockId
-            Marker.BlockId = LoadedScript.Blocks[PendingStartParagraph].Id;
+            Marker.BlockId = CurrentScript.Blocks[PendingStartParagraph].Id;
 
-            // Map end block → store as metadata
-            Marker.Metadata.Add("EndBlockId", LoadedScript.Blocks[ParagraphIndex].Id);
+            Marker.Metadata.Add(
+                "EndBlockId",
+                CurrentScript.Blocks[BlockIndex].Id
+            );
 
-            LoadedScript.Markers.Add(Marker);
+            CurrentScript.Markers.Add(Marker);
 
             PendingStartParagraph = INDEX_NONE;
 
-            //SaveScriptToJson();
-
-            // Update panel UI
-            ScriptPanel->SetShotMarkers(LoadedScript.Markers);
+            ScriptPanel->SetShotMarkers(CurrentScript.Markers);
         }
+
+        return; // 🚨 IMPORTANT: stop here in shot mode
+    }
+
+    // -------------------------------------------------
+    // EDIT MODE (THIS WAS MISSING)
+    // -------------------------------------------------
+    if (ScriptPanel.IsValid())
+    {
+        ScriptPanel->TryEditParagraph(BlockIndex);
     }
 }
+
 
 
 FReply SGAS_ScriptTab::OnClearScriptClicked()
@@ -603,7 +858,7 @@ void SGAS_ScriptTab::RebuildShotList()
 {
     ShotList.Empty();
 
-    for (const FGASMarker& Marker : LoadedScript.Markers)
+    for (const FGASMarker& Marker : CurrentScript.Markers)
     {
         if (Marker.MarkerType != EGASMarkerType::ShotMarker)
             continue;
@@ -612,14 +867,14 @@ void SGAS_ScriptTab::RebuildShotList()
         Entry.ShotType = Marker.ShotId;
 
         // Convert BlockId → paragraph index
-        int32 StartIndex = LoadedScript.Blocks.IndexOfByPredicate(
+        int32 StartIndex = CurrentScript.Blocks.IndexOfByPredicate(
             [&](const FGASBlock& B) { return B.Id == Marker.BlockId; });
 
         int32 EndIndex = StartIndex;
         if (Marker.Metadata.Contains("EndBlockId"))
         {
-            FString EndId = Marker.Metadata["EndBlockId"];
-            EndIndex = LoadedScript.Blocks.IndexOfByPredicate(
+            const FString& EndId = Marker.Metadata["EndBlockId"];
+            EndIndex = CurrentScript.Blocks.IndexOfByPredicate(
                 [&](const FGASBlock& B) { return B.Id == EndId; });
         }
 
@@ -632,16 +887,15 @@ void SGAS_ScriptTab::RebuildShotList()
 
 
 
-
 void SGAS_ScriptTab::SaveScriptToJson()
 {
     UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: SaveScriptToJson CALLED"));
 
-    FString JsonPath = FPaths::ProjectSavedDir() / TEXT("Scripts/CurrentScript.gasjson");
+    FString JsonPath = GetAuthoritativeScriptJsonPath();
 
     // Build JSON from FGASScript
     FString OutputString;
-    if (!FJsonObjectConverter::UStructToJsonObjectString(LoadedScript, OutputString))
+    if (!FJsonObjectConverter::UStructToJsonObjectString(CurrentScript, OutputString))
     {
         UE_LOG(LogTemp, Error, TEXT("Failed to convert script to JSON."));
         return;
@@ -666,76 +920,6 @@ void SGAS_ScriptTab::SaveScriptToJson()
     bIsScriptDirty = false;
 }
 
-
-
-
-void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
-{
-    FString JsonPath = FPaths::ProjectSavedDir() / TEXT("Scripts/CurrentScript.gasjson");
-
-    if (!FPaths::FileExists(JsonPath))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("No existing script JSON found."));
-        return;
-    }
-
-    FString JsonText;
-    if (!FFileHelper::LoadFileToString(JsonText, *JsonPath))
-    {
-        UE_LOG(LogTemp, Error, TEXT("Failed to load JSON file: %s"), *JsonPath);
-        return;
-    }
-
-    FGASScript Loaded;
-    if (!FJsonObjectConverter::JsonObjectStringToUStruct(JsonText, &Loaded, 0, 0))
-    {
-        UE_LOG(LogTemp, Error, TEXT("JSON parse failed"));
-        return;
-    }
-
-    // Store into tab
-    LoadedScript = Loaded;
-    ScriptPanel->SetScript(&LoadedScript);
-
-    // -------------------------
-    // Determine panel width for layout
-    // -------------------------
-    float PanelWidth = 1100.f;
-
-    if (ScriptPanel.IsValid())
-    {
-        PanelWidth = ScriptPanel->GetCachedGeometry().GetLocalSize().X;
-
-        // Fallback if panel not initialized yet
-        if (PanelWidth < 200.f)
-            PanelWidth = 1100.f;
-    }
-
-
-    // Convert Blocks to Rendered Paragraphs
-    TArray<FRenderedParagraph> Rendered =
-        ScriptLayoutEngine::LayoutScript(
-            LoadedScript.Blocks,
-            PanelWidth,
-            LoadedScript.UserPageBreakParagraphs,
-            LoadedScript.SuppressedAutoBreakBlockIds
-        );
-
-
-
-    ScriptPanel->SetRenderedScript(Rendered);
-
-
-
-    // Restore markers
-    ScriptPanel->SetShotMarkers(Loaded.Markers);
-
-    // Rebuild UI side panel
-    RebuildShotList();
-
-    UE_LOG(LogTemp, Log, TEXT("Loaded script JSON successfully."));
-}
-
 FReply SGAS_ScriptTab::OnClearScriptConfirm()
 {
     const FText DialogText = FText::FromString(
@@ -757,5 +941,84 @@ FReply SGAS_ScriptTab::OnClearScriptConfirm()
     }
 
     return FReply::Handled();
+}
+
+
+FReply SGAS_ScriptTab::OnToggleAddMode()
+{
+    bIsAddMode = !bIsAddMode;
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("ADD MODE TOGGLED: %s"),
+        bIsAddMode ? TEXT("ON") : TEXT("OFF")
+    );
+
+    if (ScriptPanel.IsValid())
+    {
+        ScriptPanel->SetAddMode(bIsAddMode);
+    }
+
+    return FReply::Handled();
+}
+
+
+
+void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
+{
+    const FString ScriptPath = GetAuthoritativeScriptJsonPath();
+
+    UE_LOG(LogTemp, Warning, TEXT("[GAS] Looking for script JSON at: %s"), *ScriptPath);
+
+    if (!FPaths::FileExists(ScriptPath))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[GAS] No saved script JSON found."));
+        return;
+    }
+
+    FString JsonString;
+    if (!FFileHelper::LoadFileToString(JsonString, *ScriptPath))
+    {
+        UE_LOG(LogTemp, Error, TEXT("[GAS] Failed to read script JSON: %s"), *ScriptPath);
+        return;
+    }
+
+    FGASScript Loaded;
+    if (!FJsonObjectConverter::JsonObjectStringToUStruct(JsonString, &Loaded, 0, 0))
+    {
+        UE_LOG(LogTemp, Error, TEXT("[GAS] Failed to parse script JSON: %s"), *ScriptPath);
+        return;
+    }
+
+    CurrentScript = MoveTemp(Loaded);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("[GAS] Loaded script JSON OK: Blocks=%d PageBreaks=%d Markers=%d"),
+        CurrentScript.Blocks.Num(),
+        CurrentScript.UserPageBreaks.Num(),
+        CurrentScript.Markers.Num()
+    );
+
+    if (ScriptPanel.IsValid())
+    {
+        ScriptPanel->SetScript(&CurrentScript);
+
+        TArray<FRenderedParagraph> Rendered =
+            ScriptLayoutEngine::LayoutScript(
+                CurrentScript.Blocks,
+                CachedScriptPanelWidth,
+                CurrentScript.UserPageBreaks
+            );
+
+        ScriptPanel->SetRenderedScript(Rendered);
+    }
+
+}
+
+
+FString SGAS_ScriptTab::GetAuthoritativeScriptJsonPath() const
+{
+    const FString Dir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("GAS"));
+    IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
+    return FPaths::Combine(Dir, TEXT("CurrentScript.gasjson"));
 }
 
