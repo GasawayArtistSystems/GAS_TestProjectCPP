@@ -174,14 +174,9 @@ struct FGASScriptUndoSnapshot
     TArray<FGASMarker> Markers;
 
     UPROPERTY()
-    TArray<int32> UserPageBreakParagraphs;
-
-    UPROPERTY()
-    TArray<int32> SuppressedAutoBreaks;
-
-    UPROPERTY()
-    TArray<FString> SuppressedAutoBreakBlockIds;
+    TArray<FGASUserPageBreak> UserPageBreaks;
 };
+
 
 
 // ------------------------------------------------------------
@@ -215,6 +210,11 @@ struct FGASScript
 
     UPROPERTY()
     TArray<FGASScriptUndoSnapshot> RedoStack;
+
+    // ------------------------------------------------------------
+    // Undo Snapshot Capture
+    // ------------------------------------------------------------
+    void CaptureUndoSnapshot();
 
 
 
