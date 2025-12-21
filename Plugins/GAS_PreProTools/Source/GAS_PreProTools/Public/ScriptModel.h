@@ -77,9 +77,6 @@ struct FGASBlock
     float IndentRight = 0.f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bForcedPageBreak = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TMap<FString, FString> Metadata;
 
     // ------------------------------------------------------------
@@ -142,6 +139,29 @@ struct FGASMarker
 };
 
 // ------------------------------------------------------------
+// USER PAGE BREAK (AUTHORITATIVE)
+// ------------------------------------------------------------
+USTRUCT(BlueprintType)
+struct FGASUserPageBreak
+{
+    GENERATED_BODY()
+
+    // Page break occurs AFTER this paragraph index (block index in Blocks array)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 AfterParagraphIndex = INDEX_NONE;
+
+    FGASUserPageBreak() {}
+
+    bool operator==(const FGASUserPageBreak& Other) const
+    {
+        return AfterParagraphIndex == Other.AfterParagraphIndex;
+    }
+};
+
+
+
+
+// ------------------------------------------------------------
 // FULL SCRIPT CONTAINER
 // ------------------------------------------------------------
 USTRUCT(BlueprintType)
@@ -162,14 +182,7 @@ struct FGASScript
     TArray<FGASMarker> Markers;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<int32> UserPageBreakParagraphs;
-
-    UPROPERTY()
-    TArray<int32> SuppressedAutoBreaks;
-
-    UPROPERTY()
-    TArray<FString> SuppressedAutoBreakBlockIds;
-
+    TArray<FGASUserPageBreak> UserPageBreaks;
 
 
     FGASScript() {}

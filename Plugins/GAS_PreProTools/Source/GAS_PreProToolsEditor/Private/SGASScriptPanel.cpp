@@ -7,13 +7,16 @@
 #include "ScriptFormatRules.h"
 #include "SlateOptMacros.h"
 #include "GAS_PreProToolsStyle.h"
+#include "Modules/ModuleManager.h"
+#include "GAS_PreProToolsEditorModule.h"
+
 #include "ScriptLayoutEngine.h"
 #include "Rendering/DrawElements.h"
 #include "Framework/Application/SlateApplication.h"
 
 #include "SlateBasics.h"
 #include "SlateExtras.h"
-
+#include "Containers/Ticker.h"
 
 
 
@@ -22,8 +25,10 @@
 // =============================================================
 void SGASScriptPanel::Construct(const FArguments& InArgs)
 {
-    SourceScript = InArgs._SourceScript;
+
     OnParagraphClicked = InArgs._OnParagraphClicked;
+
+    SetCanTick(true);
 
     bNeedsRedraw = true;
 
@@ -53,9 +58,9 @@ void SGASScriptPanel::RebuildLayout()
         ScriptLayoutEngine::LayoutScript(
             SourceScript->Blocks,
             PanelWidth,
-            SourceScript->UserPageBreakParagraphs,
-            SourceScript->SuppressedAutoBreakBlockIds
+            SourceScript->UserPageBreaks
         );
+
 
     SetRenderedScript(NewRendered);   // updates RenderedParagraphs + bNeedsRedraw
 
@@ -64,6 +69,12 @@ void SGASScriptPanel::RebuildLayout()
         OnRequestFullRedraw.Execute();
     }
 
+}
+
+void SGASScriptPanel::SetScript(FGASScript* InScript)
+{
+    SourceScript = InScript;
+    bNeedsRedraw = true;
 }
 
 
@@ -78,15 +89,6 @@ void SGASScriptPanel::SetRenderedScript(const TArray<FRenderedParagraph>& InPara
 
 
 // =============================================================
-//  SetScript
-// =============================================================
-void SGASScriptPanel::SetScript(FGASScript* InScript)
-{
-    SourceScript = InScript;
-}
-
-
-// =============================================================
 //  ComputeDesiredSize
 // =============================================================
 FVector2D SGASScriptPanel::ComputeDesiredSize(float LayoutScaleMultiplier) const
@@ -95,9 +97,8 @@ FVector2D SGASScriptPanel::ComputeDesiredSize(float LayoutScaleMultiplier) const
 }
 
 // =====================================================
-// SCRIPT EDIT PIPELINE (single entry point for edits)
+// SCRIPT EDIT PIPELINE
 // =====================================================
-
 
 void SGASScriptPanel::ApplyScriptEdit(const FGASScriptEdit& Edit)
 {
@@ -107,21 +108,67 @@ void SGASScriptPanel::ApplyScriptEdit(const FGASScriptEdit& Edit)
     if (Edit.ParagraphIndex == INDEX_NONE)
         return;
 
+    auto HasPageBreakAfterParagraph = [&](int32 ParagraphIndex) -> bool
+        {
+            for (const FGASUserPageBreak& PB : SourceScript->UserPageBreaks)
+            {
+                if (PB.AfterParagraphIndex == ParagraphIndex)
+                    return true;
+            }
+            return false;
+        };
+
+
+
     switch (Edit.Type)
     {
     case EGASScriptEditType::SetPageBreak:
-        SourceScript->UserPageBreakParagraphs.AddUnique(Edit.ParagraphIndex);
-        break;
+    {
+        const int32 ParagraphIndex = Edit.ParagraphIndex;
 
-    case EGASScriptEditType::ClearPageBreak:
-        SourceScript->UserPageBreakParagraphs.Remove(Edit.ParagraphIndex);
+        if (ParagraphIndex != INDEX_NONE)
+        {
+            if (!HasPageBreakAfterParagraph(ParagraphIndex))
+            {
+                FGASUserPageBreak NewBreak;
+                NewBreak.AfterParagraphIndex = ParagraphIndex;
+
+                SourceScript->UserPageBreaks.Add(NewBreak);
+            }
+        }
         break;
     }
 
+
+
+    case EGASScriptEditType::ClearPageBreak:
+    {
+        const int32 ParagraphIndex = Edit.ParagraphIndex;
+
+        if (ParagraphIndex != INDEX_NONE)
+        {
+            SourceScript->UserPageBreaks.RemoveAll(
+                [&](const FGASUserPageBreak& PB)
+                {
+                    return PB.AfterParagraphIndex == ParagraphIndex;
+                }
+            );
+        }
+        break;
+    }
+
+
+    default:
+        break;
+    }
+
+
+
     // Always re-layout after edits so visuals match JSON
     RebuildLayout();
-}
+    Invalidate(EInvalidateWidget::LayoutAndVolatility);
 
+}
 
 void SGASScriptPanel::ApplyTextEdit(
     const FString& BlockId,
@@ -150,6 +197,1015 @@ void SGASScriptPanel::ApplyTextEdit(
 }
 
 
+// =============================================================
+//  Edit Dialog
+// =============================================================
+
+//void SGASScriptPanel::OpenEditDialog(int32 ParagraphIndex)
+//{
+//    if (!RenderedParagraphs.IsValidIndex(ParagraphIndex))
+//        return;
+//
+//    const FRenderedParagraph& P = RenderedParagraphs[ParagraphIndex];
+//
+//    // ------------------------------------------------------------
+//    // Capture original text
+//    // ------------------------------------------------------------
+//    FString OriginalText = GetSourceTextForBlock(P.BlockId);
+//
+//    // We store edited text here before commit
+//    TSharedRef<FString> EditedText =
+//        MakeShared<FString>(OriginalText);
+//
+//    // ------------------------------------------------------------
+//    // Build modal window
+//    // ------------------------------------------------------------
+//    TSharedRef<SWindow> EditWindow = SNew(SWindow)
+//        .Title(FText::FromString(TEXT("Edit Paragraph")))
+//        .ClientSize(FVector2D(600.f, 400.f))
+//        .SupportsMinimize(false)
+//        .SupportsMaximize(false);
+//
+//    EditWindow->SetContent(
+//        SNew(SVerticalBox)
+//
+//        // -----------------------------
+//        // Text editor
+//        // -----------------------------
+//        +SVerticalBox::Slot()
+//        .FillHeight(1.f)
+//        .Padding(8.f)
+//        [
+//            SNew(SMultiLineEditableTextBox)
+//                .Text(FText::FromString(OriginalText))
+//                .OnTextChanged_Lambda(
+//                    [EditedText](const FText& NewText)
+//                    {
+//                        *EditedText = NewText.ToString();
+//                    })
+//        ]
+//
+//    // -----------------------------
+//    // Buttons
+//    // -----------------------------
+//    +SVerticalBox::Slot()
+//        .AutoHeight()
+//        .Padding(8.f)
+//        [
+//            SNew(SHorizontalBox)
+//
+//                + SHorizontalBox::Slot()
+//                .HAlign(HAlign_Right)
+//                .FillWidth(1.f)
+//                [
+//                    SNew(SButton)
+//                        .Text(FText::FromString(TEXT("Cancel")))
+//                        .OnClicked_Lambda(
+//                            [EditWindow]()
+//                            {
+//                                EditWindow->RequestDestroyWindow();
+//                                return FReply::Handled();
+//                            })
+//                ]
+//
+//            + SHorizontalBox::Slot()
+//                .HAlign(HAlign_Right)
+//                .AutoWidth()
+//                .Padding(8.f, 0.f)
+//                [
+//                    SNew(SButton)
+//                        .Text(FText::FromString(TEXT("OK")))
+//                        .OnClicked_Lambda(
+//                            [this, EditWindow, P, EditedText]()
+//                            {
+//                                ApplyTextEdit(P.BlockId, *EditedText);
+//
+//                                // If this was Add Character+Dialogue, open Dialogue next
+//                                if (PendingDialogueAfterCharacterIndex != INDEX_NONE)
+//                                {
+//                                    const int32 DialogueIndex = PendingDialogueAfterCharacterIndex;
+//                                    PendingDialogueAfterCharacterIndex = INDEX_NONE;
+//
+//                                    FTSTicker::GetCoreTicker().AddTicker(
+//                                        FTickerDelegate::CreateLambda(
+//                                            [this, DialogueIndex](float)
+//                                            {
+//                                                OpenEditDialogueDialog(DialogueIndex);
+//                                                return false;
+//                                            }
+//                                        )
+//                                    );
+//
+//
+//
+//                                }
+//
+//                                EditWindow->RequestDestroyWindow();
+//                                return FReply::Handled();
+//                            })
+//
+//                ]
+//        ]
+//        );
+//
+//    // ------------------------------------------------------------
+//    // Show modal
+//    // ------------------------------------------------------------
+//    FSlateApplication::Get().AddWindow(EditWindow);
+//}
+
+
+int32 SGASScriptPanel::HitTestAddGutter(float MouseY) const
+{
+    if (RenderedParagraphs.Num() < 1)
+    {
+        return INDEX_NONE;
+    }
+
+    constexpr float GutterTolerance = 12.f;
+
+    for (int32 i = 0; i < RenderedParagraphs.Num() - 1; ++i)
+    {
+        const FRenderedParagraph& P = RenderedParagraphs[i];
+
+        const float GutterY =
+            P.TopY + P.Height + (ScriptFormat::LineHeight * 0.25f);
+
+        if (FMath::Abs(MouseY - GutterY) <= GutterTolerance)
+        {
+            return P.ParagraphIndex; // insert AFTER this paragraph
+        }
+    }
+
+    return INDEX_NONE;
+}
+
+
+
+void SGASScriptPanel::TryEditParagraph(int32 BlockIndex)
+{
+    UE_LOG(LogTemp, Error, TEXT("TRY EDIT CALLED: BlockIndex=%d"), BlockIndex);
+
+    if (!SourceScript)
+    {
+        UE_LOG(LogTemp, Error, TEXT("SCRIPT ASSET IS NULL"));
+        return;
+    }
+
+    if (!SourceScript->Blocks.IsValidIndex(BlockIndex))
+    {
+        UE_LOG(LogTemp, Error, TEXT(
+            "INVALID BLOCK INDEX %d (Blocks.Num=%d)"),
+            BlockIndex,
+            SourceScript->Blocks.Num()
+        );
+        return;
+    }
+
+    FGASBlock& Block = SourceScript->Blocks[BlockIndex];
+
+    UE_LOG(LogTemp, Error, TEXT("BLOCK TYPE = %d"), (int32)Block.Type);
+
+    switch (Block.Type)
+    {
+    case EGASBlockType::Action:
+        UE_LOG(LogTemp, Error, TEXT("OPEN ACTION EDIT"));
+        OpenEditActionDialog(BlockIndex);
+        break;
+
+    case EGASBlockType::Character:
+        UE_LOG(LogTemp, Error, TEXT("OPEN CHARACTER EDIT"));
+        OpenEditCharacterDialog(BlockIndex);
+        break;
+
+    case EGASBlockType::Dialogue:
+        UE_LOG(LogTemp, Error, TEXT("OPEN DIALOGUE EDIT"));
+        OpenEditDialogueDialog(BlockIndex);
+        break;
+
+    default:
+        UE_LOG(LogTemp, Error, TEXT("UNSUPPORTED BLOCK TYPE"));
+        break;
+    }
+}
+
+void SGASScriptPanel::OpenEditActionDialog(int32 BlockIndex)
+{
+
+    if (!SourceScript || !SourceScript->Blocks.IsValidIndex(BlockIndex))
+    {
+        UE_LOG(LogTemp, Error, TEXT("OpenEditActionDialog: SourceScript null or invalid index %d"), BlockIndex);
+        return;
+    }
+
+    FGASBlock& Block = SourceScript->Blocks[BlockIndex];
+
+
+    TSharedRef<SWindow> EditWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Edit Action")))
+        .ClientSize(FVector2D(600.f, 300.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    TSharedPtr<SMultiLineEditableTextBox> TextBox;
+
+    EditWindow->SetContent(
+        SNew(SBorder)
+        [
+            SNew(SVerticalBox)
+
+                // ----------------------------------------------------
+                // Text box
+                // ----------------------------------------------------
+                +SVerticalBox::Slot()
+                .FillHeight(1.f)
+                .Padding(8.f)
+                [
+                    SAssignNew(EditTextBox, SMultiLineEditableTextBox)
+                        .Text(FText::FromString(Block.Text))
+                        .OnTextChanged_Lambda([this](const FText& NewText)
+                            {
+                                CachedEditText = NewText;
+                            })
+                ]
+
+            // ----------------------------------------------------
+            // Buttons
+            // ----------------------------------------------------
+            +SVerticalBox::Slot()
+                .AutoHeight()
+                .HAlign(HAlign_Right)
+                .Padding(8.f)
+                [
+                    SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("Cancel")))
+                                .OnClicked_Lambda([this, EditWindow]()
+                                    {
+                                        OnEditCancelled();
+                                        EditWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("OK")))
+                                .OnClicked_Lambda([this, EditWindow, BlockIndex]()
+                                    {
+                                        if (SourceScript && SourceScript->Blocks.IsValidIndex(BlockIndex))
+                                        {
+                                            SourceScript->Blocks[BlockIndex].Text = CachedEditText.ToString();
+
+                                            // mark dirty so the UI shows * and user knows to save JSON
+                                            if (OnScriptMutated.IsBound())
+                                            {
+                                                OnScriptMutated.Execute();
+                                            }
+
+                                            RebuildLayout();
+                                            Invalidate(EInvalidateWidget::LayoutAndVolatility);
+                                        }
+
+
+                                        EditWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+                        ]
+                ]
+        ]
+    );
+
+
+    FSlateApplication::Get().AddModalWindow(
+        EditWindow,
+        FSlateApplication::Get().GetActiveTopLevelWindow()
+    );
+
+    FSlateApplication::Get().SetKeyboardFocus(EditTextBox);
+
+}
+
+void SGASScriptPanel::OpenEditCharacterDialog(int32 BlockIndex)
+{
+    if (!SourceScript  || !SourceScript ->Blocks.IsValidIndex(BlockIndex))
+    {
+        return;
+    }
+
+    FGASBlock& Block = SourceScript ->Blocks[BlockIndex];
+
+    TSharedRef<SWindow> EditWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Edit Character")))
+        .ClientSize(FVector2D(400.f, 160.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    CachedEditText = FText::FromString(Block.Text);
+
+    EditWindow->SetContent(
+        SNew(SBorder)
+        .Padding(8.f)
+        [
+            SNew(SVerticalBox)
+
+                + SVerticalBox::Slot()
+                .FillHeight(1.f)
+                [
+                    SAssignNew(EditTextBox, SMultiLineEditableTextBox)
+                        .Text(CachedEditText)
+                        .OnTextChanged_Lambda([this](const FText& NewText)
+                            {
+                                CachedEditText = NewText;
+                            })
+                ]
+
+            + SVerticalBox::Slot()
+                .AutoHeight()
+                .HAlign(HAlign_Right)
+                .Padding(0.f, 8.f, 0.f, 0.f)
+                [
+                    SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("Cancel")))
+                                .OnClicked_Lambda([this, EditWindow]()
+                                    {
+                                        OnEditCancelled();
+                                        EditWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("OK")))
+                                .OnClicked_Lambda([this, EditWindow, BlockIndex]()
+                                    {
+                                        SourceScript->Blocks[BlockIndex].Text =
+                                            CachedEditText.ToString().ToUpper();
+
+                                        FGAS_PreProToolsEditorModule& Module =
+                                            FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
+                                                "GAS_PreProToolsEditor"
+                                            );
+
+                                        Module.MarkToolDirty();
+
+
+                                        RebuildLayout();
+                                        Invalidate(EInvalidateWidget::LayoutAndVolatility);
+
+                                        // ----------------------------------------------------
+                                        // If this Character was added with a Dialogue, open it next
+                                        // ----------------------------------------------------
+                                        if (PendingDialogueAfterCharacterIndex != INDEX_NONE)
+                                        {
+                                            const int32 DialogueIndex = PendingDialogueAfterCharacterIndex;
+                                            PendingDialogueAfterCharacterIndex = INDEX_NONE;
+
+                                            FTSTicker::GetCoreTicker().AddTicker(
+                                                FTickerDelegate::CreateLambda(
+                                                    [this, DialogueIndex](float)
+                                                    {
+                                                        OpenEditDialogueDialog(DialogueIndex);
+                                                        return false; // one-shot
+                                                    }
+                                                )
+                                            );
+                                        }
+
+                                        EditWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+                        ]
+                ]
+        ]
+    );
+
+    FSlateApplication::Get().AddModalWindow(
+        EditWindow,
+        FSlateApplication::Get().GetActiveTopLevelWindow()
+    );
+
+    FSlateApplication::Get().SetKeyboardFocus(EditTextBox);
+}
+
+
+void SGASScriptPanel::OpenAddBlockDialog(int32 InsertAfterParagraphIndex)
+{
+    if (!SourceScript)
+    {
+        return;
+    }
+
+    TSharedRef<SWindow> AddWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Add Block")))
+        .ClientSize(FVector2D(300.f, 160.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    // 0 = Action, 1 = Character + Dialogue
+    TSharedPtr<int32> SelectedType = MakeShared<int32>(0);
+
+    AddWindow->SetContent(
+        SNew(SBorder)
+        .Padding(8.f)
+        [
+            SNew(SVerticalBox)
+
+                // ----------------------------------------------------
+                // Block type selection
+                // ----------------------------------------------------
+                +SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(0.f, 0.f, 0.f, 6.f)
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("Block Type")))
+                ]
+
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                [
+                    SNew(SCheckBox)
+                        .IsChecked_Lambda([SelectedType]()
+                            {
+                                return (*SelectedType == 0)
+                                    ? ECheckBoxState::Checked
+                                    : ECheckBoxState::Unchecked;
+                            })
+                        .OnCheckStateChanged_Lambda([SelectedType](ECheckBoxState)
+                            {
+                                *SelectedType = 0;
+                            })
+                        [
+                            SNew(STextBlock).Text(FText::FromString(TEXT("Action")))
+                        ]
+                ]
+
+            + SVerticalBox::Slot()
+                .AutoHeight()
+                [
+                    SNew(SCheckBox)
+                        .IsChecked_Lambda([SelectedType]()
+                            {
+                                return (*SelectedType == 1)
+                                    ? ECheckBoxState::Checked
+                                    : ECheckBoxState::Unchecked;
+                            })
+                        .OnCheckStateChanged_Lambda([SelectedType](ECheckBoxState)
+                            {
+                                *SelectedType = 1;
+                            })
+                        [
+                            SNew(STextBlock).Text(FText::FromString(TEXT("Character + Dialogue")))
+                        ]
+                ]
+
+            // ----------------------------------------------------
+            // OK / Cancel
+            // ----------------------------------------------------
+            +SVerticalBox::Slot()
+                .AutoHeight()
+                .HAlign(HAlign_Right)
+                .Padding(0.f, 8.f, 0.f, 0.f)
+                [
+                    SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("Cancel")))
+                                .OnClicked_Lambda([AddWindow]()
+                                    {
+                                        AddWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("OK")))
+                                .OnClicked_Lambda([this, AddWindow, InsertAfterParagraphIndex, SelectedType]()
+                                    {
+                                        InsertNewBlock(
+                                            InsertAfterParagraphIndex,
+                                            *SelectedType
+                                        );
+
+                                        AddWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+
+                        ]
+                ]
+        ]
+    );
+
+    FSlateApplication::Get().AddModalWindow(
+        AddWindow,
+        FSlateApplication::Get().GetActiveTopLevelWindow()
+    );
+}
+
+
+void SGASScriptPanel::OpenDialoguePreviewDialog(int32 BlockIndex)
+{
+    if (!SourceScript || !SourceScript->Blocks.IsValidIndex(BlockIndex))
+    {
+        return;
+    }
+
+    const FGASBlock& Block = SourceScript->Blocks[BlockIndex];
+
+    TSharedRef<SWindow> PreviewWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Dialogue Preview")))
+        .ClientSize(FVector2D(500.f, 260.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    PreviewWindow->SetContent(
+        SNew(SBorder)
+        .Padding(8.f)
+        [
+            SNew(SVerticalBox)
+
+                // ----------------------------------------------------
+                // Info label
+                // ----------------------------------------------------
+                +SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(0.f, 0.f, 0.f, 6.f)
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("Dialogue editing coming soon")))
+                        .ColorAndOpacity(FLinearColor(0.7f, 0.7f, 0.7f, 1.f))
+                ]
+
+                // ----------------------------------------------------
+                // Dialogue text (read-only)
+                // ----------------------------------------------------
+                +SVerticalBox::Slot()
+                .FillHeight(1.f)
+                [
+                    SNew(SMultiLineEditableTextBox)
+                        .Text(FText::FromString(Block.Text))
+                        .IsReadOnly(true)
+                ]
+
+                // ----------------------------------------------------
+                // Close button
+                // ----------------------------------------------------
+                +SVerticalBox::Slot()
+                .AutoHeight()
+                .HAlign(HAlign_Right)
+                .Padding(0.f, 8.f, 0.f, 0.f)
+                [
+                    SNew(SButton)
+                        .Text(FText::FromString(TEXT("Close")))
+                        .OnClicked_Lambda([PreviewWindow]()
+                            {
+                                PreviewWindow->RequestDestroyWindow();
+                                return FReply::Handled();
+                            })
+                ]
+        ]
+    );
+
+
+    FSlateApplication::Get().AddModalWindow(
+        PreviewWindow,
+        FSlateApplication::Get().GetActiveTopLevelWindow()
+    );
+}
+
+void SGASScriptPanel::OpenEditDialogueDialog(int32 BlockIndex)
+{
+    if (!SourceScript || !SourceScript->Blocks.IsValidIndex(BlockIndex))
+    {
+        return;
+    }
+
+    FGASBlock& Block = SourceScript->Blocks[BlockIndex];
+
+    TSharedRef<SWindow> EditWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Edit Dialogue")))
+        .ClientSize(FVector2D(500.f, 280.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    CachedEditText = FText::FromString(Block.Text);
+
+    EditWindow->SetContent(
+        SNew(SBorder)
+        .Padding(8.f)
+        [
+            SNew(SVerticalBox)
+
+                // ----------------------------------------------------
+                // Dialogue text
+                // ----------------------------------------------------
+                +SVerticalBox::Slot()
+                .FillHeight(1.f)
+                [
+                    SAssignNew(EditTextBox, SMultiLineEditableTextBox)
+                        .Text(CachedEditText)
+                        .OnTextChanged_Lambda([this](const FText& NewText)
+                            {
+                                CachedEditText = NewText;
+                            })
+                        .OnKeyDownHandler_Lambda([this, EditWindow, BlockIndex](const FGeometry&, const FKeyEvent& KeyEvent)
+                            {
+                                // ESC = cancel
+                                if (KeyEvent.GetKey() == EKeys::Escape)
+                                {
+                                    OnEditCancelled();
+                                    EditWindow->RequestDestroyWindow();
+                                    return FReply::Handled();
+                                }
+
+
+                                // CTRL + ENTER = accept
+                                if (KeyEvent.GetKey() == EKeys::Enter && KeyEvent.IsControlDown())
+                                {
+                                    if (SourceScript && SourceScript->Blocks.IsValidIndex(BlockIndex))
+                                    {
+                                        SourceScript->Blocks[BlockIndex].Text =
+                                            CachedEditText.ToString();
+
+                                        FGAS_PreProToolsEditorModule& Module =
+                                            FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
+                                                "GAS_PreProToolsEditor"
+                                            );
+
+                                        Module.MarkToolDirty();
+
+
+                                        RebuildLayout();
+                                        Invalidate(EInvalidateWidget::LayoutAndVolatility);
+                                    }
+
+                                    EditWindow->RequestDestroyWindow();
+                                    return FReply::Handled();
+                                }
+
+                                return FReply::Unhandled();
+                            })
+                ]
+
+            // ----------------------------------------------------
+            // Buttons
+            // ----------------------------------------------------
+            +SVerticalBox::Slot()
+                .AutoHeight()
+                .HAlign(HAlign_Right)
+                .Padding(0.f, 8.f, 0.f, 0.f)
+                [
+                    SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("Cancel")))
+                                .OnClicked_Lambda([this, EditWindow]()
+                                    {
+                                        OnEditCancelled();
+                                        EditWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("OK")))
+                                .OnClicked_Lambda([this, EditWindow, BlockIndex]()
+                                    {
+                                        if (SourceScript && SourceScript->Blocks.IsValidIndex(BlockIndex))
+                                        {
+                                            SourceScript->Blocks[BlockIndex].Text =
+                                                CachedEditText.ToString();
+
+                                            FGAS_PreProToolsEditorModule& Module =
+                                                FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
+                                                    "GAS_PreProToolsEditor"
+                                                );
+
+                                            Module.MarkToolDirty();
+
+
+                                            RebuildLayout();
+                                            Invalidate(EInvalidateWidget::LayoutAndVolatility);
+                                        }
+
+                                        EditWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+                        ]
+                ]
+        ]
+    );
+
+    FSlateApplication::Get().AddModalWindow(
+        EditWindow,
+        FSlateApplication::Get().GetActiveTopLevelWindow()
+    );
+
+    FSlateApplication::Get().SetKeyboardFocus(EditTextBox);
+}
+
+void SGASScriptPanel::SetEditMode(bool bInEditMode)
+{
+    bEditMode = bInEditMode;
+
+    // Edit and Add are mutually exclusive
+    if (bEditMode)
+    {
+        bAddMode = false;
+    }
+
+    Invalidate(EInvalidateWidget::LayoutAndVolatility);
+}
+
+
+void SGASScriptPanel::SetAddMode(bool bInAddMode)
+{
+    bAddMode = bInAddMode;
+
+    // Add and Edit are mutually exclusive
+    if (bAddMode)
+    {
+        bEditMode = false;
+    }
+}
+
+void SGASScriptPanel::InsertNewBlock(
+    int32 InsertAfterParagraphIndex,
+    int32 BlockTypeChoice
+)
+{
+    if (!SourceScript)
+    {
+        return;
+    }
+
+    const int32 InsertIndex = InsertAfterParagraphIndex + 1;
+
+    if (BlockTypeChoice == 0)
+    {
+        FGASBlock NewBlock;
+        NewBlock.Type = EGASBlockType::Action;
+        NewBlock.Text = TEXT("");
+
+        SourceScript->Blocks.Insert(NewBlock, InsertIndex);
+
+        // Track add for cancel rollback
+        PendingAddStartIndex = InsertIndex;
+        PendingAddBlockCount = 1;
+
+        PendingEditBlockIndex = InsertIndex;
+
+    }
+    else
+    {
+        FGASBlock CharacterBlock;
+        CharacterBlock.Type = EGASBlockType::Character;
+        CharacterBlock.Text = TEXT("");
+
+        FGASBlock DialogueBlock;
+        DialogueBlock.Type = EGASBlockType::Dialogue;
+        DialogueBlock.Text = TEXT("");
+
+        SourceScript->Blocks.Insert(CharacterBlock, InsertIndex);
+        SourceScript->Blocks.Insert(DialogueBlock, InsertIndex + 1);
+
+        // Track add for cancel rollback
+        PendingAddStartIndex = InsertIndex;
+        PendingAddBlockCount = 2;
+
+        // Edit CHARACTER first
+        PendingEditBlockIndex = InsertIndex;
+
+        // Remember dialogue for next step
+        PendingDialogueAfterCharacterIndex = InsertIndex + 1;
+
+
+    }
+
+    // Mark dirty
+    FGAS_PreProToolsEditorModule& Module =
+        FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
+            "GAS_PreProToolsEditor"
+        );
+
+    Module.MarkToolDirty();
+
+
+    RebuildLayout();
+    Invalidate(EInvalidateWidget::LayoutAndVolatility);
+
+    // Immediately open edit dialog for the newly inserted block
+    if (PendingEditBlockIndex != INDEX_NONE)
+    {
+        TryEditParagraph(PendingEditBlockIndex);
+        PendingEditBlockIndex = INDEX_NONE;
+    }
+}
+
+
+void SGASScriptPanel::OnEditCancelled()
+{
+    if (!SourceScript)
+    {
+        return;
+    }
+
+    // If this edit came from Add Mode, roll it back
+    if (PendingAddBlockCount > 0 &&
+        PendingAddStartIndex != INDEX_NONE &&
+        SourceScript->Blocks.IsValidIndex(PendingAddStartIndex))
+    {
+        SourceScript->Blocks.RemoveAt(
+            PendingAddStartIndex,
+            PendingAddBlockCount,
+            /*bAllowShrinking=*/false
+        );
+    }
+
+    PendingAddBlockCount = 0;
+    PendingAddStartIndex = INDEX_NONE;
+    PendingEditBlockIndex = INDEX_NONE;
+
+    RebuildLayout();
+    Invalidate(EInvalidateWidget::LayoutAndVolatility);
+}
+
+void SGASScriptPanel::OpenDeleteBlockDialog(int32 BlockIndex)
+{
+    if (!SourceScript || !SourceScript->Blocks.IsValidIndex(BlockIndex))
+    {
+        return;
+    }
+
+    FGASBlock& Block = SourceScript->Blocks[BlockIndex];
+
+    FString BlockLabel;
+    switch (Block.Type)
+    {
+    case EGASBlockType::Action:     BlockLabel = TEXT("Action"); break;
+    case EGASBlockType::Character:  BlockLabel = TEXT("Character"); break;
+    case EGASBlockType::Dialogue:   BlockLabel = TEXT("Dialogue"); break;
+    default:                        BlockLabel = TEXT("Block"); break;
+    }
+
+    TSharedRef<SWindow> ConfirmWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Delete Block")))
+        .ClientSize(FVector2D(360.f, 140.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    ConfirmWindow->SetContent(
+        SNew(SBorder)
+        .Padding(12.f)
+        [
+            SNew(SVerticalBox)
+
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(0.f, 0.f, 0.f, 10.f)
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(
+                            FString::Printf(TEXT("Delete this %s block?"), *BlockLabel)
+                        ))
+                ]
+
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .HAlign(HAlign_Right)
+                [
+                    SNew(SHorizontalBox)
+
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("Cancel")))
+                                .OnClicked_Lambda([ConfirmWindow]()
+                                    {
+                                        ConfirmWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(4.f)
+                        [
+                            SNew(SButton)
+                                .Text(FText::FromString(TEXT("Delete")))
+                                .OnClicked_Lambda([this, ConfirmWindow, BlockIndex]()
+                                    {
+                                        DeleteBlock(BlockIndex);
+                                        ConfirmWindow->RequestDestroyWindow();
+                                        return FReply::Handled();
+                                    })
+                        ]
+                ]
+        ]
+    );
+
+    FSlateApplication::Get().AddModalWindow(
+        ConfirmWindow,
+        FSlateApplication::Get().GetActiveTopLevelWindow()
+    );
+}
+
+void SGASScriptPanel::DeleteBlock(int32 BlockIndex)
+{
+    if (!SourceScript || !SourceScript->Blocks.IsValidIndex(BlockIndex))
+    {
+        return;
+    }
+
+    // If deleting a Character, also delete its Dialogue if present
+    if (SourceScript->Blocks[BlockIndex].Type == EGASBlockType::Character)
+    {
+        if (SourceScript->Blocks.IsValidIndex(BlockIndex + 1) &&
+            SourceScript->Blocks[BlockIndex + 1].Type == EGASBlockType::Dialogue)
+        {
+            SourceScript->Blocks.RemoveAt(BlockIndex, 2);
+        }
+        else
+        {
+            SourceScript->Blocks.RemoveAt(BlockIndex);
+        }
+    }
+    // If deleting Dialogue, check if previous is Character
+    else if (SourceScript->Blocks[BlockIndex].Type == EGASBlockType::Dialogue)
+    {
+        if (BlockIndex > 0 &&
+            SourceScript->Blocks[BlockIndex - 1].Type == EGASBlockType::Character)
+        {
+            SourceScript->Blocks.RemoveAt(BlockIndex - 1, 2);
+        }
+        else
+        {
+            SourceScript->Blocks.RemoveAt(BlockIndex);
+        }
+    }
+    else
+    {
+        // Action or other block
+        SourceScript->Blocks.RemoveAt(BlockIndex);
+    }
+
+    FGAS_PreProToolsEditorModule& Module =
+        FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
+            "GAS_PreProToolsEditor"
+        );
+
+    Module.MarkToolDirty();
+
+
+    RebuildLayout();
+    Invalidate(EInvalidateWidget::LayoutAndVolatility);
+}
+
 
 
 // =============================================================
@@ -166,12 +1222,15 @@ int32 SGASScriptPanel::OnPaint(
 ) const
 {
 
-
     // Track total height
     CachedTotalHeight = 0.f;
 
     const FSlateFontInfo FontInfo =
         FGAS_PreProToolsStyle::Get().GetFontStyle("GAS.ScriptFont");
+
+    const TSharedRef<FSlateFontMeasure> FontMeasureService =
+        FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+
 
 
     for (int32 i = 0; i < RenderedParagraphs.Num(); i++)
@@ -222,6 +1281,69 @@ int32 SGASScriptPanel::OnPaint(
             }
         }
 
+        // ------------------------------------------------------------
+        // Draw PAGE BREAK marker (derived, visual only)
+        // ------------------------------------------------------------
+        if (P.bStartsPage)
+        {
+            const FString PageText =
+                FString::Printf(TEXT("PAGE %d"), P.PageNumber);
+
+            const float MarkerY =
+                P.TopY - (ScriptFormat::LineHeight * 2.0f);
+
+            const float MarkerX =
+                ScriptFormat::PageLeft * 0.35f;
+
+            const bool bIsHovered =
+                bEditMode &&
+                (HoveredPageBreakIndex != INDEX_NONE) &&
+                SourceScript &&
+                SourceScript->UserPageBreaks.IsValidIndex(HoveredPageBreakIndex) &&
+                SourceScript->UserPageBreaks[HoveredPageBreakIndex].AfterParagraphIndex
+                == P.ParagraphIndex - 1;
+
+
+            const FLinearColor TextColor =
+                bIsHovered
+                ? FLinearColor(1.0f, 1.0f, 0.6f, 1.f)   // bright yellow
+                : FLinearColor(1.0f, 0.85f, 0.2f, 1.f); // normal yellow
+
+            // Bold horizontal rule when hovered
+            if (bIsHovered)
+            {
+                const float RuleThickness = 3.0f;
+
+                FSlateDrawElement::MakeBox(
+                    OutDrawElements,
+                    LayerId + 0,
+                    AllottedGeometry.ToPaintGeometry(
+                        FVector2D(0.f, MarkerY + ScriptFormat::LineHeight * 0.4f),
+                        FVector2D(AllottedGeometry.GetLocalSize().X, RuleThickness)
+                    ),
+                    FCoreStyle::Get().GetBrush("WhiteBrush"),
+                    ESlateDrawEffect::None,
+                    FLinearColor(1.0f, 0.9f, 0.3f, 0.8f)
+                );
+            }
+
+            // Page text
+            FSlateDrawElement::MakeText(
+                OutDrawElements,
+                LayerId + 1,
+                AllottedGeometry.ToPaintGeometry(
+                    FVector2D(MarkerX, MarkerY),
+                    FVector2D::UnitVector
+                ),
+                PageText,
+                FontInfo,
+                ESlateDrawEffect::None,
+                TextColor
+            );
+
+        }
+
+
 
         // ----------------------------------------------
         // Draw lines at TRUE layout coordinates
@@ -247,248 +1369,36 @@ int32 SGASScriptPanel::OnPaint(
         }
 
         // ----------------------------------------------
-        // PAGE BREAK MARKER
-        // ----------------------------------------------
-        if (P.bStartsPage && P.PageNumber > 1)
-        {
-            FString Marker = FString::Printf(TEXT("-- PAGE %d --"), P.PageNumber);
-
-            FSlateDrawElement::MakeText(
-                OutDrawElements,
-                LayerId + 1,
-                AllottedGeometry.ToPaintGeometry(
-                    FVector2D(0.f, P.TopY),
-                    FVector2D::UnitVector
-                ),
-                FText::FromString(Marker),
-                FontInfo,
-                ESlateDrawEffect::None,
-                FLinearColor::Yellow
-            );
-        }
-
-        // ----------------------------------------------
         // Update panel height
         // ----------------------------------------------
         CachedTotalHeight = FMath::Max(CachedTotalHeight, P.TopY + P.Height);
     }
 
-
-    // Draw preview line during drag
-    if (bShowDragPreview)
+    // ------------------------------------------------------------
+    // Draw page break drag preview
+    // ------------------------------------------------------------
+    if (bIsDraggingPageBreak || bAnimatingPageBreak)
     {
+        const float LineThickness = 2.0f;
+
         FSlateDrawElement::MakeBox(
             OutDrawElements,
-            LayerId + 5,
+            LayerId + 50,
             AllottedGeometry.ToPaintGeometry(
                 FVector2D(0.f, DragPreviewY),
-                FVector2D(AllottedGeometry.GetLocalSize().X, 2.f)
+                FVector2D(AllottedGeometry.GetLocalSize().X, LineThickness)
             ),
             FCoreStyle::Get().GetBrush("WhiteBrush"),
             ESlateDrawEffect::None,
-            FLinearColor::Yellow
+            FLinearColor(1.0f, 0.85f, 0.2f, 0.9f)
         );
     }
+
+
 
     bNeedsRedraw = false;
     return LayerId + 10;
 }
-
-
-
-// =============================================================
-//  OnMouseButtonDown — begin drag / detect clicks
-// =============================================================
-FReply SGASScriptPanel::OnMouseButtonDown(
-    const FGeometry& MyGeometry,
-    const FPointerEvent& MouseEvent)
-{
-    FVector2D Local = MyGeometry.AbsoluteToLocal(
-        MouseEvent.GetScreenSpacePosition());
-    float MouseY = Local.Y;
-
-    UE_LOG(LogTemp, Warning, TEXT("MOUSEDOWN: Alt=%d Left=%d  PosY=%.2f"),
-        MouseEvent.IsAltDown(),
-        MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton,
-        MouseY);
-
-    // ============================================================
-    // ALT + LEFT = begin DRAG of a page break
-    // (always allowed, even in Edit Mode)
-    // ============================================================
-    // NOTE:
-    // ALT+drag page break interaction is gated correctly by Edit Mode,
-    // but drag mechanics are temporarily disabled pending refactor.
-    // (Hit-testing + selection must be stable first.)
-
-    if (bEditMode &&
-        MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton &&
-        MouseEvent.IsAltDown())
-
-    {
-        for (int32 i = 0; i < RenderedParagraphs.Num(); ++i)
-        {
-            const FRenderedParagraph& P = RenderedParagraphs[i];
-
-            if (P.bStartsPage && P.PageNumber > 1)
-            {
-                float Top = P.TopY;
-                float Bottom = Top + ScriptFormat::LineHeight;
-
-                if (MouseY >= Top && MouseY <= Bottom)
-                {
-                    bIsDraggingPageBreak = true;
-                    DraggedPageBreakParagraph = i;
-                    DragOffsetY = MouseY - Top;
-
-                    UE_LOG(LogTemp, Error,
-                        TEXT("  >>> DRAG STARTED on break paragraph %d"), i);
-
-                    return FReply::Handled().CaptureMouse(AsShared());
-                }
-            }
-        }
-    }
-
-    // ------------------------------------------------------------
-    // In View Mode, do not allow any structural interaction
-    // ------------------------------------------------------------
-    if (!bEditMode)
-    {
-        return FReply::Unhandled();
-    }
-
-
-    // ============================================================
-    // RIGHT CLICK = popup menu
-    // (allowed regardless of Edit Mode)
-    // ============================================================
-    if (bEditMode &&
-        MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("RIGHT CLICK detected in Edit Mode"));
-
-        int32 HitIndex = HitTestParagraph(MouseY);
-        if (HitIndex != INDEX_NONE)
-        {
-            UE_LOG(LogTemp, Warning,
-                TEXT("RIGHT CLICK hit paragraph %d"), HitIndex);
-
-            ShowPageBreakMenu(HitIndex);
-            return FReply::Handled();
-        }
-    }
-
-
-    // ------------------------------------------------------------
-    // View Mode: consume right-click so nothing mutates accidentally
-    // ------------------------------------------------------------
-    if (!bEditMode &&
-        MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
-    {
-        return FReply::Unhandled();
-    }
-
-
-    // ============================================================
-    // NORMAL LEFT CLICK
-    // ============================================================
-    if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton &&
-        !MouseEvent.IsAltDown())
-    {
-        int32 HitIndex = HitTestParagraph(MouseY);
-        if (HitIndex == INDEX_NONE)
-            return FReply::Unhandled();
-
-        // -----------------------------
-        // EDIT MODE CLICK
-        // -----------------------------
-        if (bEditMode)
-        {
-            SelectedParagraphIndex = HitIndex;
-
-            UE_LOG(LogTemp, Warning,
-                TEXT("EDIT MODE CLICK on paragraph %d"), HitIndex);
-
-            OpenEditDialog(HitIndex);
-            return FReply::Handled();
-        }
-
-
-        // -----------------------------
-        // EDIT MODE CLICK
-        // -----------------------------
-        // Edit Mode enables intentional editing only.
-        // Clicking a paragraph resolves its index and
-        // opens an edit dialog (no inline editing).
-        // -----------------------------
-
-        if (OnParagraphClicked.IsBound())
-        {
-            OnParagraphClicked.Execute(HitIndex);
-            return FReply::Handled();
-        }
-    }
-
-    return FReply::Unhandled();
-}
-
-
-
-
-// =============================================================
-//  OnMouseMove — drag preview
-// =============================================================
-FReply SGASScriptPanel::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
-{
-    if (!bIsDraggingPageBreak)
-        return FReply::Unhandled();
-
-    FVector2D LocalPos = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
-    float DragY = LocalPos.Y - DragOffsetY;
-
-    bShowDragPreview = true;
-    DragPreviewY = DragY;
-
-    UE_LOG(LogTemp, Warning, TEXT("DRAGGING: PreviewY=%.2f Offset=%.2f"), DragPreviewY, DragOffsetY);
-
-    bNeedsRedraw = true;
-    Invalidate(EInvalidateWidget::Paint);
-
-
-    return FReply::Handled();
-}
-
-
-
-// =============================================================
-//  SNAP → returns nearest paragraph index
-// =============================================================
-int32 SGASScriptPanel::SnapToNearestParagraph(float ReleaseY, const TArray<FRenderedParagraph>& Paragraphs) const
-{
-    int32 BestIndex = INDEX_NONE;
-    float BestDist = FLT_MAX;
-
-    for (int32 i = 0; i < Paragraphs.Num(); i++)
-    {
-        float Dist = FMath::Abs(ReleaseY - Paragraphs[i].TopY);
-        if (Dist < BestDist)
-        {
-            BestDist = Dist;
-            BestIndex = i;
-        }
-    }
-
-    return BestIndex;
-}
-
-// =============================================================
-// Paragraph Hit Testing
-// -------------------------------------------------------------
-// Maps a local Y coordinate to a rendered paragraph index.
-// This is deterministic and independent of Edit Mode.
-// Used by editing, selection, and context menus.
-// =============================================================
 
 
 
@@ -509,46 +1419,6 @@ int32 SGASScriptPanel::HitTestParagraph(float LocalY) const
 
 
 
-
-// =============================================================
-//  OnMouseButtonUp — FINISH DRAG
-// =============================================================
-FReply SGASScriptPanel::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
-{
-    UE_LOG(LogTemp, Error, TEXT("MOUSEUP: Dragging=%d"), bIsDraggingPageBreak);
-
-    if (!bIsDraggingPageBreak)
-        return FReply::Unhandled();
-
-    bIsDraggingPageBreak = false;
-    bShowDragPreview = false;
-
-    FVector2D LocalPos = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
-    float ReleaseY = LocalPos.Y;
-
-    // SNAP to nearest paragraph
-    int32 NewIndex = SnapToNearestParagraph(ReleaseY, RenderedParagraphs);
-
-    UE_LOG(LogTemp, Error, TEXT("  >>> DROP TARGET = %d"), NewIndex);
-
-    if (SourceScript && DraggedPageBreakParagraph != INDEX_NONE && NewIndex != INDEX_NONE)
-    {
-        // --------------------------------------------------------
-        // 1. Remove old break
-        // --------------------------------------------------------
-        SilentRemoveUserBreak(DraggedPageBreakParagraph);
-
-        // --------------------------------------------------------
-        // 2. Insert NEW break
-        // --------------------------------------------------------
-        InsertPageBreak(NewIndex);
-    }
-
-    DraggedPageBreakParagraph = INDEX_NONE;
-
-    return FReply::Handled().ReleaseMouseCapture();
-}
-
 FString SGASScriptPanel::GetSourceTextForBlock(const FString& BlockId) const
 {
     if (!SourceScript)
@@ -566,212 +1436,14 @@ FString SGASScriptPanel::GetSourceTextForBlock(const FString& BlockId) const
 }
 
 
-// =============================================================
-//  Edit Dialog
-// =============================================================
-
-void SGASScriptPanel::OpenEditDialog(int32 ParagraphIndex)
+void SGASScriptPanel::SetShowSceneNumbers(bool bInShow)
 {
-    if (!RenderedParagraphs.IsValidIndex(ParagraphIndex))
-        return;
+    bShowSceneNumbers = bInShow;
 
-    const FRenderedParagraph& P = RenderedParagraphs[ParagraphIndex];
-
-    // ------------------------------------------------------------
-    // Capture original text
-    // ------------------------------------------------------------
-    FString OriginalText = GetSourceTextForBlock(P.BlockId);
-
-    // We store edited text here before commit
-    TSharedRef<FString> EditedText =
-        MakeShared<FString>(OriginalText);
-
-    // ------------------------------------------------------------
-    // Build modal window
-    // ------------------------------------------------------------
-    TSharedRef<SWindow> EditWindow = SNew(SWindow)
-        .Title(FText::FromString(TEXT("Edit Paragraph")))
-        .ClientSize(FVector2D(600.f, 400.f))
-        .SupportsMinimize(false)
-        .SupportsMaximize(false);
-
-    EditWindow->SetContent(
-        SNew(SVerticalBox)
-
-        // -----------------------------
-        // Text editor
-        // -----------------------------
-        +SVerticalBox::Slot()
-        .FillHeight(1.f)
-        .Padding(8.f)
-        [
-            SNew(SMultiLineEditableTextBox)
-                .Text(FText::FromString(OriginalText))
-                .OnTextChanged_Lambda(
-                    [EditedText](const FText& NewText)
-                    {
-                        *EditedText = NewText.ToString();
-                    })
-        ]
-
-    // -----------------------------
-    // Buttons
-    // -----------------------------
-    +SVerticalBox::Slot()
-        .AutoHeight()
-        .Padding(8.f)
-        [
-            SNew(SHorizontalBox)
-
-                + SHorizontalBox::Slot()
-                .HAlign(HAlign_Right)
-                .FillWidth(1.f)
-                [
-                    SNew(SButton)
-                        .Text(FText::FromString(TEXT("Cancel")))
-                        .OnClicked_Lambda(
-                            [EditWindow]()
-                            {
-                                EditWindow->RequestDestroyWindow();
-                                return FReply::Handled();
-                            })
-                ]
-
-            + SHorizontalBox::Slot()
-                .HAlign(HAlign_Right)
-                .AutoWidth()
-                .Padding(8.f, 0.f)
-                [
-                    SNew(SButton)
-                        .Text(FText::FromString(TEXT("OK")))
-                        .OnClicked_Lambda(
-                            [this, EditWindow, P, EditedText]()
-                            {
-                                ApplyTextEdit(P.BlockId, *EditedText);
-                                EditWindow->RequestDestroyWindow();
-                                return FReply::Handled();
-                            })
-                ]
-        ]
-        );
-
-    // ------------------------------------------------------------
-    // Show modal
-    // ------------------------------------------------------------
-    FSlateApplication::Get().AddWindow(EditWindow);
+    // Scene numbers are visual-only but depend on layout
+    RebuildLayout();
+    Invalidate(EInvalidateWidget::LayoutAndVolatility);
 }
-
-
-
-// =============================================================
-//  Insert NEW break
-// =============================================================
-void SGASScriptPanel::InsertPageBreak(int32 ParagraphIndex)
-{
-    if (!SourceScript || !RenderedParagraphs.IsValidIndex(ParagraphIndex))
-        return;
-
-    ApplyScriptEdit({
-        EGASScriptEditType::SetPageBreak,
-        ParagraphIndex
-        });
-}
-
-
-
-
-
-// =============================================================
-//  Remove break → JSON + flags
-// =============================================================
-void SGASScriptPanel::SilentRemoveUserBreak(int32 ParagraphIndex)
-{
-    if (!SourceScript)
-        return;
-
-
-    // Find the block that CAUSED this break
-    int32 BlockParaIndex = ParagraphIndex;
-
-    // Find the nearest paragraph that actually starts the next block
-    while (BlockParaIndex < RenderedParagraphs.Num() &&
-        !RenderedParagraphs[BlockParaIndex].bAutoBreakCausedHere)
-    {
-        BlockParaIndex++;
-    }
-
-    // Fallback
-    if (!RenderedParagraphs.IsValidIndex(BlockParaIndex))
-    {
-        BlockParaIndex = ParagraphIndex;
-    }
-
-    // Suppress future auto-breaks on that block
-    FString BlockId = RenderedParagraphs[BlockParaIndex].BlockId;
-
-    UE_LOG(LogTemp, Warning,
-        TEXT("SilentRemove: Suppressing auto-break block %s at paragraph %d"),
-        *BlockId, BlockParaIndex);
-}
-
-
-
-
-// =============================================================
-//  Remove (UI action)
-// =============================================================
-void SGASScriptPanel::RemovePageBreak(int32 ParagraphIndex)
-{
-    ApplyScriptEdit({
-        EGASScriptEditType::ClearPageBreak,
-        ParagraphIndex
-        });
-}
-
-
-
-
-
-// =============================================================
-//  Popup menu (placeholder)
-// =============================================================
-void SGASScriptPanel::ShowPageBreakMenu(int32 ParagraphIndex)
-{
-    FMenuBuilder MenuBuilder(true, nullptr);
-
-    MenuBuilder.AddMenuEntry(
-        FText::FromString("Insert Page Break"),
-        FText::FromString("Insert a page break here"),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([this, ParagraphIndex]()
-                {
-                    InsertPageBreak(ParagraphIndex);
-                })
-        )
-    );
-
-    MenuBuilder.AddMenuEntry(
-        FText::FromString("Remove Page Break"),
-        FText::FromString("Remove page break"),
-        FSlateIcon(),
-        FUIAction(
-            FExecuteAction::CreateLambda([this, ParagraphIndex]()
-                {
-                    RemovePageBreak(ParagraphIndex);
-                })
-        )
-    );
-
-    FSlateApplication::Get().PushMenu(
-        AsShared(),                                   // anchor
-        FWidgetPath(),
-        MenuBuilder.MakeWidget(),
-        FSlateApplication::Get().GetCursorPos(),
-        FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu)
-    );
-}
-
 
 
 void SGASScriptPanel::ScrollToParagraph(int32 ParagraphIndex)
@@ -787,6 +1459,307 @@ void SGASScriptPanel::SetShotMarkers(const TArray<FGASMarker>& Markers)
 
 }
 
+
+// ------------------------------------------------------------
+// MOUSE CONTROLS
+// ------------------------------------------------------------
+
+FReply SGASScriptPanel::OnMouseButtonDown(
+    const FGeometry& MyGeometry,
+    const FPointerEvent& MouseEvent
+)
+{
+    // SAFETY: panel not ready yet
+    if (!SourceScript || RenderedParagraphs.Num() == 0)
+    {
+        return FReply::Unhandled();
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("SCRIPT PANEL: MouseDown received"));
+
+    // We only handle clicks when a tool is active
+    UE_LOG(LogTemp, Error, TEXT("PANEL STATE: Edit=%d Add=%d"), bEditMode, bAddMode);
+
+
+
+    if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+    {
+        return FReply::Unhandled();
+    }
+
+    if (RenderedParagraphs.Num() == 0)
+    {
+        return FReply::Unhandled();
+    }
+
+
+
+    const bool bAltDown = MouseEvent.IsAltDown();
+    const bool bCtrlDown = MouseEvent.IsControlDown();
+
+
+    const FVector2D LocalPos =
+        MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+
+    const float MouseY = LocalPos.Y;
+
+    // ------------------------------------------------------------
+    // ADD MODE: click between blocks to insert
+    // ------------------------------------------------------------
+    if (bAddMode)
+    {
+        const int32 InsertAfterParagraph =
+            HitTestAddGutter(MouseY);
+
+        if (InsertAfterParagraph != INDEX_NONE)
+        {
+            OpenAddBlockDialog(InsertAfterParagraph);
+            return FReply::Handled();
+        }
+
+        return FReply::Handled();
+    }
+
+
+    // ------------------------------------------------------------
+    // 1) PAGE BREAK HIT TEST (ALT + LMB ONLY)
+    // ------------------------------------------------------------
+    if (bAltDown)
+    {
+        constexpr float PageBreakHitTolerance = 40.f;
+
+        for (int32 BreakIndex = 0; BreakIndex < SourceScript->UserPageBreaks.Num(); ++BreakIndex)
+        {
+            const int32 AfterParagraph =
+                SourceScript->UserPageBreaks[BreakIndex].AfterParagraphIndex;
+
+
+            for (const FRenderedParagraph& P : RenderedParagraphs)
+            {
+                if (P.ParagraphIndex == AfterParagraph + 1 && P.bStartsPage)
+                {
+                    const float MarkerY =
+                        P.TopY - (ScriptFormat::LineHeight * 2.0f);
+
+                    if (FMath::Abs(MouseY - MarkerY) <= PageBreakHitTolerance)
+                    {
+                        UE_LOG(LogTemp, Warning, TEXT("PAGE BREAK HIT! Index=%d"), BreakIndex);
+
+                        bIsDraggingPageBreak = true;
+                        DraggedPageBreakIndex = BreakIndex;
+                        DragPreviewY = MarkerY;
+
+                        return FReply::Handled().CaptureMouse(AsShared());
+                    }
+                }
+            }
+        }
+    }
+
+
+    // ------------------------------------------------------------
+    // 2) BLOCK HIT TEST (NEW)
+    // ------------------------------------------------------------
+    int32 HitParagraphIndex = INDEX_NONE;
+
+    for (int32 i = 0; i < RenderedParagraphs.Num(); ++i)
+    {
+        const FRenderedParagraph& P = RenderedParagraphs[i];
+
+        if (MouseY >= P.TopY && MouseY <= (P.TopY + P.Height))
+        {
+            HitParagraphIndex = i;
+            break;
+        }
+    }
+
+    if (HitParagraphIndex == INDEX_NONE)
+    {
+        UE_LOG(LogTemp, Error, TEXT("NO PARAGRAPH HIT — forcing paragraph 0"));
+        HitParagraphIndex = 0;
+    }
+
+
+    // ------------------------------------------------------------
+    // 3) SELECT PARAGRAPH (VISUAL FEEDBACK)
+    // ------------------------------------------------------------
+    SelectedParagraphIndex = HitParagraphIndex;
+    Invalidate(EInvalidateWidget::Paint);
+
+    const FRenderedParagraph& HitParagraph = RenderedParagraphs[HitParagraphIndex];
+
+
+    // ------------------------------------------------------------
+    // CTRL + LMB = Delete block (Edit Mode only)
+    // ------------------------------------------------------------
+    if (bEditMode && bCtrlDown)
+    {
+        OpenDeleteBlockDialog(HitParagraph.ParagraphIndex);
+        return FReply::Handled();
+    }
+
+
+    // ------------------------------------------------------------
+    // 4) ROUTE ALL BLOCK CLICKS THROUGH EDIT PIPELINE
+    // ------------------------------------------------------------
+    if (bEditMode && OnParagraphClicked.IsBound())
+    {
+        UE_LOG(LogTemp, Error, TEXT("EXECUTING OnParagraphClicked for %d"), HitParagraph.ParagraphIndex);
+        OnParagraphClicked.Execute(HitParagraph.ParagraphIndex);
+    }
+
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("OnParagraphClicked NOT bound"));
+    }
+
+
+    return FReply::Handled();
+
+}
+
+
+
+FReply SGASScriptPanel::OnMouseMove(
+    const FGeometry& MyGeometry,
+    const FPointerEvent& MouseEvent
+)
+{
+    // ------------------------------------------------------------
+    // ADD MODE: no mouse-move behavior yet
+    // ------------------------------------------------------------
+    if (bAddMode)
+    {
+        return FReply::Unhandled();
+    }
+
+    // ------------------------------------------------------------
+    // Safety guards
+    // ------------------------------------------------------------
+    if (!SourceScript || RenderedParagraphs.Num() == 0)
+    {
+        return FReply::Unhandled();
+    }
+
+
+    // ------------------------------------------------------------
+    // PAGE BREAK DRAGGING (Edit Mode only)
+    // ------------------------------------------------------------
+    if (bEditMode && bIsDraggingPageBreak)
+    {
+        const FVector2D LocalPos =
+            MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+
+        DragPreviewY = LocalPos.Y;
+        Invalidate(EInvalidateWidget::Paint);
+
+        return FReply::Handled();
+    }
+
+    // ------------------------------------------------------------
+    // Existing hover logic (if any)
+    // ------------------------------------------------------------
+    return FReply::Unhandled();
+}
+
+
+FReply SGASScriptPanel::OnMouseButtonUp(
+    const FGeometry& MyGeometry,
+    const FPointerEvent& MouseEvent
+)
+{
+    if (!bIsDraggingPageBreak)
+    {
+        return FReply::Unhandled();
+    }
+
+    // Stop dragging
+    bIsDraggingPageBreak = false;
+
+    // Convert mouse position to local Y
+    const FVector2D LocalPos =
+        MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+
+    const float ReleaseY = LocalPos.Y;
+
+    // ------------------------------------------------------------
+    // Snap to nearest paragraph
+    // ------------------------------------------------------------
+    int32 NewAfterParagraph = INDEX_NONE;
+
+    for (int32 i = 0; i < RenderedParagraphs.Num(); ++i)
+    {
+        const FRenderedParagraph& P = RenderedParagraphs[i];
+
+        // We snap to paragraphs that participate in vertical flow
+        if (!P.bStartsPage && P.ParagraphIndex != INDEX_NONE)
+        {
+            if (ReleaseY < P.TopY)
+            {
+                NewAfterParagraph = P.ParagraphIndex - 1;
+                break;
+            }
+        }
+    }
+
+    // Fallback: place at end if dropped below everything
+    if (NewAfterParagraph == INDEX_NONE && RenderedParagraphs.Num() > 0)
+    {
+        NewAfterParagraph =
+            RenderedParagraphs.Last().ParagraphIndex;
+    }
+
+    // ------------------------------------------------------------
+    // Commit page break change
+    // ------------------------------------------------------------
+    if (SourceScript &&
+        SourceScript ->UserPageBreaks.IsValidIndex(DraggedPageBreakIndex))
+    {
+        SourceScript ->UserPageBreaks[DraggedPageBreakIndex]
+            .AfterParagraphIndex = FMath::Max(0, NewAfterParagraph);
+    }
+
+    // Prepare snap animation
+    SnapStartY = DragPreviewY;
+
+    // Find target Y from the newly snapped paragraph
+    SnapTargetY = DragPreviewY;
+    for (const FRenderedParagraph& P : RenderedParagraphs)
+    {
+        if (P.ParagraphIndex == NewAfterParagraph + 1 && P.bStartsPage)
+        {
+            SnapTargetY = P.TopY - (ScriptFormat::LineHeight * 2.0f);
+            break;
+        }
+    }
+
+    bAnimatingPageBreak = true;
+    SnapAnimAlpha = 0.f;
+
+    DraggedPageBreakIndex = INDEX_NONE;
+
+    // Rebuild layout so page numbers update
+    RebuildLayout();
+
+    // Release mouse capture
+    return FReply::Handled().ReleaseMouseCapture();
+
+}
+
+FCursorReply SGASScriptPanel::OnCursorQuery(
+    const FGeometry& MyGeometry,
+    const FPointerEvent& CursorEvent
+) const
+{
+    if (HoveredPageBreakIndex != INDEX_NONE)
+    {
+        return FCursorReply::Cursor(EMouseCursor::ResizeUpDown);
+    }
+
+    return FCursorReply::Unhandled();
+}
+
+
 void SGASScriptPanel::Tick(
     const FGeometry& AllottedGeometry,
     const double InCurrentTime,
@@ -801,4 +1774,46 @@ void SGASScriptPanel::Tick(
     }
 
     CachedTotalHeight = Y;
+
+    // ------------------------------------------------------------
+    // Page break snap animation
+    // ------------------------------------------------------------
+    if (bAnimatingPageBreak)
+    {
+        constexpr float SnapSpeed = 8.0f; // higher = snappier
+
+        SnapAnimAlpha = FMath::Min(1.f, SnapAnimAlpha + InDeltaTime * SnapSpeed);
+
+        // Ease-out (feels better than linear)
+        const float T = 1.f - FMath::Pow(1.f - SnapAnimAlpha, 3);
+
+        DragPreviewY = FMath::Lerp(SnapStartY, SnapTargetY, T);
+
+        if (SnapAnimAlpha >= 1.f)
+        {
+            bAnimatingPageBreak = false;
+        }
+
+        Invalidate(EInvalidateWidget::Paint);
+
+        if (PendingEditBlockIndex != INDEX_NONE)
+        {
+            const int32 ParagraphIndexToEdit = PendingEditBlockIndex;
+            PendingEditBlockIndex = INDEX_NONE;
+
+            // Exit Add Mode before opening editor
+            const bool bWasAddMode = bAddMode;
+            bAddMode = false;
+
+            TryEditParagraph(ParagraphIndexToEdit);
+
+            // (Optional) restore if you want
+            // bAddMode = bWasAddMode;
+        }
+
+
+
+    }
+
 }
+

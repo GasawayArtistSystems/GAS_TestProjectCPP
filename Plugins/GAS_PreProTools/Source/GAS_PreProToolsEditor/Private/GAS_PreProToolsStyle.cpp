@@ -81,6 +81,41 @@ void FGAS_PreProToolsStyle::Initialize()
         )
     );
 
+    // Register EditAddIcon_40.png as a brush
+    StyleInstance->Set(
+        "GAS.EditAddIcon",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("EditAddIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
+    // Register PageBreakIcon_40.png as a brush
+    StyleInstance->Set(
+        "GAS.PageBreakIcon",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("PageBreakIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
+    // Register ClearIcon_40.png as a brush
+    StyleInstance->Set(
+        "GAS.ClearIcon",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("ClearIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
+    // Register ImportScript_40.png as a brush
+    StyleInstance->Set(
+        "GAS.ImportScript",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("ImportScript_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
 
     // Register style set
     FSlateStyleRegistry::RegisterSlateStyle(*StyleInstance);

@@ -5,6 +5,8 @@
 #include "ScriptModel.h"
 #include "Widgets/SCompoundWidget.h"
 #include "GAS_FDXImporter.h"
+#include "SGASScriptPanel.h"
+
 
 
 
@@ -23,6 +25,9 @@ struct FShotEntry
 };
 
 
+DECLARE_DELEGATE_OneParam(FOnParagraphClicked, int32 /*ParagraphIndex*/);
+
+
 class SGAS_ScriptTab : public SCompoundWidget
 {
 public:
@@ -37,7 +42,9 @@ public:
     FReply OnImportScript();
     FReply OnSaveScript();
 
+    FReply OnGeneratePageBreaks();
 
+    FReply OnToggleAddMode();
 
 
     void ClearScript();
@@ -51,8 +58,6 @@ public:
     void MarkScriptDirty();
     void ClearScriptDirty();
     bool IsScriptDirty() const;
-
-
 
 
 private:
@@ -71,24 +76,35 @@ private:
     // Rebuild UI Panels
     // =========================================================
 
-    // Right-side shot list
     void RebuildShotList();
 
     void LoadScriptFromFDX(const FString& FilePath);
 
-    void SaveScriptToJson();
+
+
+    FString GetAuthoritativeScriptJsonPath() const;
     void LoadScriptFromJsonIfExists();
+    void SaveScriptToJson();
+
 
     float CachedScriptPanelWidth = 1200.f; // fallback width
 
-    FGASScript LoadedScript;
-    bool bHasLoadedScript = false;
+    // =========================================================
+    // Authoritative Script Model (JSON-backed)
+    // =========================================================
+    FGASScript CurrentScript;
+    bool bHasScript = false;
+
+
+
 
     FReply OnClearScriptConfirm();
     FReply OnClearScriptClicked();
 
 
 private:
+
+
 
     // =========================================================
     // Script + Shot Data
@@ -102,6 +118,8 @@ private:
     bool bIsShotMarkingActive = false;
     bool bIsEditMode = false;
     bool bIsScriptDirty = false;
+    bool bIsAddMode = false;
+
 
     bool bShowSceneNumbers = false;
 
@@ -119,10 +137,6 @@ private:
     TSharedPtr<SGASScriptPanel> ScriptPanel;
     TSharedPtr<SImage> ShotMarkingIcon;
     TSharedPtr<SImage> NumberingIcon;
-
-
-    
-
 
 
 
