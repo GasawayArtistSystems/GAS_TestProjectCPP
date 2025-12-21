@@ -159,8 +159,6 @@ struct FGASUserPageBreak
 };
 
 
-
-
 // ------------------------------------------------------------
 // FULL SCRIPT CONTAINER
 // ------------------------------------------------------------
@@ -186,4 +184,29 @@ struct FGASScript
 
 
     FGASScript() {}
+};
+
+
+// ------------------------------------------------------------
+// Undo Snapshot (Authoritative Data Only)
+// ------------------------------------------------------------
+USTRUCT()
+struct FGASScriptUndoSnapshot
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    TArray<FGASBlock> Blocks;
+
+    UPROPERTY()
+    TArray<FGASMarker> Markers;
+
+    UPROPERTY()
+    TArray<int32> UserPageBreakParagraphs;
+
+    UPROPERTY()
+    TArray<int32> SuppressedAutoBreaks;
+
+    UPROPERTY()
+    TArray<FString> SuppressedAutoBreakBlockIds;
 };
