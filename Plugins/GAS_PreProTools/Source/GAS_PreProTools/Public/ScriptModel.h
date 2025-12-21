@@ -160,34 +160,6 @@ struct FGASUserPageBreak
 
 
 // ------------------------------------------------------------
-// FULL SCRIPT CONTAINER
-// ------------------------------------------------------------
-USTRUCT(BlueprintType)
-struct FGASScript
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString Title;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString Uuid;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGASBlock> Blocks;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGASMarker> Markers;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGASUserPageBreak> UserPageBreaks;
-
-
-    FGASScript() {}
-};
-
-
-// ------------------------------------------------------------
 // Undo Snapshot (Authoritative Data Only)
 // ------------------------------------------------------------
 USTRUCT()
@@ -210,3 +182,43 @@ struct FGASScriptUndoSnapshot
     UPROPERTY()
     TArray<FString> SuppressedAutoBreakBlockIds;
 };
+
+
+// ------------------------------------------------------------
+// FULL SCRIPT CONTAINER
+// ------------------------------------------------------------
+USTRUCT(BlueprintType)
+struct FGASScript
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString Title;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString Uuid;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGASBlock> Blocks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGASMarker> Markers;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FGASUserPageBreak> UserPageBreaks;
+
+    // ------------------------------------------------------------
+    // Undo / Redo Stacks (Authoritative)
+    // ------------------------------------------------------------
+    UPROPERTY()
+    TArray<FGASScriptUndoSnapshot> UndoStack;
+
+    UPROPERTY()
+    TArray<FGASScriptUndoSnapshot> RedoStack;
+
+
+
+    FGASScript() {}
+};
+
+
