@@ -13,6 +13,9 @@
 
 IMPLEMENT_MODULE(FGAS_PreProToolsEditorModule, GAS_PreProToolsEditor)
 
+static TSharedPtr<SGAS_ScriptTab> PersistentScriptTab;
+
+
 void FGAS_PreProToolsEditorModule::StartupModule()
 {
     UE_LOG(LogTemp, Warning, TEXT("GAS_PreProToolsEditor: StartupModule"));
@@ -87,36 +90,19 @@ void FGAS_PreProToolsEditorModule::RegisterTabSpawner()
         .SetDisplayName(FText::FromString("GAS Pre Pro Tools"))
         .SetMenuType(ETabSpawnerMenuType::Hidden);
 
-    // Standalone Script tab
-    FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-        "GAS_ScriptTab",
-        FOnSpawnTab::CreateLambda([](const FSpawnTabArgs& Args)
-            {
-                TSharedRef<SGAS_ScriptTab> ScriptTabWidget =
-                    SNew(SGAS_ScriptTab);
-
-                TSharedRef<SDockTab> DockTab =
-                    SNew(SDockTab)
-                    .TabRole(ETabRole::NomadTab);
-
-                DockTab->SetContent(ScriptTabWidget);
-                return DockTab;
-
-
-            })
-    )
-        .SetMenuType(ETabSpawnerMenuType::Hidden);
 
 }
 
 TSharedRef<SDockTab> FGAS_PreProToolsEditorModule::SpawnMainToolTab(
     const FSpawnTabArgs& Args)
 {
+    TSharedPtr<SGAS_TestWindow> TestWindow;
+
     TSharedRef<SDockTab> DockTab =
         SNew(SDockTab)
         .TabRole(ETabRole::NomadTab)
         [
-            SNew(SGAS_TestWindow)
+            SAssignNew(TestWindow, SGAS_TestWindow)
         ];
 
     MainToolDockTab = DockTab;
@@ -125,6 +111,8 @@ TSharedRef<SDockTab> FGAS_PreProToolsEditorModule::SpawnMainToolTab(
 
     return DockTab;
 }
+
+
 
 void FGAS_PreProToolsEditorModule::MarkToolDirty()
 {

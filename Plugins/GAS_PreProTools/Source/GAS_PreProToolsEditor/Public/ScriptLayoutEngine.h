@@ -23,6 +23,10 @@ struct FRenderedParagraph
     UPROPERTY()
     EGASBlockType BlockType = EGASBlockType::None;
 
+    // Derived scene label (display-only)
+    UPROPERTY()
+    FString SceneLabel;
+
     // Wrapped lines
     UPROPERTY()
     TArray<FString> Lines;
@@ -66,7 +70,8 @@ public:
     static TArray<FRenderedParagraph> LayoutScript(
         const TArray<FGASBlock>& Blocks,
         float PanelWidth,
-        const TArray<FGASUserPageBreak>& PageBreaks
+        const TArray<FGASUserPageBreak>& PageBreaks,
+        const FGASSceneNumberingSettings& SceneNumbering
     );
 
     static bool HasPageBreakAfter(

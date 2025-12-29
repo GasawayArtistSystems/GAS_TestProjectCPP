@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Modules/ModuleManager.h"
+#include "SGAS_TestWindow.h"
+
 
 class FGAS_PreProToolsEditorModule : public IModuleInterface
 {
@@ -18,5 +20,7 @@ private:
 
     TWeakPtr<SDockTab> MainToolDockTab;
     TSharedRef<SDockTab> SpawnMainToolTab(const FSpawnTabArgs& Args);
+
+    TSharedPtr<SGAS_TestWindow> MainToolWindow;
 };
 

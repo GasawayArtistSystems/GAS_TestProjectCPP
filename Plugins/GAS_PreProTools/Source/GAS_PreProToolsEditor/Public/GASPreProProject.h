@@ -3,7 +3,13 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "ScriptModel.h"
+#include "Data/GASShot.h"
+
+struct FGASDerivedShotRow;
+
 #include "GASPreProProject.generated.h"
+
+
 
 /*
 ===============================================================================
@@ -86,34 +92,9 @@ struct FGASScene
 ===============================================================================
 */
 
-USTRUCT(BlueprintType)
-struct FGASShot
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGuid ShotID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ShotLabel;  // "10", "A", "20B"
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ShotType;   // MS / CU / Insert / etc.
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString Notes;
-
-    FGASShot()
-        : ShotID(FGuid())
-        , ShotLabel(TEXT(""))
-        , ShotType(TEXT(""))
-        , Notes(TEXT(""))
-    {
-    }
-};
 
 USTRUCT(BlueprintType)
-struct FGASShotMarker
+struct FGASShotDefinitionMarker
 {
     GENERATED_BODY()
 
@@ -129,7 +110,7 @@ struct FGASShotMarker
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString Notes;
 
-    FGASShotMarker()
+    FGASShotDefinitionMarker()
         : ShotID(FGuid())
         , StartBlockID(FGuid())
         , EndBlockID(FGuid())
@@ -159,7 +140,8 @@ public:
         SCRIPT CONTENT
     ------------------------------------------*/
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
-    TArray<FGASBlock> ScriptBlocks;
+    TArray<FGASScriptBlock> ScriptBlocks;
+
 
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
@@ -168,18 +150,19 @@ public:
     /*-----------------------------------------
         SHOTS + MARKERS
     ------------------------------------------*/
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shots")
-    TArray<FGASShot> Shots;
+    UPROPERTY()
+    TArray<FGASShotDefinition> ShotDefinitions;
+
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shots")
-    TArray<FGASShotMarker> ShotMarkers;
+    TArray<FGASShotDefinitionMarker> ShotMarkers;
 
     /*-----------------------------------------
         MUTATION API
         (These will mark the project dirty)
     ------------------------------------------*/
     FGuid AddScene(const FString& Label, const FString& Heading);
-    FGuid AddShot(const FString& Label);
+    FGuid AddShot();
 
     void AddShotMarker(
         const FGuid& ShotID,
@@ -194,6 +177,11 @@ public:
     void MarkDirty();
     void ClearDirty();
     bool IsDirty() const;
+
+    void BuildDerivedShotList(TArray<FGASDerivedShotRow>& OutShots) const;
+
+
+    virtual void PostLoad() override;
 
 private:
 

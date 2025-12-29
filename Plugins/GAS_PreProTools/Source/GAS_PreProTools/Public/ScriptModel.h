@@ -34,7 +34,6 @@ enum class EGASMarkerType : uint8
 // ------------------------------------------------------------
 // DUAL DIALOG
 // ------------------------------------------------------------
-
 UENUM(BlueprintType)
 enum class EGASDualRole : uint8
 {
@@ -42,7 +41,6 @@ enum class EGASDualRole : uint8
     Left,
     Right
 };
-
 
 // ------------------------------------------------------------
 // SCRIPT BLOCK (REPLACES FScriptParagraph)
@@ -88,7 +86,6 @@ struct FGASBlock
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EGASDualRole DualRole = EGASDualRole::None;
 
-    // Was explicitly wrapped in <DualDialogue> in FDX
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bIsExplicitDualDialogue = false;
 
@@ -108,6 +105,12 @@ struct FGASMarker
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EGASMarkerType MarkerType = EGASMarkerType::ShotMarker;
+
+    // -------------------------------------------------
+    // OPTION A: Scene-derived shot support
+    // -------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bDerivedFromScene = false;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString ShotId;
@@ -138,6 +141,14 @@ struct FGASMarker
     }
 };
 
+UENUM(BlueprintType)
+enum class EGASShotNumberingPolicy : uint8
+{
+    Numeric_1s UMETA(DisplayName = "1, 2, 3"),
+    Numeric_10s UMETA(DisplayName = "10, 20, 30"),
+    Alphabetic UMETA(DisplayName = "A, B, C (AA after Z)")
+};
+
 // ------------------------------------------------------------
 // USER PAGE BREAK (AUTHORITATIVE)
 // ------------------------------------------------------------
@@ -146,17 +157,49 @@ struct FGASUserPageBreak
 {
     GENERATED_BODY()
 
-    // Page break occurs AFTER this paragraph index (block index in Blocks array)
+    // Page break occurs AFTER this block (stable identity)
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 AfterParagraphIndex = INDEX_NONE;
+    FString AfterBlockId;
 
     FGASUserPageBreak() {}
 
     bool operator==(const FGASUserPageBreak& Other) const
     {
-        return AfterParagraphIndex == Other.AfterParagraphIndex;
+        return AfterBlockId == Other.AfterBlockId;
     }
 };
+
+// ------------------------------------------------------------
+// SCENE NUMBERING SETTINGS (SCRIPT-WIDE POLICY)
+// ------------------------------------------------------------
+UENUM(BlueprintType)
+enum class EGASSceneNumberBaseStyle : uint8
+{
+    By10           UMETA(DisplayName = "By 10s"),
+    By1            UMETA(DisplayName = "By 1s"),
+    Alphabetical   UMETA(DisplayName = "Alphabetical")
+};
+
+USTRUCT(BlueprintType)
+struct FGASSceneNumberingSettings
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EGASSceneNumberBaseStyle BaseStyle = EGASSceneNumberBaseStyle::By10;
+};
+
+// ------------------------------------------------------------
+// SCENE NUMBER DISPLAY HELPERS (DECLARATIONS ONLY)
+// ------------------------------------------------------------
+namespace GASSceneNumbering
+{
+    GAS_PREPROTOOLS_API FString MakeSceneNumber(
+        int32 ZeroBasedSceneIndex,
+        EGASSceneNumberBaseStyle Style
+    );
+}
+
 
 
 // ------------------------------------------------------------
@@ -177,13 +220,11 @@ struct FGASScriptUndoSnapshot
     TArray<FGASUserPageBreak> UserPageBreaks;
 };
 
-
-
 // ------------------------------------------------------------
 // FULL SCRIPT CONTAINER
 // ------------------------------------------------------------
 USTRUCT(BlueprintType)
-struct FGASScript
+struct GAS_PREPROTOOLS_API FGASScript
 {
     GENERATED_BODY()
 
@@ -192,6 +233,19 @@ struct FGASScript
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString Uuid;
+
+    // ------------------------------------------------------------
+    // Scene Numbering Settings (Authoritative)
+    // ------------------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FGASSceneNumberingSettings SceneNumbering;
+
+    // ------------------------------------------------------------
+    // Shot Numbering Policy (Authoritative)
+    // ------------------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EGASShotNumberingPolicy ShotNumberingPolicy =
+        EGASShotNumberingPolicy::Numeric_1s;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FGASBlock> Blocks;
@@ -216,9 +270,14 @@ struct FGASScript
     // ------------------------------------------------------------
     void CaptureUndoSnapshot();
 
+    // ------------------------------------------------------------
+    // Undo / Redo Execution
+    // ------------------------------------------------------------
+    bool CanUndo() const;
+    bool CanRedo() const;
 
+    void Undo();
+    void Redo();
 
     FGASScript() {}
 };
-
-

@@ -60,12 +60,6 @@ public:
     void SetScript(FGASScript* InScript);
 
 
-
-    // =========================================================
-    // View / Navigation
-    // =========================================================
-    void ScrollToParagraph(int32 ParagraphIndex);
-
     // =========================================================
     // Editing / Interaction
     // =========================================================
@@ -97,6 +91,18 @@ public:
     FOnScriptMutated OnScriptMutated;
 
     FOnParagraphClicked OnParagraphClicked;
+
+    void ScrollToParagraph(int32 ParagraphIndex);
+    void ScrollToBlockId(const FString& BlockId);
+
+    FReply HandleMouseWheel(
+        const FGeometry& MyGeometry,
+        const FPointerEvent& MouseEvent);
+
+    // Returns BlockId for the currently selected paragraph (Edit Mode selection).
+    // Empty if nothing is selected.
+    FString GetSelectedBlockId() const;
+
 
 private:
 
@@ -136,6 +142,16 @@ private:
         const FGeometry& MyGeometry,
         const FPointerEvent& CursorEvent
     ) const override;
+
+    virtual FReply OnKeyDown(
+        const FGeometry& MyGeometry,
+        const FKeyEvent& InKeyEvent
+    ) override;
+
+
+    virtual bool SupportsKeyboardFocus() const override { return true; }
+
+
 
 
     // =========================================================
@@ -224,6 +240,9 @@ private:
 
 
     FGASScript* SourceScript = nullptr;
+    mutable float ScrollOffsetY = 0.f;
+    mutable int32 PendingScrollParagraph = INDEX_NONE;
+
 
 
 };

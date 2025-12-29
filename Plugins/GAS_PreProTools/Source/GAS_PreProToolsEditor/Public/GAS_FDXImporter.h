@@ -15,6 +15,12 @@ struct FRawFDXBlock
     bool bInsideDualDialogue = false;
 };
 
+struct FGASImportNumberingOptions;
+
+bool GAS_DetectSceneNumbersInFDX(
+    const FString& FDXText,
+    FGASImportNumberingOptions& OutOptions
+);
 
 
 UCLASS()
@@ -24,11 +30,15 @@ class GAS_PREPROTOOLSEDITOR_API UGAS_FDXImporter : public UObject
 
 public:
 
-    // NEW — returns a full FGASScript containing Blocks + Scenes + Markers
-    UFUNCTION(BlueprintCallable, Category = "FDX")
-    static bool ImportFDXToScript(const FString& FilePath, FGASScript& OutScript);
+    // C++ ONLY — importer entry point
+    static bool ImportFDXToScript(
+        const FString& FilePath,
+        FGASScript& OutScript,
+        const FGASImportNumberingOptions& Options
+    );
 
     void PostProcessDualDialogue(TArray<FGASBlock>& Blocks);
+
 
 private:
 

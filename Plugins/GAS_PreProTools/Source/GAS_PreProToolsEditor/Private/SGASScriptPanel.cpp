@@ -25,7 +25,6 @@
 // =============================================================
 void SGASScriptPanel::Construct(const FArguments& InArgs)
 {
-
     OnParagraphClicked = InArgs._OnParagraphClicked;
 
     SetCanTick(true);
@@ -37,9 +36,11 @@ void SGASScriptPanel::Construct(const FArguments& InArgs)
             SNew(SBorder)
                 .Padding(0)
                 .BorderImage(FCoreStyle::Get().GetBrush("NoBrush"))
+                .Clipping(EWidgetClipping::ClipToBoundsAlways)
         ];
 
 }
+
 
 
 void SGASScriptPanel::RebuildLayout()
@@ -58,8 +59,10 @@ void SGASScriptPanel::RebuildLayout()
         ScriptLayoutEngine::LayoutScript(
             SourceScript->Blocks,
             PanelWidth,
-            SourceScript->UserPageBreaks
+            SourceScript->UserPageBreaks,
+            SourceScript->SceneNumbering
         );
+
 
 
     SetRenderedScript(NewRendered);   // updates RenderedParagraphs + bNeedsRedraw
@@ -91,10 +94,12 @@ void SGASScriptPanel::SetRenderedScript(const TArray<FRenderedParagraph>& InPara
 // =============================================================
 //  ComputeDesiredSize
 // =============================================================
-FVector2D SGASScriptPanel::ComputeDesiredSize(float LayoutScaleMultiplier) const
+FVector2D SGASScriptPanel::ComputeDesiredSize(float) const
 {
-    return FVector2D(1000.f, CachedTotalHeight + 200.f);
+    return FVector2D(1000.f, CachedTotalHeight);
 }
+
+
 
 // =====================================================
 // SCRIPT EDIT PIPELINE
@@ -108,30 +113,32 @@ void SGASScriptPanel::ApplyScriptEdit(const FGASScriptEdit& Edit)
     if (Edit.ParagraphIndex == INDEX_NONE)
         return;
 
-    auto HasPageBreakAfterParagraph = [&](int32 ParagraphIndex) -> bool
-        {
-            for (const FGASUserPageBreak& PB : SourceScript->UserPageBreaks)
-            {
-                if (PB.AfterParagraphIndex == ParagraphIndex)
-                    return true;
-            }
-            return false;
-        };
-
-
-
     switch (Edit.Type)
     {
     case EGASScriptEditType::SetPageBreak:
     {
         const int32 ParagraphIndex = Edit.ParagraphIndex;
 
-        if (ParagraphIndex != INDEX_NONE)
+        if (RenderedParagraphs.IsValidIndex(ParagraphIndex))
         {
-            if (!HasPageBreakAfterParagraph(ParagraphIndex))
+            const FString& BlockId =
+                RenderedParagraphs[ParagraphIndex].BlockId;
+
+            // Prevent duplicate page breaks on the same block
+            bool bAlreadyHasBreak = false;
+            for (const FGASUserPageBreak& PB : SourceScript->UserPageBreaks)
+            {
+                if (PB.AfterBlockId == BlockId)
+                {
+                    bAlreadyHasBreak = true;
+                    break;
+                }
+            }
+
+            if (!bAlreadyHasBreak)
             {
                 FGASUserPageBreak NewBreak;
-                NewBreak.AfterParagraphIndex = ParagraphIndex;
+                NewBreak.AfterBlockId = BlockId;
 
                 SourceScript->UserPageBreaks.Add(NewBreak);
             }
@@ -141,21 +148,28 @@ void SGASScriptPanel::ApplyScriptEdit(const FGASScriptEdit& Edit)
 
 
 
+
+
     case EGASScriptEditType::ClearPageBreak:
     {
         const int32 ParagraphIndex = Edit.ParagraphIndex;
 
-        if (ParagraphIndex != INDEX_NONE)
+        if (RenderedParagraphs.IsValidIndex(ParagraphIndex))
         {
+            const FString& BlockId =
+                RenderedParagraphs[ParagraphIndex].BlockId;
+
             SourceScript->UserPageBreaks.RemoveAll(
                 [&](const FGASUserPageBreak& PB)
                 {
-                    return PB.AfterParagraphIndex == ParagraphIndex;
+                    return PB.AfterBlockId == BlockId;
                 }
             );
         }
         break;
     }
+
+
 
 
     default:
@@ -197,123 +211,6 @@ void SGASScriptPanel::ApplyTextEdit(
 }
 
 
-// =============================================================
-//  Edit Dialog
-// =============================================================
-
-//void SGASScriptPanel::OpenEditDialog(int32 ParagraphIndex)
-//{
-//    if (!RenderedParagraphs.IsValidIndex(ParagraphIndex))
-//        return;
-//
-//    const FRenderedParagraph& P = RenderedParagraphs[ParagraphIndex];
-//
-//    // ------------------------------------------------------------
-//    // Capture original text
-//    // ------------------------------------------------------------
-//    FString OriginalText = GetSourceTextForBlock(P.BlockId);
-//
-//    // We store edited text here before commit
-//    TSharedRef<FString> EditedText =
-//        MakeShared<FString>(OriginalText);
-//
-//    // ------------------------------------------------------------
-//    // Build modal window
-//    // ------------------------------------------------------------
-//    TSharedRef<SWindow> EditWindow = SNew(SWindow)
-//        .Title(FText::FromString(TEXT("Edit Paragraph")))
-//        .ClientSize(FVector2D(600.f, 400.f))
-//        .SupportsMinimize(false)
-//        .SupportsMaximize(false);
-//
-//    EditWindow->SetContent(
-//        SNew(SVerticalBox)
-//
-//        // -----------------------------
-//        // Text editor
-//        // -----------------------------
-//        +SVerticalBox::Slot()
-//        .FillHeight(1.f)
-//        .Padding(8.f)
-//        [
-//            SNew(SMultiLineEditableTextBox)
-//                .Text(FText::FromString(OriginalText))
-//                .OnTextChanged_Lambda(
-//                    [EditedText](const FText& NewText)
-//                    {
-//                        *EditedText = NewText.ToString();
-//                    })
-//        ]
-//
-//    // -----------------------------
-//    // Buttons
-//    // -----------------------------
-//    +SVerticalBox::Slot()
-//        .AutoHeight()
-//        .Padding(8.f)
-//        [
-//            SNew(SHorizontalBox)
-//
-//                + SHorizontalBox::Slot()
-//                .HAlign(HAlign_Right)
-//                .FillWidth(1.f)
-//                [
-//                    SNew(SButton)
-//                        .Text(FText::FromString(TEXT("Cancel")))
-//                        .OnClicked_Lambda(
-//                            [EditWindow]()
-//                            {
-//                                EditWindow->RequestDestroyWindow();
-//                                return FReply::Handled();
-//                            })
-//                ]
-//
-//            + SHorizontalBox::Slot()
-//                .HAlign(HAlign_Right)
-//                .AutoWidth()
-//                .Padding(8.f, 0.f)
-//                [
-//                    SNew(SButton)
-//                        .Text(FText::FromString(TEXT("OK")))
-//                        .OnClicked_Lambda(
-//                            [this, EditWindow, P, EditedText]()
-//                            {
-//                                ApplyTextEdit(P.BlockId, *EditedText);
-//
-//                                // If this was Add Character+Dialogue, open Dialogue next
-//                                if (PendingDialogueAfterCharacterIndex != INDEX_NONE)
-//                                {
-//                                    const int32 DialogueIndex = PendingDialogueAfterCharacterIndex;
-//                                    PendingDialogueAfterCharacterIndex = INDEX_NONE;
-//
-//                                    FTSTicker::GetCoreTicker().AddTicker(
-//                                        FTickerDelegate::CreateLambda(
-//                                            [this, DialogueIndex](float)
-//                                            {
-//                                                OpenEditDialogueDialog(DialogueIndex);
-//                                                return false;
-//                                            }
-//                                        )
-//                                    );
-//
-//
-//
-//                                }
-//
-//                                EditWindow->RequestDestroyWindow();
-//                                return FReply::Handled();
-//                            })
-//
-//                ]
-//        ]
-//        );
-//
-//    // ------------------------------------------------------------
-//    // Show modal
-//    // ------------------------------------------------------------
-//    FSlateApplication::Get().AddWindow(EditWindow);
-//}
-
 
 int32 SGASScriptPanel::HitTestAddGutter(float MouseY) const
 {
@@ -339,7 +236,6 @@ int32 SGASScriptPanel::HitTestAddGutter(float MouseY) const
 
     return INDEX_NONE;
 }
-
 
 
 void SGASScriptPanel::TryEditParagraph(int32 BlockIndex)
@@ -465,9 +361,10 @@ void SGASScriptPanel::OpenEditActionDialog(int32 BlockIndex)
                                     {
                                         if (SourceScript && SourceScript->Blocks.IsValidIndex(BlockIndex))
                                         {
+                                            SourceScript->CaptureUndoSnapshot();
+
                                             SourceScript->Blocks[BlockIndex].Text = CachedEditText.ToString();
 
-                                            // mark dirty so the UI shows * and user knows to save JSON
                                             if (OnScriptMutated.IsBound())
                                             {
                                                 OnScriptMutated.Execute();
@@ -477,10 +374,10 @@ void SGASScriptPanel::OpenEditActionDialog(int32 BlockIndex)
                                             Invalidate(EInvalidateWidget::LayoutAndVolatility);
                                         }
 
-
                                         EditWindow->RequestDestroyWindow();
                                         return FReply::Handled();
                                     })
+
                         ]
                 ]
         ]
@@ -609,7 +506,6 @@ void SGASScriptPanel::OpenEditCharacterDialog(int32 BlockIndex)
     FSlateApplication::Get().SetKeyboardFocus(EditTextBox);
 }
 
-
 void SGASScriptPanel::OpenAddBlockDialog(int32 InsertAfterParagraphIndex)
 {
     if (!SourceScript)
@@ -732,7 +628,6 @@ void SGASScriptPanel::OpenAddBlockDialog(int32 InsertAfterParagraphIndex)
         FSlateApplication::Get().GetActiveTopLevelWindow()
     );
 }
-
 
 void SGASScriptPanel::OpenDialoguePreviewDialog(int32 BlockIndex)
 {
@@ -959,7 +854,6 @@ void SGASScriptPanel::SetEditMode(bool bInEditMode)
     Invalidate(EInvalidateWidget::LayoutAndVolatility);
 }
 
-
 void SGASScriptPanel::SetAddMode(bool bInAddMode)
 {
     bAddMode = bInAddMode;
@@ -980,6 +874,9 @@ void SGASScriptPanel::InsertNewBlock(
     {
         return;
     }
+
+    // UNDO: capture state BEFORE mutation
+    SourceScript->CaptureUndoSnapshot();
 
     const int32 InsertIndex = InsertAfterParagraphIndex + 1;
 
@@ -1043,7 +940,6 @@ void SGASScriptPanel::InsertNewBlock(
         PendingEditBlockIndex = INDEX_NONE;
     }
 }
-
 
 void SGASScriptPanel::OnEditCancelled()
 {
@@ -1162,6 +1058,10 @@ void SGASScriptPanel::DeleteBlock(int32 BlockIndex)
         return;
     }
 
+    // UNDO: capture state BEFORE deletion
+    SourceScript->CaptureUndoSnapshot();
+
+
     // If deleting a Character, also delete its Dialogue if present
     if (SourceScript->Blocks[BlockIndex].Type == EGASBlockType::Character)
     {
@@ -1206,6 +1106,73 @@ void SGASScriptPanel::DeleteBlock(int32 BlockIndex)
     Invalidate(EInvalidateWidget::LayoutAndVolatility);
 }
 
+FReply SGASScriptPanel::OnKeyDown(
+    const FGeometry& MyGeometry,
+    const FKeyEvent& InKeyEvent
+)
+{
+    // CTRL + Z → Undo
+    if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::Z)
+    {
+        if (SourceScript && SourceScript->CanUndo())
+        {
+            SourceScript->Undo();
+            RebuildLayout();
+            Invalidate(EInvalidateWidget::LayoutAndVolatility);
+            return FReply::Handled();
+        }
+    }
+
+    // CTRL + Y → Redo
+    if (InKeyEvent.IsControlDown() && InKeyEvent.GetKey() == EKeys::Y)
+    {
+        if (SourceScript && SourceScript->CanRedo())
+        {
+            SourceScript->Redo();
+            RebuildLayout();
+            Invalidate(EInvalidateWidget::LayoutAndVolatility);
+            return FReply::Handled();
+        }
+    }
+
+    return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+}
+
+void SGASScriptPanel::ScrollToParagraph(int32 ParagraphIndex)
+{
+    if (!RenderedParagraphs.IsValidIndex(ParagraphIndex))
+    {
+        return;
+    }
+
+    PendingScrollParagraph = ParagraphIndex;
+    Invalidate(EInvalidateWidget::Paint);
+}
+
+
+void SGASScriptPanel::ScrollToBlockId(const FString& BlockId)
+{
+    for (int32 i = 0; i < RenderedParagraphs.Num(); ++i)
+    {
+        if (RenderedParagraphs[i].BlockId == BlockId)
+        {
+            PendingScrollParagraph = i;
+            Invalidate(EInvalidateWidget::Paint);
+            return;
+        }
+    }
+}
+
+
+FString SGASScriptPanel::GetSelectedBlockId() const
+{
+    if (!RenderedParagraphs.IsValidIndex(SelectedParagraphIndex))
+    {
+        return FString();
+    }
+
+    return RenderedParagraphs[SelectedParagraphIndex].BlockId;
+}
 
 
 // =============================================================
@@ -1224,6 +1191,50 @@ int32 SGASScriptPanel::OnPaint(
 
     // Track total height
     CachedTotalHeight = 0.f;
+    for (const FRenderedParagraph& P : RenderedParagraphs)
+    {
+        CachedTotalHeight = FMath::Max(
+            CachedTotalHeight,
+            P.TopY + P.Height
+        );
+    }
+
+    // ------------------------------------------------------------
+    // Apply pending scroll-to-paragraph (scene jump)
+    // MUST happen BEFORE drawing
+    // ------------------------------------------------------------
+    if (PendingScrollParagraph != INDEX_NONE &&
+        RenderedParagraphs.IsValidIndex(PendingScrollParagraph))
+    {
+        const FRenderedParagraph& Para =
+            RenderedParagraphs[PendingScrollParagraph];
+
+        const float ViewportHeight =
+            MyCullingRect.GetSize().Y;
+
+        const float MaxScroll =
+            FMath::Max(0.f, CachedTotalHeight - ViewportHeight);
+
+        constexpr float SceneScrollPadding = 24.f;
+
+        ScrollOffsetY = FMath::Clamp(
+            Para.TopY - ScriptFormat::MarginTop - SceneScrollPadding,
+            0.f,
+            MaxScroll
+        );
+
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("SCROLL JUMP → Para=%d TopY=%.1f Offset=%.1f"),
+            PendingScrollParagraph,
+            Para.TopY,
+            ScrollOffsetY
+        );
+
+        PendingScrollParagraph = INDEX_NONE;
+    }
+
 
     const FSlateFontInfo FontInfo =
         FGAS_PreProToolsStyle::Get().GetFontStyle("GAS.ScriptFont");
@@ -1246,7 +1257,7 @@ int32 SGASScriptPanel::OnPaint(
                 OutDrawElements,
                 LayerId,
                 AllottedGeometry.ToPaintGeometry(
-                    FVector2D(0.f, P.TopY),
+                    FVector2D(0.f, P.TopY - ScrollOffsetY),
                     FVector2D(AllottedGeometry.GetLocalSize().X, P.Height)
                 ),
                 FCoreStyle::Get().GetBrush("WhiteBrush"),
@@ -1255,61 +1266,63 @@ int32 SGASScriptPanel::OnPaint(
             );
         }
 
+
         // ------------------------------------------------------------
         // Draw SCENE NUMBER (optional, margin only — no layout impact)
         // ------------------------------------------------------------
         if (bShowSceneNumbers &&
             P.BlockType == EGASBlockType::SceneHeading)
-        {
-            const FString* SceneNum =
-                P.SourceMetadata.Find("SceneNumber");
 
-            if (SceneNum)
+
+        {
+            if (!P.SceneLabel.IsEmpty())
             {
                 FSlateDrawElement::MakeText(
                     OutDrawElements,
                     LayerId,
                     AllottedGeometry.ToPaintGeometry(
-                        FVector2D(ScriptFormat::PageLeft + P.IndentLeft - 50.f, P.TopY),
+                        FVector2D(
+                            ScriptFormat::PageLeft + P.IndentLeft - 50.f,
+                            P.TopY - ScrollOffsetY
+                        ),
                         FVector2D::UnitVector
                     ),
-                    FText::FromString(*SceneNum),
+                    FText::FromString(P.SceneLabel),
                     FontInfo,
                     ESlateDrawEffect::None,
                     FLinearColor(0.65f, 0.65f, 0.65f, 1.f)
                 );
             }
+
         }
 
         // ------------------------------------------------------------
         // Draw PAGE BREAK marker (derived, visual only)
         // ------------------------------------------------------------
+
         if (P.bStartsPage)
         {
             const FString PageText =
                 FString::Printf(TEXT("PAGE %d"), P.PageNumber);
 
-            const float MarkerY =
-                P.TopY - (ScriptFormat::LineHeight * 2.0f);
+            const float MarkerY = P.TopY - ScrollOffsetY;
+            const float MarkerX = 10.f; // force "PAGE" to be visible (no clipping)
 
-            const float MarkerX =
-                ScriptFormat::PageLeft * 0.35f;
+            //const float MarkerX = ScriptFormat::PageLeft * 0.35f;
 
             const bool bIsHovered =
                 bEditMode &&
                 (HoveredPageBreakIndex != INDEX_NONE) &&
                 SourceScript &&
                 SourceScript->UserPageBreaks.IsValidIndex(HoveredPageBreakIndex) &&
-                SourceScript->UserPageBreaks[HoveredPageBreakIndex].AfterParagraphIndex
-                == P.ParagraphIndex - 1;
-
+                SourceScript->UserPageBreaks[HoveredPageBreakIndex].AfterBlockId
+                == P.BlockId;
 
             const FLinearColor TextColor =
                 bIsHovered
-                ? FLinearColor(1.0f, 1.0f, 0.6f, 1.f)   // bright yellow
-                : FLinearColor(1.0f, 0.85f, 0.2f, 1.f); // normal yellow
+                ? FLinearColor(1.0f, 1.0f, 0.6f, 1.f)
+                : FLinearColor(1.0f, 0.85f, 0.2f, 1.f);
 
-            // Bold horizontal rule when hovered
             if (bIsHovered)
             {
                 const float RuleThickness = 3.0f;
@@ -1327,7 +1340,6 @@ int32 SGASScriptPanel::OnPaint(
                 );
             }
 
-            // Page text
             FSlateDrawElement::MakeText(
                 OutDrawElements,
                 LayerId + 1,
@@ -1340,18 +1352,17 @@ int32 SGASScriptPanel::OnPaint(
                 ESlateDrawEffect::None,
                 TextColor
             );
-
         }
-
-
 
         // ----------------------------------------------
         // Draw lines at TRUE layout coordinates
         // ----------------------------------------------
-        float LineY = P.TopY;
+        float LineY = P.TopY - ScrollOffsetY;
+
 
         for (const FString& Ln : P.Lines)
         {
+
             FSlateDrawElement::MakeText(
                 OutDrawElements,
                 LayerId,
@@ -1368,10 +1379,6 @@ int32 SGASScriptPanel::OnPaint(
             LineY += ScriptFormat::LineHeight;
         }
 
-        // ----------------------------------------------
-        // Update panel height
-        // ----------------------------------------------
-        CachedTotalHeight = FMath::Max(CachedTotalHeight, P.TopY + P.Height);
     }
 
     // ------------------------------------------------------------
@@ -1385,7 +1392,7 @@ int32 SGASScriptPanel::OnPaint(
             OutDrawElements,
             LayerId + 50,
             AllottedGeometry.ToPaintGeometry(
-                FVector2D(0.f, DragPreviewY),
+                FVector2D(0.f, DragPreviewY - ScrollOffsetY),
                 FVector2D(AllottedGeometry.GetLocalSize().X, LineThickness)
             ),
             FCoreStyle::Get().GetBrush("WhiteBrush"),
@@ -1393,7 +1400,6 @@ int32 SGASScriptPanel::OnPaint(
             FLinearColor(1.0f, 0.85f, 0.2f, 0.9f)
         );
     }
-
 
 
     bNeedsRedraw = false;
@@ -1408,7 +1414,9 @@ int32 SGASScriptPanel::HitTestParagraph(float LocalY) const
     {
         const FRenderedParagraph& P = RenderedParagraphs[i];
 
-        if (LocalY >= P.TopY && LocalY <= (P.TopY + P.Height))
+        float TestY = LocalY + ScrollOffsetY;
+
+        if (TestY >= P.TopY && TestY < P.TopY + P.Height)
         {
             return i;
         }
@@ -1446,11 +1454,6 @@ void SGASScriptPanel::SetShowSceneNumbers(bool bInShow)
 }
 
 
-void SGASScriptPanel::ScrollToParagraph(int32 ParagraphIndex)
-{
-    // Future: implement scrolling. For now, safe no-op.
-}
-
 void SGASScriptPanel::SetShotMarkers(const TArray<FGASMarker>& Markers)
 {
     ShotMarkers = Markers;
@@ -1469,6 +1472,8 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     const FPointerEvent& MouseEvent
 )
 {
+
+    FSlateApplication::Get().SetKeyboardFocus(AsShared(), EFocusCause::Mouse);
     // SAFETY: panel not ready yet
     if (!SourceScript || RenderedParagraphs.Num() == 0)
     {
@@ -1477,15 +1482,16 @@ FReply SGASScriptPanel::OnMouseButtonDown(
 
     UE_LOG(LogTemp, Warning, TEXT("SCRIPT PANEL: MouseDown received"));
 
+
     // We only handle clicks when a tool is active
     UE_LOG(LogTemp, Error, TEXT("PANEL STATE: Edit=%d Add=%d"), bEditMode, bAddMode);
 
+    const bool bLeftMouse =
+        MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton;
 
+    const bool bAltDown = MouseEvent.IsAltDown();
+    const bool bCtrlDown = MouseEvent.IsControlDown();
 
-    if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
-    {
-        return FReply::Unhandled();
-    }
 
     if (RenderedParagraphs.Num() == 0)
     {
@@ -1493,20 +1499,84 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     }
 
 
-
-    const bool bAltDown = MouseEvent.IsAltDown();
-    const bool bCtrlDown = MouseEvent.IsControlDown();
-
-
     const FVector2D LocalPos =
         MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 
-    const float MouseY = LocalPos.Y;
+    const float MouseY = LocalPos.Y + ScrollOffsetY;
+
+
+    // ------------------------------------------------------------
+    // 1) PAGE BREAK HIT TEST (ALT + LMB ONLY)
+    // ------------------------------------------------------------
+    if (bEditMode && bAltDown && bLeftMouse)
+
+    {
+        constexpr float PageBreakHitTolerance = 40.f;
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("ALT PATH CHECK: Alt=%d LMB=%d"),
+            bAltDown,
+            bLeftMouse
+        );
+
+
+        for (int32 BreakIndex = 0;
+            BreakIndex < SourceScript->UserPageBreaks.Num();
+            ++BreakIndex)
+        {
+            const FString& AfterBlockId =
+                SourceScript->UserPageBreaks[BreakIndex].AfterBlockId;
+
+            for (const FRenderedParagraph& P : RenderedParagraphs)
+            {
+                if (!P.bStartsPage)
+                {
+                    continue;
+                }
+
+                const int32 PrevIndex = P.ParagraphIndex - 1;
+
+                if (!RenderedParagraphs.IsValidIndex(PrevIndex))
+                {
+                    continue;
+                }
+
+                if (RenderedParagraphs[PrevIndex].BlockId != AfterBlockId)
+                {
+                    continue;
+                }
+
+                const float MarkerY = P.TopY;
+
+                if (FMath::Abs(MouseY - MarkerY) <= PageBreakHitTolerance)
+                {
+                    UE_LOG(LogTemp, Warning,
+                        TEXT("PAGE BREAK HIT! Index=%d"),
+                        BreakIndex
+                    );
+
+                    bIsDraggingPageBreak = true;
+                    DraggedPageBreakIndex = BreakIndex;
+                    DragPreviewY = MarkerY;
+
+                    return FReply::Handled()
+                        .CaptureMouse(AsShared());
+                }
+            }
+        }
+
+        // 🔴 CRITICAL: ALT was held but no page break hit
+        // Do NOT fall through to paragraph selection
+        return FReply::Handled();
+    }
+
 
     // ------------------------------------------------------------
     // ADD MODE: click between blocks to insert
     // ------------------------------------------------------------
-    if (bAddMode)
+    if (bAddMode && bLeftMouse)
+
     {
         const int32 InsertAfterParagraph =
             HitTestAddGutter(MouseY);
@@ -1518,42 +1588,6 @@ FReply SGASScriptPanel::OnMouseButtonDown(
         }
 
         return FReply::Handled();
-    }
-
-
-    // ------------------------------------------------------------
-    // 1) PAGE BREAK HIT TEST (ALT + LMB ONLY)
-    // ------------------------------------------------------------
-    if (bAltDown)
-    {
-        constexpr float PageBreakHitTolerance = 40.f;
-
-        for (int32 BreakIndex = 0; BreakIndex < SourceScript->UserPageBreaks.Num(); ++BreakIndex)
-        {
-            const int32 AfterParagraph =
-                SourceScript->UserPageBreaks[BreakIndex].AfterParagraphIndex;
-
-
-            for (const FRenderedParagraph& P : RenderedParagraphs)
-            {
-                if (P.ParagraphIndex == AfterParagraph + 1 && P.bStartsPage)
-                {
-                    const float MarkerY =
-                        P.TopY - (ScriptFormat::LineHeight * 2.0f);
-
-                    if (FMath::Abs(MouseY - MarkerY) <= PageBreakHitTolerance)
-                    {
-                        UE_LOG(LogTemp, Warning, TEXT("PAGE BREAK HIT! Index=%d"), BreakIndex);
-
-                        bIsDraggingPageBreak = true;
-                        DraggedPageBreakIndex = BreakIndex;
-                        DragPreviewY = MarkerY;
-
-                        return FReply::Handled().CaptureMouse(AsShared());
-                    }
-                }
-            }
-        }
     }
 
 
@@ -1592,7 +1626,8 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     // ------------------------------------------------------------
     // CTRL + LMB = Delete block (Edit Mode only)
     // ------------------------------------------------------------
-    if (bEditMode && bCtrlDown)
+    if (bEditMode && bCtrlDown && bLeftMouse)
+
     {
         OpenDeleteBlockDialog(HitParagraph.ParagraphIndex);
         return FReply::Handled();
@@ -1602,7 +1637,7 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     // ------------------------------------------------------------
     // 4) ROUTE ALL BLOCK CLICKS THROUGH EDIT PIPELINE
     // ------------------------------------------------------------
-    if (bEditMode && OnParagraphClicked.IsBound())
+    if (bEditMode && bLeftMouse && !bAltDown && OnParagraphClicked.IsBound())
     {
         UE_LOG(LogTemp, Error, TEXT("EXECUTING OnParagraphClicked for %d"), HitParagraph.ParagraphIndex);
         OnParagraphClicked.Execute(HitParagraph.ParagraphIndex);
@@ -1610,7 +1645,7 @@ FReply SGASScriptPanel::OnMouseButtonDown(
 
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("OnParagraphClicked NOT bound"));
+        UE_LOG(LogTemp, Verbose, TEXT("OnParagraphClicked not bound (normal outside edit mode)"));
     }
 
 
@@ -1645,12 +1680,13 @@ FReply SGASScriptPanel::OnMouseMove(
     // ------------------------------------------------------------
     // PAGE BREAK DRAGGING (Edit Mode only)
     // ------------------------------------------------------------
-    if (bEditMode && bIsDraggingPageBreak)
+    if (bIsDraggingPageBreak)
     {
         const FVector2D LocalPos =
             MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 
-        DragPreviewY = LocalPos.Y;
+        DragPreviewY = LocalPos.Y + ScrollOffsetY;
+
         Invalidate(EInvalidateWidget::Paint);
 
         return FReply::Handled();
@@ -1680,7 +1716,8 @@ FReply SGASScriptPanel::OnMouseButtonUp(
     const FVector2D LocalPos =
         MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 
-    const float ReleaseY = LocalPos.Y;
+    const float ReleaseY = LocalPos.Y + ScrollOffsetY;
+
 
     // ------------------------------------------------------------
     // Snap to nearest paragraph
@@ -1692,7 +1729,7 @@ FReply SGASScriptPanel::OnMouseButtonUp(
         const FRenderedParagraph& P = RenderedParagraphs[i];
 
         // We snap to paragraphs that participate in vertical flow
-        if (!P.bStartsPage && P.ParagraphIndex != INDEX_NONE)
+        if (P.ParagraphIndex != INDEX_NONE)
         {
             if (ReleaseY < P.TopY)
             {
@@ -1700,6 +1737,7 @@ FReply SGASScriptPanel::OnMouseButtonUp(
                 break;
             }
         }
+
     }
 
     // Fallback: place at end if dropped below everything
@@ -1713,11 +1751,16 @@ FReply SGASScriptPanel::OnMouseButtonUp(
     // Commit page break change
     // ------------------------------------------------------------
     if (SourceScript &&
-        SourceScript ->UserPageBreaks.IsValidIndex(DraggedPageBreakIndex))
+        SourceScript->UserPageBreaks.IsValidIndex(DraggedPageBreakIndex) &&
+        RenderedParagraphs.IsValidIndex(NewAfterParagraph))
     {
-        SourceScript ->UserPageBreaks[DraggedPageBreakIndex]
-            .AfterParagraphIndex = FMath::Max(0, NewAfterParagraph);
+        const FString& NewAfterBlockId =
+            RenderedParagraphs[NewAfterParagraph].BlockId;
+
+        SourceScript->UserPageBreaks[DraggedPageBreakIndex]
+            .AfterBlockId = NewAfterBlockId;
     }
+
 
     // Prepare snap animation
     SnapStartY = DragPreviewY;
@@ -1746,6 +1789,36 @@ FReply SGASScriptPanel::OnMouseButtonUp(
 
 }
 
+FReply SGASScriptPanel::HandleMouseWheel(
+    const FGeometry& MyGeometry,
+    const FPointerEvent& MouseEvent)
+{
+    constexpr float WheelScrollSpeed = 60.f;
+
+    // Recompute total height (authoritative)
+    CachedTotalHeight = 0.f;
+    for (const FRenderedParagraph& P : RenderedParagraphs)
+    {
+        CachedTotalHeight = FMath::Max(
+            CachedTotalHeight,
+            P.TopY + P.Height
+        );
+    }
+
+    ScrollOffsetY -= MouseEvent.GetWheelDelta() * WheelScrollSpeed;
+
+    const float ViewportHeight = MyGeometry.GetLocalSize().Y;
+    const float MaxScroll =
+        FMath::Max(0.f, CachedTotalHeight - ViewportHeight);
+
+    ScrollOffsetY = FMath::Clamp(ScrollOffsetY, 0.f, MaxScroll);
+
+    Invalidate(EInvalidateWidget::Paint);
+    return FReply::Handled();
+}
+
+
+
 FCursorReply SGASScriptPanel::OnCursorQuery(
     const FGeometry& MyGeometry,
     const FPointerEvent& CursorEvent
@@ -1766,14 +1839,17 @@ void SGASScriptPanel::Tick(
     const float InDeltaTime)
 {
     // Recompute total height before Slate asks for desired size
-    float Y = 0.f;
+    CachedTotalHeight = 0.f;
 
     for (const FRenderedParagraph& P : RenderedParagraphs)
     {
-        Y += P.Height;
+        CachedTotalHeight = FMath::Max(
+            CachedTotalHeight,
+            P.TopY + P.Height
+        );
     }
 
-    CachedTotalHeight = Y;
+    Invalidate(EInvalidateWidget::Paint);
 
     // ------------------------------------------------------------
     // Page break snap animation

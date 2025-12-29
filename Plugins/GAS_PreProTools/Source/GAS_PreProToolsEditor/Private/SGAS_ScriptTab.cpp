@@ -1,9 +1,14 @@
 ﻿#include "SGAS_ScriptTab.h"
+#include "GAS_ShotListBuilder.h"
 #include "ScriptModel.h"
 #include "SGASScriptPanel.h"
 #include "GAS_FDXImporter.h"
 #include "GASPreProProject.h"
 #include "GAS_PreProToolsEditorModule.h"
+#include "GAS_ImportNumberingTypes.h"
+#include "GAS_ShotListTypes.h"
+#include "SScriptWheelCatcher.h"
+
 
 #include "ScriptLayoutEngine.h"
 #include "JsonObjectConverter.h"
@@ -23,6 +28,8 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
+#include "Misc/MessageDialog.h"
+
 
 #include "GAS_PreProToolsStyle.h"
 #include "GASScriptAsset.h"
@@ -31,13 +38,234 @@
 // JSON persistence is temporarily disabled; we keep FileManager for GetScriptJsonPath.
 #include "HAL/FileManager.h"
 
+// ------------------------------------------------------------
+// Import-time numbering prompt (Scene + Shot)
+// ------------------------------------------------------------
+static FGASImportNumberingOptions PromptImportNumberingOptions()
+{
+    FGASImportNumberingOptions Options;
 
+    // Defaults (match previous behavior)
+    Options.SceneNumberingStyle = EGASNumberingStyle::CountBy10;
+    Options.ShotNumberingPolicy = EGASShotNumberingPolicy::Numeric_1s;
+
+    TSharedRef<SWindow> Window = SNew(SWindow)
+        .Title(FText::FromString(TEXT("Scene & Shot Numbering")))
+        .ClientSize(FVector2D(420.f, 300.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    // ------------------------------------------------------------
+    // Scene numbering checkboxes
+    // ------------------------------------------------------------
+    TSharedPtr<SCheckBox> SceneBy10;
+    TSharedPtr<SCheckBox> SceneBy1;
+    TSharedPtr<SCheckBox> SceneAlpha;
+
+    // ------------------------------------------------------------
+    // Shot numbering checkboxes
+    // ------------------------------------------------------------
+    TSharedPtr<SCheckBox> ShotBy1;
+    TSharedPtr<SCheckBox> ShotBy10;
+    TSharedPtr<SCheckBox> ShotAlpha;
+
+    Window->SetContent(
+        SNew(SVerticalBox)
+
+        // =========================================================
+        // Header
+        // =========================================================
+        +SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f)
+        [
+            SNew(STextBlock)
+                .Text(FText::FromString(
+                    TEXT("Choose how scenes and shots should be numbered.\n")
+                    TEXT("(These cannot be changed later.)")
+                ))
+        ]
+
+    // =========================================================
+    // Scene Numbering
+    // =========================================================
+    +SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 8.f, 12.f, 4.f)
+        [
+            SNew(STextBlock)
+                .Text(FText::FromString(TEXT("Scene Numbering Style")))
+        ]
+
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(20.f, 2.f)
+        [
+            SAssignNew(SceneBy10, SCheckBox)
+                .IsChecked(ECheckBoxState::Checked)
+                .OnCheckStateChanged_Lambda([&](ECheckBoxState State)
+                    {
+                        if (State == ECheckBoxState::Checked)
+                        {
+                            SceneBy1->SetIsChecked(ECheckBoxState::Unchecked);
+                            SceneAlpha->SetIsChecked(ECheckBoxState::Unchecked);
+                            Options.SceneNumberingStyle = EGASNumberingStyle::CountBy10;
+                        }
+                    })
+                [
+                    SNew(STextBlock).Text(FText::FromString(TEXT("By 10 (10, 20, 30…)")))
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(20.f, 2.f)
+        [
+            SAssignNew(SceneBy1, SCheckBox)
+                .OnCheckStateChanged_Lambda([&](ECheckBoxState State)
+                    {
+                        if (State == ECheckBoxState::Checked)
+                        {
+                            SceneBy10->SetIsChecked(ECheckBoxState::Unchecked);
+                            SceneAlpha->SetIsChecked(ECheckBoxState::Unchecked);
+                            Options.SceneNumberingStyle = EGASNumberingStyle::CountBy1;
+                        }
+                    })
+                [
+                    SNew(STextBlock).Text(FText::FromString(TEXT("By 1 (1, 2, 3…)")))
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(20.f, 2.f)
+        [
+            SAssignNew(SceneAlpha, SCheckBox)
+                .OnCheckStateChanged_Lambda([&](ECheckBoxState State)
+                    {
+                        if (State == ECheckBoxState::Checked)
+                        {
+                            SceneBy10->SetIsChecked(ECheckBoxState::Unchecked);
+                            SceneBy1->SetIsChecked(ECheckBoxState::Unchecked);
+                            Options.SceneNumberingStyle = EGASNumberingStyle::Alphabetic;
+                        }
+                    })
+                [
+                    SNew(STextBlock).Text(FText::FromString(TEXT("Alphabetical (A, B, C…)")))
+                ]
+        ]
+
+    // =========================================================
+    // Shot Numbering
+    // =========================================================
+    +SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 10.f, 12.f, 4.f)
+        [
+            SNew(STextBlock)
+                .Text(FText::FromString(TEXT("Shot Numbering Style")))
+        ]
+
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(20.f, 2.f)
+        [
+            SAssignNew(ShotBy1, SCheckBox)
+                .IsChecked(ECheckBoxState::Checked)
+                .OnCheckStateChanged_Lambda([&](ECheckBoxState State)
+                    {
+                        if (State == ECheckBoxState::Checked)
+                        {
+                            ShotBy10->SetIsChecked(ECheckBoxState::Unchecked);
+                            ShotAlpha->SetIsChecked(ECheckBoxState::Unchecked);
+                            Options.ShotNumberingPolicy = EGASShotNumberingPolicy::Numeric_1s;
+                        }
+                    })
+                [
+                    SNew(STextBlock).Text(FText::FromString(TEXT("By 1 (1, 2, 3…)")))
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(20.f, 2.f)
+        [
+            SAssignNew(ShotBy10, SCheckBox)
+                .OnCheckStateChanged_Lambda([&](ECheckBoxState State)
+                    {
+                        if (State == ECheckBoxState::Checked)
+                        {
+                            ShotBy1->SetIsChecked(ECheckBoxState::Unchecked);
+                            ShotAlpha->SetIsChecked(ECheckBoxState::Unchecked);
+                            Options.ShotNumberingPolicy = EGASShotNumberingPolicy::Numeric_10s;
+                        }
+                    })
+                [
+                    SNew(STextBlock).Text(FText::FromString(TEXT("By 10 (10, 20, 30…)")))
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(20.f, 2.f)
+        [
+            SAssignNew(ShotAlpha, SCheckBox)
+                .OnCheckStateChanged_Lambda([&](ECheckBoxState State)
+                    {
+                        if (State == ECheckBoxState::Checked)
+                        {
+                            ShotBy1->SetIsChecked(ECheckBoxState::Unchecked);
+                            ShotBy10->SetIsChecked(ECheckBoxState::Unchecked);
+                            Options.ShotNumberingPolicy = EGASShotNumberingPolicy::Alphabetic;
+                        }
+                    })
+                [
+                    SNew(STextBlock).Text(
+                        FText::FromString(TEXT("Alphabetical (A, B, C… AA after Z)"))
+                    )
+                ]
+        ]
+
+    // =========================================================
+    // OK button
+    // =========================================================
+    +SVerticalBox::Slot()
+        .AutoHeight()
+        .HAlign(HAlign_Right)
+        .Padding(12.f)
+        [
+            SNew(SButton)
+                .Text(FText::FromString(TEXT("OK")))
+                .OnClicked_Lambda([&]()
+                    {
+                        Window->RequestDestroyWindow();
+                        return FReply::Handled();
+                    })
+        ]
+        );
+
+    FSlateApplication::Get().AddModalWindow(Window, nullptr);
+
+    return Options;
+}
 
 
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
 {
 
     UE_LOG(LogTemp, Error, TEXT("=== GAS SCRIPT TAB CONSTRUCTED @ %s ==="), *FDateTime::Now().ToString());
+
+    // --------------------------------------------------
+    // Scene Numbering dropdown options
+    // --------------------------------------------------
+    SceneNumberingStyleOptions.Reset();
+    SceneNumberingStyleOptions.Add(MakeShared<FString>(TEXT("By 10")));
+    SceneNumberingStyleOptions.Add(MakeShared<FString>(TEXT("By 1")));
+    SceneNumberingStyleOptions.Add(MakeShared<FString>(TEXT("Alphabetical")));
+
+    // Default selection (match current Script.SceneNumbering if possible later)
+    SceneNumberingStyleSelected = SceneNumberingStyleOptions[0];
+
 
     ChildSlot
         [
@@ -68,7 +296,7 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                                 .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
                                                 .HAlign(HAlign_Center)
                                                 .VAlign(VAlign_Center)
-                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnToggleShotMarking))
+                                                .OnClicked(this, &SGAS_ScriptTab::OnAddShotMarkerClicked)
                                                 [
                                                     SNew(SImage)
                                                         .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.CameraIcon"))
@@ -263,9 +491,6 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                                     && CurrentScript.UserPageBreaks.Num() == 0;
                                             })
 
-
-
-
                                         // Tooltip explains state
                                         .ToolTipText_Lambda([this]()
                                             {
@@ -337,32 +562,52 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                         // MIDDLE PANEL
                         + SSplitter::Slot()
                         .Value(0.75f)
+                        .MinSize(400.f)
                         [
-                            SNew(SBorder)
-                                .Padding(8.f)
+                            SNew(SScriptWheelCatcher)
+                                .OnMouseWheel(FScriptMouseWheelDelegate::CreateLambda(
+                                    [this](const FGeometry& Geo, const FPointerEvent& Event)
+                                    {
+                                        if (ScriptPanel.IsValid())
+                                        {
+                                            return ScriptPanel->HandleMouseWheel(Geo, Event);
+                                        }
+                                        return FReply::Unhandled();
+                                    }
+                                ))
                                 [
-                                    SNew(SScrollBox)
+                                    SAssignNew(ScriptScrollBox, SScrollBox)
+                                        .ConsumeMouseWheel(EConsumeMouseWheel::Never)
+
                                         + SScrollBox::Slot()
                                         [
                                             SAssignNew(ScriptPanel, SGASScriptPanel)
-
                                         ]
                                 ]
-                        ]
 
+
+                        ]
 
                     // =======================================================
                     // RIGHT PANEL
                     // =======================================================
                     +SSplitter::Slot()
                         .Value(0.25f)
+                        .MinSize(250.f)
                         [
                             SNew(SBorder)
                                 .Padding(8.f)
+                                .Visibility(EVisibility::Visible)
                                 [
-                                    SAssignNew(ShotListContainer, SVerticalBox)
+                                    SNew(SScrollBox)
+
+                                        + SScrollBox::Slot()
+                                        [
+                                            SAssignNew(ShotListContainer, SVerticalBox)
+                                        ]
                                 ]
                         ]
+
                 ]
         ];
 
@@ -402,13 +647,26 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                 ScriptLayoutEngine::LayoutScript(
                     CurrentScript.Blocks,
                     CachedScriptPanelWidth,
-                    CurrentScript.UserPageBreaks
+                    CurrentScript.UserPageBreaks,
+                    CurrentScript.SceneNumbering
                 );
 
             ScriptPanel->SetRenderedScript(Rendered);
         }
 
         RebuildShotList();
+        // ------------------------------------------------------------
+        // TEMP: Create a project asset if none exists
+        // ------------------------------------------------------------
+        if (!ActiveProject)
+        {
+            ActiveProject = NewObject<UGASPreProProject>(
+                GetTransientPackage(),
+                UGASPreProProject::StaticClass()
+            );
+
+            UE_LOG(LogTemp, Warning, TEXT("DEBUG: Created transient GAS PrePro Project"));
+        }
 
 
 }
@@ -459,6 +717,30 @@ FReply SGAS_ScriptTab::OnImportScript()
         return FReply::Handled();
     }
 
+
+    // ------------------------------------------------------------
+    // SAFETY WARNING — before opening file dialog
+    // ------------------------------------------------------------
+    if (CurrentScript.Blocks.Num() > 0)
+    {
+        const EAppReturnType::Type Response =
+            FMessageDialog::Open(
+                EAppMsgType::YesNo,
+                FText::FromString(
+                    TEXT("A script is already loaded.\n\n"
+                        "ALL WORK WILL BE DESTROYED.\n\n"
+                        "Are you sure you want to import a NEW script?")
+                ),
+                FText::FromString(TEXT("Import New Script?"))
+            );
+
+        if (Response != EAppReturnType::Yes)
+        {
+            return FReply::Handled();
+        }
+
+    }
+
     TArray<FString> OutFiles;
 
     const void* ParentWindow =
@@ -476,7 +758,101 @@ FReply SGAS_ScriptTab::OnImportScript()
 
     if (bOpened && OutFiles.Num() > 0)
     {
-        LoadScriptFromFDX(OutFiles[0]);
+        // Import replaces the script wholesale
+        FGASImportNumberingOptions ImportOptions =
+            PromptImportNumberingOptions();
+
+        LoadScriptFromFDX(
+            OutFiles[0],
+            ImportOptions
+        );
+
+
+
+
+        // ------------------------------------------------------------
+        // Reset derived data (shot list MUST be rebuilt)
+        // ------------------------------------------------------------
+        TArray<FGASShotDefinitionListRow> SceneRows;
+
+        if (BuildShotListFromScript(
+            CurrentScript,
+            CurrentScript.SceneNumbering,
+            SceneRows))
+        {
+            ShotListItems.Reset();
+
+            for (const FGASShotDefinitionListRow& Row : SceneRows)
+            {
+                ShotListItems.Add(MakeShared<FGASShotDefinitionListRow>(Row));
+            }
+
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("[ShotList] Script scene rebuild: %d scenes"),
+                ShotListItems.Num()
+            );
+
+            for (const FGASShotDefinitionListRow& Row : SceneRows)
+            {
+                UE_LOG(
+                    LogTemp,
+                    Warning,
+                    TEXT("[ShotList DEBUG] SceneRow: bIsShotRow=%d  SceneBlockIndex=%d  DisplayName='%s'"),
+                    Row.bIsShotRow,
+                    Row.SceneBlockIndex,
+                    *Row.DisplayName
+                );
+            }
+
+        }
+
+        // -------------------------------------------------
+        // Step 16: Append derived Shot rows under Scenes
+        // (Display-only; importer remains authoritative)
+        // -------------------------------------------------
+
+        // Helper: resolve SceneBlockIndex from BlockId
+        auto ResolveSceneBlockIndex = [&](const FString& BlockId) -> int32
+            {
+                for (int32 i = 0; i < CurrentScript.Blocks.Num(); ++i)
+                {
+                    if (CurrentScript.Blocks[i].Id == BlockId)
+                    {
+                        return i;
+                    }
+                }
+                return INDEX_NONE;
+            };
+
+        for (const FGASMarker& Marker : CurrentScript.Markers)
+        {
+            if (Marker.MarkerType != EGASMarkerType::ShotMarker)
+            {
+                continue;
+            }
+
+            if (!Marker.bDerivedFromScene)
+            {
+                continue;
+            }
+
+            const int32 SceneBlockIndex = ResolveSceneBlockIndex(Marker.BlockId);
+            if (SceneBlockIndex == INDEX_NONE)
+            {
+                continue;
+            }
+
+            FGASShotDefinitionListRow ShotRow;
+            ShotRow.SceneBlockIndex = SceneBlockIndex;
+            ShotRow.SceneNumber = Marker.ShotId; // display name only
+            ShotRow.SceneTitle = Marker.ShotId;
+
+            ShotListItems.Add(MakeShared<FGASShotDefinitionListRow>(ShotRow));
+        }
+
+
     }
 
     return FReply::Handled();
@@ -512,7 +888,6 @@ FReply SGAS_ScriptTab::OnToggleSceneNumbers()
 }
 
 
-
 FReply SGAS_ScriptTab::OnToggleShotMarking()
 {
     // Simple toggle for now – we'll wire this into real behavior later.
@@ -524,10 +899,54 @@ FReply SGAS_ScriptTab::OnToggleShotMarking()
     return FReply::Handled();
 }
 
+FReply SGAS_ScriptTab::OnAddShotMarkerClicked()
+{
+    if (!ScriptPanel.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[ShotMarker] ScriptPanel invalid"));
+        return FReply::Handled();
+    }
+
+    const FString SelectedBlockId = ScriptPanel->GetSelectedBlockId();
+    if (SelectedBlockId.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[ShotMarker] No paragraph selected (no BlockId)"));
+        return FReply::Handled();
+    }
+
+    FGASMarker NewMarker;
+    NewMarker.Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    NewMarker.MarkerType = EGASMarkerType::ShotMarker;
+
+    // Anchor to the selected paragraph
+    NewMarker.BlockId = SelectedBlockId;
+
+    // IMPORTANT: user-created (non-derived)
+    NewMarker.bDerivedFromScene = false;
+
+    CurrentScript.Markers.Add(NewMarker);
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("[ShotMarker] Created user ShotMarker Id=%s BlockId=%s"),
+        *NewMarker.Id,
+        *NewMarker.BlockId
+    );
+
+    RebuildShotList();
+    return FReply::Handled();
+}
+
+
 // ============================================================================
 // LOAD SCRIPT (.FDX) — parse, layout, send to panel
 // ============================================================================
-void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
+void SGAS_ScriptTab::LoadScriptFromFDX(
+    const FString& FilePath,
+    const FGASImportNumberingOptions& ImportOptions
+)
+
 {
     // --------------------------------------------------------------------
     // 0. Confirm overwrite if script already loaded
@@ -563,15 +982,21 @@ void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
     // 2. Import FDX into a temporary FGASScript
     // --------------------------------------------------------------------
     FGASScript Script;
-    if (!UGAS_FDXImporter::ImportFDXToScript(FilePath, Script))
+
+    // Import options now come directly from the import dialog
+    const FGASImportNumberingOptions& Options = ImportOptions;
+
+
+
+    if (!UGAS_FDXImporter::ImportFDXToScript(FilePath, Script, Options))
     {
         UE_LOG(LogTemp, Error, TEXT("FDX import failed: %s"), *FilePath);
         return;
     }
 
-
     // Overwrite current in-memory script (JSON-authoritative)
     CurrentScript = FGASScript();
+
 
 
     // --------------------------------------------------------------------
@@ -579,6 +1004,7 @@ void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
     // --------------------------------------------------------------------
     CurrentScript = Script;
     CurrentScript.UserPageBreaks.Empty();
+
 
     if (ScriptPanel.IsValid())
     {
@@ -609,7 +1035,8 @@ void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
         ScriptLayoutEngine::LayoutScript(
             CurrentScript.Blocks,
             PanelWidth,
-            CurrentScript.UserPageBreaks
+            CurrentScript.UserPageBreaks,
+            CurrentScript.SceneNumbering
         );
 
 
@@ -622,99 +1049,121 @@ void SGAS_ScriptTab::LoadScriptFromFDX(const FString& FilePath)
     RebuildShotList();
 
     UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: LoadScriptFromFDX finished"));
+
     MarkScriptDirty();
 
 
 
     UE_LOG(LogTemp, Log, TEXT("Successfully loaded script from FDX: %s"), *FilePath);
+    OnSaveScript(); // make JSON authoritative immediately
+
 }
 
+
+// NOTE:
+// Auto page breaks are a bootstrap helper.
+// Final layout uses semantic page breaks only.
+// Tune ApproxLinesPerPage (≈53) for Final Draft parity.
 
 
 FReply SGAS_ScriptTab::OnGeneratePageBreaks()
 {
     UE_LOG(LogTemp, Warning, TEXT("Generate Page Breaks clicked"));
 
-    UE_LOG(LogTemp, Warning,
-        TEXT("Blocks=%d  ExistingPageBreaks=%d"),
-        CurrentScript.Blocks.Num(),
-        CurrentScript.UserPageBreaks.Num());
-
-
-
-    // Safety: button should be disabled if breaks exist
+    // One-time bootstrap only
     if (CurrentScript.UserPageBreaks.Num() > 0)
     {
         return FReply::Handled();
     }
 
-    // ------------------------------------------------------------
-    // Generate approximate page breaks (one-time bootstrap)
-    // ------------------------------------------------------------
+    int32 LinesOnPage = 0;
+    const int32 ApproxLinesPerPage = 54;
+
+    for (int32 BlockIndex = 0; BlockIndex < CurrentScript.Blocks.Num(); ++BlockIndex)
     {
-        int32 LinesOnPage = 0;
-        const int32 ApproxLinesPerPage = 55;
+        const FGASBlock& Block = CurrentScript.Blocks[BlockIndex];
 
-        // Paragraph index in vertical flow (ignores right-side dual dialogue)
-        int32 FlowParagraphIndex = -1;
-
-        for (int32 i = 0; i < CurrentScript.Blocks.Num(); ++i)
+        // Ignore right-side dual dialogue
+        if (Block.bIsDualDialogue && Block.DualRole == EGASDualRole::Right)
         {
-            const FGASBlock& Block = CurrentScript.Blocks[i];
+            continue;
+        }
 
-            // Ignore right-side dual dialogue (does not advance vertical flow)
-            if (Block.bIsDualDialogue && Block.DualRole == EGASDualRole::Right)
-            {
-                continue;
-            }
+        // VERY rough estimate (fine for bootstrap)
+        // Estimate line usage based on block type (bootstrap only)
+        int32 EstimatedLines = 0;
 
-            // This block counts as a paragraph in vertical flow
-            FlowParagraphIndex++;
+        switch (Block.Type)
+        {
+        case EGASBlockType::SceneHeading:
+            EstimatedLines = 2;
+            break;
 
-            const int32 EstimatedLines = 3;
-            LinesOnPage += EstimatedLines;
+        case EGASBlockType::Action:
+            EstimatedLines = 3;
+            break;
 
-            // Insert page break AFTER previous paragraph
-            if (LinesOnPage >= ApproxLinesPerPage && FlowParagraphIndex > 0)
-            {
-                UE_LOG(LogTemp, Warning,
-                    TEXT("PAGE BREAK TRIGGER: FlowParagraphIndex=%d LinesOnPage=%d"),
-                    FlowParagraphIndex,
-                    LinesOnPage);
+        case EGASBlockType::Character:
+            EstimatedLines = 1;
+            break;
 
-                FGASUserPageBreak NewBreak;
-                NewBreak.AfterParagraphIndex = FlowParagraphIndex - 1;
+        case EGASBlockType::Dialogue:
+            EstimatedLines = 2;
+            break;
 
-                CurrentScript.UserPageBreaks.Add(NewBreak);
+        case EGASBlockType::Parenthetical:
+            EstimatedLines = 1;
+            break;
 
-                UE_LOG(LogTemp, Warning,
-                    TEXT("PAGE BREAK ADDED: AfterParagraphIndex=%d  TotalNow=%d"),
-                    NewBreak.AfterParagraphIndex,
-                    CurrentScript.UserPageBreaks.Num());
+        case EGASBlockType::Transition:
+            EstimatedLines = 1;
+            break;
 
-                LinesOnPage = 0;
-            }
+        default:
+            EstimatedLines = 1;
+            break;
+        }
+
+        LinesOnPage += EstimatedLines;
+
+
+        if (LinesOnPage >= ApproxLinesPerPage)
+        {
+            FGASUserPageBreak NewBreak;
+            NewBreak.AfterBlockId = Block.Id;
+            CurrentScript.UserPageBreaks.Add(NewBreak);
+
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("[GEN] PAGE BREAK after BlockId='%s'"),
+                *Block.Id
+            );
+
+            LinesOnPage = 0; // reset for next page
         }
     }
 
-    // Force relayout / redraw using new page breaks
+    // Let normal pipeline rebuild layout
     if (ScriptPanel.IsValid())
     {
-        TArray<FRenderedParagraph> Rendered =
-            ScriptLayoutEngine::LayoutScript(
-                CurrentScript.Blocks,
-                CachedScriptPanelWidth,
-                CurrentScript.UserPageBreaks
-            );
-
-        ScriptPanel->SetRenderedScript(Rendered);
+        ScriptPanel->RebuildLayout();
     }
-
-
 
     return FReply::Handled();
 }
 
+void SGAS_ScriptTab::EnsureScriptSaved()
+{
+    UE_LOG(LogTemp, Warning, TEXT("EnsureScriptSaved() called"));
+
+    if (CurrentScript.Blocks.Num() == 0)
+    {
+        return;
+    }
+
+    OnSaveScript();
+}
 
 void SGAS_ScriptTab::MarkScriptDirty()
 {
@@ -730,8 +1179,6 @@ void SGAS_ScriptTab::MarkScriptDirty()
     Module.MarkToolDirty();
 }
 
-
-
 void SGAS_ScriptTab::ClearScriptDirty()
 {
     bIsScriptDirty = false;
@@ -741,7 +1188,6 @@ bool SGAS_ScriptTab::IsScriptDirty() const
 {
     return bIsScriptDirty;
 }
-
 
 void SGAS_ScriptTab::ClearScript()
 {
@@ -781,6 +1227,28 @@ FReply SGAS_ScriptTab::OnToggleEditMode()
     return FReply::Handled();
 }
 
+// ============================================================================
+// HELPER FUNCTIONS - Numbering style
+// ============================================================================
+
+void SGAS_ScriptTab::ApplySceneNumberingBaseStyle(EGASSceneNumberBaseStyle InBaseStyle)
+{
+    // Update authoritative model
+    CurrentScript.SceneNumbering.BaseStyle = InBaseStyle;
+
+    // Mark dirty so JSON stays in sync
+    MarkScriptDirty();
+
+    // Rebuild dependent UI
+    RebuildShotList();
+
+    if (ScriptPanel.IsValid())
+    {
+        ScriptPanel->Invalidate(EInvalidateWidget::LayoutAndVolatility);
+    }
+
+}
+
 
 
 // ============================================================================
@@ -797,7 +1265,7 @@ void SGAS_ScriptTab::OnScriptParagraphClicked(int32 BlockIndex)
     // -------------------------------------------------
     // SHOT MARKING MODE
     // -------------------------------------------------
-    if (bIsMarkingShot)
+    if (bIsShotMarkingActive)
     {
         if (PendingStartParagraph == INDEX_NONE)
         {
@@ -825,9 +1293,13 @@ void SGAS_ScriptTab::OnScriptParagraphClicked(int32 BlockIndex)
 
             CurrentScript.Markers.Add(Marker);
 
+            ScriptPanel->SetShotMarkers(CurrentScript.Markers);
+
+
+            RebuildShotList();
+
             PendingStartParagraph = INDEX_NONE;
 
-            ScriptPanel->SetShotMarkers(CurrentScript.Markers);
         }
 
         return; // 🚨 IMPORTANT: stop here in shot mode
@@ -843,11 +1315,56 @@ void SGAS_ScriptTab::OnScriptParagraphClicked(int32 BlockIndex)
 }
 
 
-
 FReply SGAS_ScriptTab::OnClearScriptClicked()
 {
     ClearScript();
     return FReply::Handled();
+}
+
+
+static FString ResolveShotLabel_Stub(
+    int32 InSceneIndex,
+    int32 InShotIndex,
+    EGASShotNumberingPolicy InPolicy
+)
+{
+    // STUB ONLY — numbering logic implemented later
+    return FString();
+}
+
+// ------------------------------------------------------------
+// UI-only shot label resolver (display only)
+// ------------------------------------------------------------
+static FString ResolveShotDisplayLabel(
+    const FGASScript& Script,
+    int32 SceneBlockIndex,
+    int32 ShotIndexZeroBased
+)
+{
+    switch (Script.ShotNumberingPolicy)
+    {
+    case EGASShotNumberingPolicy::Numeric_1s:
+        return FString::FromInt(ShotIndexZeroBased + 1);
+
+    case EGASShotNumberingPolicy::Numeric_10s:
+        return FString::FromInt((ShotIndexZeroBased + 1) * 10);
+
+    case EGASShotNumberingPolicy::Alphabetic:
+    {
+        int32 Index = ShotIndexZeroBased;
+        FString Letters;
+
+        while (Index >= 0)
+        {
+            Letters.InsertAt(0, TCHAR('A' + (Index % 26)));
+            Index = (Index / 26) - 1;
+        }
+        return Letters;
+    }
+
+    default:
+        return FString::FromInt(ShotIndexZeroBased + 1);
+    }
 }
 
 
@@ -856,34 +1373,588 @@ FReply SGAS_ScriptTab::OnClearScriptClicked()
 // ============================================================================
 void SGAS_ScriptTab::RebuildShotList()
 {
-    ShotList.Empty();
+    // -------------------------------------------------
+    // OPTION A (Step 3): Remove previously derived shots
+    // -------------------------------------------------
+    {
+        for (int32 i = CurrentScript.Markers.Num() - 1; i >= 0; --i)
+        {
+            const FGASMarker& M = CurrentScript.Markers[i];
+
+            if (M.MarkerType == EGASMarkerType::ShotMarker && M.bDerivedFromScene)
+            {
+                CurrentScript.Markers.RemoveAt(i);
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("[ShotList] Markers=%d  ShotList=%d"),
+        CurrentScript.Markers.Num(),
+        ShotList.Num()
+    );
+
+    ShotListItems.Empty();
+
+    // -------------------------------------------------
+    // Helper: resolve SceneBlockIndex from Marker.BlockId
+    // -------------------------------------------------
+    auto FindSceneBlockIndexByBlockId =
+        [this](const FString& BlockId) -> int32
+        {
+            for (int32 i = 0; i < CurrentScript.Blocks.Num(); ++i)
+            {
+                if (CurrentScript.Blocks[i].Id == BlockId &&
+                    CurrentScript.Blocks[i].Type == EGASBlockType::SceneHeading)
+                {
+                    return i;
+                }
+            }
+            return INDEX_NONE;
+        };
+
+
+    // -----------------------------------------
+    // Scene rows from authoritative script
+    // -----------------------------------------
+    TArray<FGASShotDefinitionListRow> SceneRows;
+
+    if (BuildShotListFromScript(
+        CurrentScript,
+        CurrentScript.SceneNumbering,
+        SceneRows))
+    {
+        ShotListItems.Reset();
+
+        for (const FGASShotDefinitionListRow& Row : SceneRows)
+        {
+            ShotListItems.Add(MakeShared<FGASShotDefinitionListRow>(Row));
+        }
+
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("[ShotList] Script scene rebuild: %d scenes"),
+            SceneRows.Num()
+        );
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[ShotList] No JSON script for scene rebuild"));
+    }
+
+    // -------------------------------------------------
+    // Helper: find SceneBlockIndex by BlockId (marker stores BlockId)
+    // -------------------------------------------------
+    auto FindBlockIndexById = [this](const FString& InBlockId) -> int32
+        {
+            if (InBlockId.IsEmpty())
+            {
+                return INDEX_NONE;
+            }
+
+            for (int32 i = 0; i < CurrentScript.Blocks.Num(); ++i)
+            {
+                if (CurrentScript.Blocks[i].Id == InBlockId)
+                {
+                    return i;
+                }
+            }
+            return INDEX_NONE;
+        };
+
+    // -------------------------------------------------
+    // Helper: find owning SceneBlockIndex for ANY block
+    // (walk backward to nearest SceneHeading)
+    // -------------------------------------------------
+    auto FindOwningSceneBlockIndex =
+        [this](const FString& BlockId) -> int32
+        {
+            if (BlockId.IsEmpty())
+            {
+                return INDEX_NONE;
+            }
+
+            int32 BlockIndex = INDEX_NONE;
+
+            for (int32 i = 0; i < CurrentScript.Blocks.Num(); ++i)
+            {
+                if (CurrentScript.Blocks[i].Id == BlockId)
+                {
+                    BlockIndex = i;
+                    break;
+                }
+            }
+
+            if (BlockIndex == INDEX_NONE)
+            {
+                return INDEX_NONE;
+            }
+
+            for (int32 i = BlockIndex; i >= 0; --i)
+            {
+                if (CurrentScript.Blocks[i].Type == EGASBlockType::SceneHeading)
+                {
+                    return i;
+                }
+            }
+
+            return INDEX_NONE;
+        };
+
+
+    // -------------------------------------------------
+    // OPTION A (Step 1 + 2): Ensure derived Shot markers
+    // ONLY for scenes that already have USER shots
+    // -------------------------------------------------
+    {
+        // 1) Collect scenes that have at least one USER shot
+        TSet<FString> ScenesWithUserShots;
+
+        for (const FGASMarker& M : CurrentScript.Markers)
+        {
+            if (M.MarkerType == EGASMarkerType::ShotMarker &&
+                !M.bDerivedFromScene)
+            {
+                ScenesWithUserShots.Add(M.BlockId);
+            }
+        }
+
+        // No user shots anywhere → do NOTHING
+        if (ScenesWithUserShots.Num() == 0)
+        {
+            // intentionally empty
+        }
+        else
+        {
+            // 2) Collect scenes that already have ANY shot marker
+            TSet<FString> SceneBlockIdsWithShotMarkers;
+
+            for (const FGASMarker& M : CurrentScript.Markers)
+            {
+                if (M.MarkerType == EGASMarkerType::ShotMarker)
+                {
+                    SceneBlockIdsWithShotMarkers.Add(M.BlockId);
+                }
+            }
+
+            // 3) Create derived shots ONLY for scenes with user shots
+            for (const FGASShotDefinitionListRow& SceneRow : SceneRows)
+            {
+                if (!CurrentScript.Blocks.IsValidIndex(SceneRow.SceneBlockIndex))
+                {
+                    continue;
+                }
+
+                const FString& SceneBlockId =
+                    CurrentScript.Blocks[SceneRow.SceneBlockIndex].Id;
+
+                // 🔒 Only scenes that already contain USER shots
+                if (!ScenesWithUserShots.Contains(SceneBlockId))
+                {
+                    continue;
+                }
+
+                if (SceneBlockIdsWithShotMarkers.Contains(SceneBlockId))
+                {
+                    continue;
+                }
+
+                FGASMarker NewMarker;
+                NewMarker.Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+                NewMarker.MarkerType = EGASMarkerType::ShotMarker;
+                NewMarker.BlockId = SceneBlockId;
+                NewMarker.bDerivedFromScene = true;
+
+                CurrentScript.Markers.Add(NewMarker);
+                SceneBlockIdsWithShotMarkers.Add(SceneBlockId);
+            }
+        }
+    }
+
+
+
+    // -------------------------------------------------
+    // Stable ordering of derived shot markers
+    // -------------------------------------------------
+    TArray<const FGASMarker*> DerivedShotMarkers;
+
+    for (const FGASMarker& Marker : CurrentScript.Markers)
+    {
+        if (Marker.MarkerType == EGASMarkerType::ShotMarker &&
+            Marker.bDerivedFromScene)
+        {
+            DerivedShotMarkers.Add(&Marker);
+        }
+    }
+
+    DerivedShotMarkers.Sort(
+        [&](const FGASMarker& A, const FGASMarker& B)
+        {
+            const int32 SceneA = FindSceneBlockIndexByBlockId(A.BlockId);
+            const int32 SceneB = FindSceneBlockIndexByBlockId(B.BlockId);
+
+            if (SceneA != SceneB)
+            {
+                return SceneA < SceneB;
+            }
+
+            // Stable fallback
+            return A.Id < B.Id;
+        }
+    );
+
+    // -------------------------------------------------
+    // OPTION A (Step 4): Append Shot rows (derived shots)
+    // -------------------------------------------------
+    for (const FGASMarker* MarkerPtr : DerivedShotMarkers)
+    {
+        const FGASMarker& Marker = *MarkerPtr;
+
+        FGASShotDefinitionListRow ShotRow;
+        ShotRow.bIsShotRow = true;
+
+        // Resolve SceneBlockIndex from Marker.BlockId
+        const int32 SceneBlockIndex = FindSceneBlockIndexByBlockId(Marker.BlockId);
+        if (SceneBlockIndex == INDEX_NONE)
+        {
+            continue;
+        }
+
+        ShotRow.SceneBlockIndex = SceneBlockIndex;
+        ShotRow.MarkerId = Marker.Id;
+
+        // -------------------------------------------------
+        // STEP 16: UI-only shot display naming
+        // -------------------------------------------------
+        TMap<int32, int32> SceneShotCounters;
+
+        int32& Counter = SceneShotCounters.FindOrAdd(SceneBlockIndex);
+        const int32 ShotIndexZeroBased = Counter++;
+
+        ShotRow.DisplayName =
+            ResolveShotDisplayLabel(
+                CurrentScript,
+                SceneBlockIndex,
+                ShotIndexZeroBased
+            );
+
+        ShotRow.bDerivedFromScene = Marker.bDerivedFromScene;
+
+        ShotListItems.Add(MakeShared<FGASShotDefinitionListRow>(ShotRow));
+    }
+
+
+    // -------------------------------------------------
+    // STEP MVP: Append user-created shot rows (non-derived)
+    // -------------------------------------------------
+    TMap<int32, int32> SceneUserShotCounters;
+
 
     for (const FGASMarker& Marker : CurrentScript.Markers)
     {
         if (Marker.MarkerType != EGASMarkerType::ShotMarker)
-            continue;
-
-        FShotEntry Entry;
-        Entry.ShotType = Marker.ShotId;
-
-        // Convert BlockId → paragraph index
-        int32 StartIndex = CurrentScript.Blocks.IndexOfByPredicate(
-            [&](const FGASBlock& B) { return B.Id == Marker.BlockId; });
-
-        int32 EndIndex = StartIndex;
-        if (Marker.Metadata.Contains("EndBlockId"))
         {
-            const FString& EndId = Marker.Metadata["EndBlockId"];
-            EndIndex = CurrentScript.Blocks.IndexOfByPredicate(
-                [&](const FGASBlock& B) { return B.Id == EndId; });
+            continue;
         }
 
-        Entry.StartParagraph = StartIndex;
-        Entry.EndParagraph = EndIndex;
+        if (Marker.bDerivedFromScene)
+        {
+            continue; // derived already handled above
+        }
 
-        ShotList.Add(Entry);
+        const int32 SceneBlockIndex =
+            FindOwningSceneBlockIndex(Marker.BlockId);
+
+
+        if (SceneBlockIndex == INDEX_NONE)
+        {
+            continue;
+        }
+
+        FGASShotDefinitionListRow ShotRow;
+        ShotRow.bIsShotRow = true;
+        ShotRow.bDerivedFromScene = false;
+
+        ShotRow.SceneBlockIndex = SceneBlockIndex;
+        ShotRow.MarkerId = Marker.Id;
+
+        int32& Counter = SceneUserShotCounters.FindOrAdd(SceneBlockIndex);
+        Counter++;
+
+        // UI-only label for MVP
+        ShotRow.DisplayName =
+            FString::Printf(TEXT("U%d"), Counter);
+
+        ShotListItems.Add(MakeShared<FGASShotDefinitionListRow>(ShotRow));
+    }
+
+
+    // -------------------------------------------------
+    // Reorder ShotListItems so shots follow their parent scene deterministically
+    // -------------------------------------------------
+    {
+        TArray<TSharedPtr<FGASShotDefinitionListRow>> OrderedItems;
+
+        // Cache shot rows grouped by SceneBlockIndex
+        TMultiMap<int32, TSharedPtr<FGASShotDefinitionListRow>> ShotsByScene;
+
+        for (const TSharedPtr<FGASShotDefinitionListRow>& Row : ShotListItems)
+        {
+            if (Row.IsValid() && Row->bIsShotRow)
+            {
+                ShotsByScene.Add(Row->SceneBlockIndex, Row);
+            }
+        }
+
+        // Walk scenes in original order and append their shots
+        for (const TSharedPtr<FGASShotDefinitionListRow>& Row : ShotListItems)
+        {
+            if (!Row.IsValid() || Row->bIsShotRow)
+            {
+                continue;
+            }
+
+            // Scene row first
+            OrderedItems.Add(Row);
+
+            // Then its shots
+            TArray<TSharedPtr<FGASShotDefinitionListRow>> SceneShots;
+            ShotsByScene.MultiFind(Row->SceneBlockIndex, SceneShots);
+
+            for (const TSharedPtr<FGASShotDefinitionListRow>& ShotRow : SceneShots)
+            {
+                OrderedItems.Add(ShotRow);
+            }
+        }
+
+        ShotListItems = MoveTemp(OrderedItems);
+    }
+
+
+    // -------------------------------------------------
+    // Renumber shots per scene (S##_##)
+    // -------------------------------------------------
+    {
+        TMap<int32, int32> SceneShotCounters;
+
+        for (const TSharedPtr<FGASShotDefinitionListRow>& Row : ShotListItems)
+        {
+            if (!Row.IsValid() || !Row->bIsShotRow)
+            {
+                continue;
+            }
+
+            int32& Counter = SceneShotCounters.FindOrAdd(Row->SceneBlockIndex);
+            Counter++;
+
+            const int32 ShotNumber = Counter;
+
+            // Format: S<SceneNumber>_<ShotNumber padded>
+            FString SceneNum = Row->SceneBlockIndex != INDEX_NONE
+                ? Row->SceneNumber
+                : TEXT("X");
+
+            if (SceneNum.IsEmpty())
+            {
+                SceneNum = TEXT("X");
+            }
+
+            //Row->DisplayName =
+            //    FString::Printf(TEXT("S%s_%02d"), *SceneNum, ShotNumber);
+
+            //// Also update backing marker name
+            //for (FGASMarker& M : CurrentScript.Markers)
+            //{
+            //    if (M.Id == Row->MarkerId)
+            //    {
+            //        M.ShotId = Row->DisplayName;
+            //        break;
+            //    }
+            //}
+        }
+    }
+    // --------------------------------------------------
+    // BUILD SCENE LIST UI (RIGHT PANEL)
+    // --------------------------------------------------
+    if (!ShotListContainer.IsValid())
+    {
+        return;
+    }
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("[ShotList UI] Children BEFORE clear = %d"),
+        ShotListContainer->GetChildren()->Num()
+    );
+
+
+    ShotListContainer->ClearChildren();
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("[ShotList UI] Children AFTER clear = %d"),
+        ShotListContainer->GetChildren()->Num()
+    );
+
+
+    if (SceneRows.Num() == 0)
+    {
+        ShotListContainer->AddSlot()
+            .AutoHeight()
+            .Padding(8.f)
+            [
+                SNew(STextBlock)
+                    .Text(FText::FromString("No scenes found."))
+                    .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+            ];
+        return;
+    }
+
+    for (const TSharedPtr<FGASShotDefinitionListRow>& Row : ShotListItems)
+    {
+        if (!Row.IsValid())
+        {
+            continue;
+        }
+
+        // HARD GUARD
+        if (Row->bIsShotRow && Row->DisplayName.IsEmpty())
+        {
+            continue;
+        }
+
+        // -----------------------------
+        // Scene row
+        // -----------------------------
+        if (!Row->bIsShotRow)
+        {
+            const FString SceneLabel = FString::Printf(
+                TEXT("%s  %s"),
+                *Row->SceneNumber,
+                *Row->SceneTitle
+            );
+
+            ShotListContainer->AddSlot()
+                .AutoHeight()
+                .Padding(4.f, 6.f)
+                [
+                    SNew(SButton)
+                        .Text(FText::FromString(SceneLabel))
+                        .OnClicked_Lambda([this, Row]()
+                            {
+                                ScrollToScene(*Row);
+                                return FReply::Handled();
+                            })
+                ];
+        }
+        // -----------------------------
+        // Shot row
+        // -----------------------------
+        else
+        {
+            ShotListContainer->AddSlot()
+                .AutoHeight()
+                .Padding(24.f, 2.f)
+                [
+                    SNew(SButton)
+                        .ButtonStyle(FAppStyle::Get(), "NoBorder")
+                        .OnClicked_Lambda([this, Row]()
+                            {
+                                FGASMarker* FoundMarker = nullptr;
+
+                                for (FGASMarker& M : CurrentScript.Markers)
+                                {
+                                    if (M.Id == Row->MarkerId)
+                                    {
+                                        FoundMarker = &M;
+                                        break;
+                                    }
+                                }
+
+                                if (!FoundMarker)
+                                {
+                                    return FReply::Handled();
+                                }
+
+                                // -------------------------------------------------
+                                // USER SHOT → scroll to paragraph anchor
+                                // -------------------------------------------------
+                                if (!FoundMarker->bDerivedFromScene)
+                                {
+                                    if (ScriptPanel.IsValid())
+                                    {
+                                        ScriptPanel->ScrollToBlockId(FoundMarker->BlockId);
+                                    }
+                                    return FReply::Handled();
+                                }
+
+                                // -------------------------------------------------
+                                // DERIVED SHOT → semantic promotion + scroll to scene
+                                // -------------------------------------------------
+                                FoundMarker->bDerivedFromScene = false;
+
+                                RebuildShotList();
+                                ScrollToScene(*Row);
+
+                                return FReply::Handled();
+                            })
+
+
+                        [
+                            SNew(STextBlock)
+                                .Text(
+                                    Row->DisplayName.IsEmpty()
+                                    ? FText::GetEmpty()
+                                    : FText::FromString(Row->DisplayName)
+                                )
+                                .ColorAndOpacity(
+                                    Row->bDerivedFromScene
+                                    ? FLinearColor(0.65f, 0.65f, 0.65f)
+                                    : FLinearColor::White
+                                )
+                        ]
+
+                ];
+        }
+
     }
 }
+
+
+void SGAS_ScriptTab::ScrollToScene(const FGASShotDefinitionListRow& Scene)
+{
+    if (!ScriptPanel.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ScrollToScene: ScriptPanel invalid"));
+        return;
+    }
+
+    if (!CurrentScript.Blocks.IsValidIndex(Scene.SceneBlockIndex))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("ScrollToScene: invalid SceneBlockIndex %d"),
+            Scene.SceneBlockIndex
+        );
+        return;
+    }
+
+    const FString& BlockId =
+        CurrentScript.Blocks[Scene.SceneBlockIndex].Id;
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("ScrollToScene: SceneBlockIndex=%d  BlockId=%s"),
+        Scene.SceneBlockIndex,
+        *BlockId
+    );
+
+    // ✅ THIS IS THE JUMP
+    ScriptPanel->ScrollToBlockId(BlockId);
+
+}
+
 
 
 
@@ -991,7 +2062,9 @@ void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
 
     CurrentScript = MoveTemp(Loaded);
 
-    UE_LOG(LogTemp, Warning,
+    UE_LOG(
+        LogTemp,
+        Warning,
         TEXT("[GAS] Loaded script JSON OK: Blocks=%d PageBreaks=%d Markers=%d"),
         CurrentScript.Blocks.Num(),
         CurrentScript.UserPageBreaks.Num(),
@@ -1006,12 +2079,12 @@ void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
             ScriptLayoutEngine::LayoutScript(
                 CurrentScript.Blocks,
                 CachedScriptPanelWidth,
-                CurrentScript.UserPageBreaks
+                CurrentScript.UserPageBreaks,
+                CurrentScript.SceneNumbering
             );
 
         ScriptPanel->SetRenderedScript(Rendered);
     }
-
 }
 
 
