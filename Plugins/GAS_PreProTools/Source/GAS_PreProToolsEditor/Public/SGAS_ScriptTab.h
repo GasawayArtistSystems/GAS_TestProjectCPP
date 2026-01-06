@@ -5,6 +5,8 @@
 #include "ScriptModel.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Styling/SlateColor.h"
+#include "Math/Color.h"
 
 #include "GAS_FDXImporter.h"
 #include "SGASScriptPanel.h"
@@ -86,6 +88,16 @@ public:
     void ApplySceneNumberingBaseStyle(EGASSceneNumberBaseStyle InBaseStyle);
 
 
+    // ------------------------------------------------------------
+    // Shot Marker (Phase 1)
+    // ------------------------------------------------------------
+    bool bShotSelectArmed = false;
+    FSlateColor GetShotButtonTint() const;
+
+    
+    void AddShotMarkerForScene(const FString& SceneBlockId);
+
+
 private:
 
     // =========================================================
@@ -126,8 +138,6 @@ private:
 
     TWeakPtr<SGAS_TestWindow> MainToolWindow;
 
-private:
-
     // =========================================================
     // Script + Shot Data
     // =========================================================
@@ -158,7 +168,6 @@ private:
     TSharedPtr<SImage> ShotMarkingIcon;
     TSharedPtr<SImage> NumberingIcon;
 
-    bool SaveScriptJson_Silent();
 
     // -----------------------------------------
     // Shot List (Scene rows from script JSON)
@@ -168,6 +177,34 @@ private:
     TSharedPtr<SScrollBox> ScriptScrollBox;
 
     void ScrollToSceneBlock(const FString& BlockId);
+
+    // -------------------------------------------------
+    // Shot List UI state
+    // -------------------------------------------------
+    TSet<FString> ExpandedScenes;
+
+    float ColExpand = 0.10f;
+    float ColPage = 0.08f;
+    float ColScene = 0.15f;
+    float ColHeading = 1.0f;
+    float ColLength = 0.08f;
+    float ColTime = 0.15f;
+    float ColSet = 0.50f;
+    float ColNotes = 1.0f;
+
+    float ColShot = 0.10f;
+    float ColType = 0.10f;
+
+    float ColDes = 0.60f;
+    float ColLens = 0.10f;
+    float ColCamera = 0.20f;
+
+    // --------------------------------------------------
+    // Shot selection
+    // --------------------------------------------------
+    FString ActiveShotMarkerId;
+
+
 
 
 };

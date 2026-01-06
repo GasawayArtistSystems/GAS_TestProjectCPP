@@ -1,7 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GAS_NumberingEnums.h"
+#include "Misc/Optional.h"
+
 #include "ScriptModel.generated.h"
+
 
 // ------------------------------------------------------------
 // BLOCK TYPE ENUM
@@ -29,6 +33,17 @@ enum class EGASMarkerType : uint8
     ShotMarker      UMETA(DisplayName = "Shot Marker"),
     Comment         UMETA(DisplayName = "Comment"),
     Bookmark        UMETA(DisplayName = "Bookmark")
+};
+
+
+// ------------------------------------------------------------
+// Shot Origin
+// ------------------------------------------------------------
+UENUM(BlueprintType)
+enum class EGASShotOrigin : uint8
+{
+    Derived UMETA(DisplayName = "Derived"),   // auto / implicit
+    User    UMETA(DisplayName = "User")       // explicitly created by user
 };
 
 // ------------------------------------------------------------
@@ -92,6 +107,9 @@ struct FGASBlock
     FGASBlock() {}
 };
 
+
+
+
 // ------------------------------------------------------------
 // SCRIPT MARKER
 // ------------------------------------------------------------
@@ -106,14 +124,14 @@ struct FGASMarker
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EGASMarkerType MarkerType = EGASMarkerType::ShotMarker;
 
-    // -------------------------------------------------
-    // OPTION A: Scene-derived shot support
-    // -------------------------------------------------
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool bDerivedFromScene = false;
+    EGASShotOrigin ShotOrigin = EGASShotOrigin::Derived;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ShotId;
+    UPROPERTY()
+    int32 ShotIndex = 0;
+
+    UPROPERTY()
+    int32 SceneShotIndex = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString BlockId;
@@ -124,6 +142,20 @@ struct FGASMarker
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 LineIndex = -1;
 
+    UPROPERTY()
+    float ScreenX = -1.f;
+
+    UPROPERTY()
+    float ScreenY = -1.f;
+
+    // Stored in SCRIPT SPACE (same coordinate system as ScreenY)
+    UPROPERTY()
+    float ShotLineStartY = -1.f;
+
+    UPROPERTY()
+    float ShotLineEndY = -1.f;
+
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString Notes;
 
@@ -133,6 +165,10 @@ struct FGASMarker
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TMap<FString, FString> Metadata;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 ParagraphIndex = INDEX_NONE;
+
+
     FGASMarker() {}
 
     bool operator==(const FGASMarker& Other) const
@@ -141,13 +177,21 @@ struct FGASMarker
     }
 };
 
-UENUM(BlueprintType)
-enum class EGASShotNumberingPolicy : uint8
+
+// ------------------------------------------------------------
+// Shot Marker Authoritative Factory (Phase 1)
+// ------------------------------------------------------------
+struct GAS_PREPROTOOLS_API FGASShotMarkerFactory
 {
-    Numeric_1s UMETA(DisplayName = "1, 2, 3"),
-    Numeric_10s UMETA(DisplayName = "10, 20, 30"),
-    Alphabetic UMETA(DisplayName = "A, B, C (AA after Z)")
+    // Creates a ShotMarker ONLY if TargetBlockId resolves to a SceneHeading block.
+    // Returns true on success and fills OutMarker.
+    static bool CreateShotMarkerForSceneHeading(
+        const TArray<FGASBlock>& Blocks,
+        const FString& TargetBlockId,
+        FGASMarker& OutMarker
+    );
 };
+
 
 // ------------------------------------------------------------
 // USER PAGE BREAK (AUTHORITATIVE)
@@ -187,6 +231,9 @@ struct FGASSceneNumberingSettings
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EGASSceneNumberBaseStyle BaseStyle = EGASSceneNumberBaseStyle::By10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EGASNumberingStyle Style = EGASNumberingStyle::FromScript;
 };
 
 // ------------------------------------------------------------
@@ -199,6 +246,19 @@ namespace GASSceneNumbering
         EGASSceneNumberBaseStyle Style
     );
 }
+
+// ------------------------------------------------------------
+// SHOT NUMBERING SETTINGS (SCENE-LOCAL POLICY)
+// ------------------------------------------------------------
+UENUM(BlueprintType)
+enum class EGASShotNumberBaseStyle : uint8
+{
+    By1            UMETA(DisplayName = "By 1s"),
+    By10           UMETA(DisplayName = "By 10s"),
+    Alphabetical   UMETA(DisplayName = "Alphabetical")
+};
+
+
 
 
 
@@ -281,3 +341,13 @@ struct GAS_PREPROTOOLS_API FGASScript
 
     FGASScript() {}
 };
+// ------------------------------------------------------------
+// Shot number display helper (shared, UI-safe)
+// ------------------------------------------------------------
+GAS_PREPROTOOLS_API FString ResolveShotDisplayLabel(
+    const FGASScript& Script,
+    int32 SceneBlockIndex,
+    int32 ShotIndexZeroBased
+);
+
+

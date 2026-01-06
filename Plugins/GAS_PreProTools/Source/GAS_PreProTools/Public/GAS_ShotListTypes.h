@@ -69,8 +69,6 @@ struct FGASShotDefinitionListRow
     UPROPERTY()
     FString DisplayName;
 
-    UPROPERTY()
-    bool bDerivedFromScene = false;
 };
 
 

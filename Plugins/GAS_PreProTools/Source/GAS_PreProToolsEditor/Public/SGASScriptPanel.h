@@ -38,6 +38,7 @@ struct FGASScriptEdit
 
 struct FRenderedParagraph;
 
+
 class SGASScriptPanel : public SCompoundWidget
 {
 public:
@@ -65,7 +66,7 @@ public:
     // =========================================================
     void SetEditMode(bool bInEditMode);
     void SetAddMode(bool bInAddMode);
-
+    void ResetEditorModes();
 
 
     void OpenDialoguePreviewDialog(int32 BlockIndex);
@@ -95,13 +96,23 @@ public:
     void ScrollToParagraph(int32 ParagraphIndex);
     void ScrollToBlockId(const FString& BlockId);
 
-    FReply HandleMouseWheel(
-        const FGeometry& MyGeometry,
-        const FPointerEvent& MouseEvent);
-
     // Returns BlockId for the currently selected paragraph (Edit Mode selection).
     // Empty if nothing is selected.
     FString GetSelectedBlockId() const;
+
+    // =========================================================
+    // Shot Selection
+    // =========================================================
+    void EnterShotSelectionMode();
+    int32 CountShotsForScene(const FString& SceneBlockId) const;
+    void SetAddShotArmed(bool bArmed);
+    void SetShotAddArmed(bool bInArmed);
+
+    // Shot range selection (drag)
+    bool bIsShotRangeDragging = false;
+    int32 ShotRangeStartParagraph = INDEX_NONE;
+    int32 ShotRangeCurrentParagraph = INDEX_NONE;
+
 
 
 private:
@@ -138,6 +149,11 @@ private:
         const FPointerEvent& MouseEvent
     ) override;
 
+    virtual FReply OnMouseWheel(
+        const FGeometry& MyGeometry,
+        const FPointerEvent& MouseEvent
+    ) override;
+
     virtual FCursorReply OnCursorQuery(
         const FGeometry& MyGeometry,
         const FPointerEvent& CursorEvent
@@ -152,6 +168,50 @@ private:
     virtual bool SupportsKeyboardFocus() const override { return true; }
 
 
+    // ------------------------------------------------------------
+    // Shot Add (Rubberband Commit)
+    // ------------------------------------------------------------
+    bool bShotAddArmed = false;
+
+    float ShotRangeStartX = 0.f;
+    float ShotRangeStartY = -1.f;
+
+
+
+    int32 HoveredShotParagraphIndex = INDEX_NONE;
+
+    FString HoveredShotMarkerId;
+    FString SelectedShotMarkerId;
+
+    FString HitTestShot(const FVector2D& LocalPos) const;
+    FString HitTestShotTail(const FVector2D& LocalPos) const;
+
+
+    int32 FindOwningSceneParagraphIndex(int32 StartParagraphIndex) const;
+
+
+    int32 PendingShotParagraphIndex = INDEX_NONE;
+
+    void CommitShotAtParagraph(
+        int32 SceneParaIndex,
+        int32 InsertIndex,
+        float ShotStartScriptY,
+        float ShotEndScriptY,
+        float CommitX
+    );
+
+
+
+
+
+
+    int32 ResolveSceneIndexAtY(float LocalY) const;
+
+    int32 ResolveShotInsertIndex(
+        const FString& SceneBlockId,
+        float ScriptY
+    ) const;
+
 
 
     // =========================================================
@@ -159,13 +219,10 @@ private:
     // =========================================================
     void ApplyScriptEdit(const FGASScriptEdit& Edit);   
 
-
     void OpenEditActionDialog(int32 BlockIndex);
     void OpenAddBlockDialog(int32 InsertAfterParagraphIndex);
     void InsertNewBlock(int32 InsertAfterParagraphIndex, int32 BlockTypeChoice);
     void OpenEditCharacterDialog(int32 BlockIndex);
-
-
 
     // =========================================================
     // Cached State
@@ -209,8 +266,6 @@ private:
     int32 PendingAddBlockCount = 0;
     int32 PendingDialogueAfterCharacterIndex = INDEX_NONE;
 
-
-
     // ------------------------------------------------------------
     // Applies a text edit to a script block and triggers re-layout.
     // ------------------------------------------------------------
@@ -221,8 +276,25 @@ private:
     mutable int32 SelectedShotIndex = INDEX_NONE;
 
 
+    bool  bShowShotGhost = false;
+    float ShotGhostY = 0.f;
+    static constexpr float ShotStackSpacing = 6.f;
+    static constexpr float ShotBaseOffset = 10.f;
+
     int32 HitTestParagraph(float LocalY) const;
     int32 HitTestAddGutter(float LocalY) const;
+
+
+    // Cache of clickable shot icon rectangles built during OnPaint
+    struct FShotHitRect
+    {
+        FString MarkerId;
+        FSlateRect Rect;
+    };
+
+
+    mutable TArray<FShotHitRect> ShotHitRects;
+
 
 
     // Page break drag state
@@ -237,6 +309,18 @@ private:
     float SnapStartY = 0.f;
     float SnapTargetY = 0.f;
     float SnapAnimAlpha = 0.f; // 0 → 1
+
+    // =============================================================
+    // SHOT RUBBER-BAND SELECTION (Phase 1)
+    // =============================================================
+    bool bIsShotSelectMode = false;     // Armed via camera icon
+    bool bIsDraggingShot = false;       // Mouse currently dragging
+
+    FString ShotStartBlockId;
+    FString ShotEndBlockId;
+
+    int32 ShotStartParagraphIndex = INDEX_NONE;
+    int32 ShotCurrentParagraphIndex = INDEX_NONE;
 
 
     FGASScript* SourceScript = nullptr;
