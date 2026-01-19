@@ -30,7 +30,16 @@ public class GAS_PreProToolsEditor : ModuleRules
             "JsonUtilities"
         });
 
-        PublicIncludePaths.Add(ModuleDirectory + "/Public");
-        PrivateIncludePaths.Add(ModuleDirectory + "/Private");
+        PublicIncludePaths.AddRange(new string[]
+        {
+    ModuleDirectory + "/Public"
+        });
+
+        PrivateIncludePaths.AddRange(new string[]
+        {
+    ModuleDirectory + "/Private",
+    ModuleDirectory + "/Private/ShotList"
+        });
+
     }
 }

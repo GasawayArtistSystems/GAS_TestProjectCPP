@@ -8,7 +8,6 @@
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "GASScriptAsset.h"
 
-
 #include "Input/Reply.h"
 
 
@@ -18,6 +17,12 @@
 
 // Paragraph click delegate
 DECLARE_DELEGATE_OneParam(FOnParagraphClicked, int32 /* ParagraphIndex */);
+DECLARE_DELEGATE(FOnRequestShotListRebuild);
+
+DECLARE_DELEGATE_OneParam(FOnRequestExternalScroll, float);
+
+
+class UGASShotListSelectionState;
 
 
 // =====================================================
@@ -59,6 +64,13 @@ public:
     void SetShowSceneNumbers(bool bInShow);
 
     void SetScript(FGASScript* InScript);
+
+    // Access to last rendered layout (authoritative)
+    const TArray<FRenderedParagraph>& GetRenderedParagraphs() const
+    {
+        return RenderedParagraphs;
+    }
+
 
 
     // =========================================================
@@ -112,6 +124,21 @@ public:
     bool bIsShotRangeDragging = false;
     int32 ShotRangeStartParagraph = INDEX_NONE;
     int32 ShotRangeCurrentParagraph = INDEX_NONE;
+    void SetEnabledCastNames(const TArray<TSharedPtr<FString>>& InNames);
+
+    FOnRequestShotListRebuild OnRequestShotListRebuild;
+
+    void ModifyShotMarkerMetadata(
+        const FGuid& ShotId,
+        const FString& Key,
+        const FString& Value
+    );
+
+    float GetScrollOffsetY() const { return ScrollOffsetY; }
+    float GetClampedScrollOffsetY() const { return ScrollOffsetY; }
+    void SetExternalScrollOffset(float InOffset);
+
+    FOnRequestExternalScroll OnRequestExternalScroll;
 
 
 
@@ -183,6 +210,16 @@ private:
     FString HoveredShotMarkerId;
     FString SelectedShotMarkerId;
 
+    mutable FString PendingScrollBlockId;
+    mutable float LastKnownViewportHeight = 0.f;
+    bool bPendingScrollAfterLayout = false;
+    bool bLockExternalScroll = false;
+    bool bIgnoreNextExternalScrollOnSetScript = false;
+
+
+
+
+
     FString HitTestShot(const FVector2D& LocalPos) const;
     FString HitTestShotTail(const FVector2D& LocalPos) const;
 
@@ -201,17 +238,15 @@ private:
     );
 
 
-
-
-
-
     int32 ResolveSceneIndexAtY(float LocalY) const;
 
-    int32 ResolveShotInsertIndex(
-        const FString& SceneBlockId,
-        float ScriptY
-    ) const;
+    TArray<TSharedPtr<FString>> EnabledCastNames;
+    TArray<TSharedPtr<FString>> EnabledCastOptions;
+    TSharedPtr<FString> SelectedShotIntentSubject;
 
+    void RebuildEnabledCastOptions();
+
+    UGASShotListSelectionState* ShotSelectionState = nullptr;
 
 
     // =========================================================
@@ -296,7 +331,6 @@ private:
     mutable TArray<FShotHitRect> ShotHitRects;
 
 
-
     // Page break drag state
     bool bIsDraggingPageBreak = false;
     int32 DraggedPageBreakIndex = INDEX_NONE; // index into UserPageBreaks
@@ -326,7 +360,13 @@ private:
     FGASScript* SourceScript = nullptr;
     mutable float ScrollOffsetY = 0.f;
     mutable int32 PendingScrollParagraph = INDEX_NONE;
+    mutable bool bForceScrollReset = false;
+    mutable bool bSuppressScrollInput = false;
 
 
+
+    void OpenShotIntentPopup(const FString& MarkerId);
+
+    int32 ResolveParagraphForShot(float LocalY) const;
 
 };

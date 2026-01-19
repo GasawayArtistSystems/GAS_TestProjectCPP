@@ -21,12 +21,23 @@ class STextBlock;
 class SImage;
 class SGAS_TestWindow;
 
+// =====================================================
+// Cast Management (Editor-only)
+// =====================================================
+struct FGASCastMember
+{
+    FString Name;
+    bool bEnabled = true;
+};
+
+
 struct FShotEntry
 {
     int32 StartParagraph;
     int32 EndParagraph;
     FString ShotType;
 };
+
 
 DECLARE_DELEGATE_OneParam(FOnParagraphClicked, int32 /*ParagraphIndex*/);
 
@@ -97,8 +108,25 @@ public:
     
     void AddShotMarkerForScene(const FString& SceneBlockId);
 
+    void GetEnabledCastNames(TArray<TSharedPtr<FString>>& OutNames) const;
+
+    void UpdateShotDescription(const FGuid& ShotId, const FString& NewDescription);
+
+
+
 
 private:
+
+    // --------------------------------------------------
+    // Cast (derived from script, user-editable later)
+    // --------------------------------------------------
+    TArray<FGASCastMember> CastList;
+    void BuildCastListFromScript();
+    TSharedPtr<SVerticalBox> CastListContainer;
+    void RebuildCastUI();
+    FReply OnOpenCastPopup();
+    void RebuildCastList();
+
 
     // =========================================================
     // User Interactions
@@ -187,8 +215,8 @@ private:
     float ColPage = 0.08f;
     float ColScene = 0.15f;
     float ColHeading = 1.0f;
-    float ColLength = 0.08f;
-    float ColTime = 0.15f;
+    float ColLength = 0.20f;
+    float ColTime = 0.20f;
     float ColSet = 0.50f;
     float ColNotes = 1.0f;
 
@@ -203,8 +231,6 @@ private:
     // Shot selection
     // --------------------------------------------------
     FString ActiveShotMarkerId;
-
-
 
 
 };

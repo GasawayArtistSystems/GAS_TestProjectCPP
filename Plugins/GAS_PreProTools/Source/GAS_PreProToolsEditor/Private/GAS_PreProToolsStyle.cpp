@@ -90,6 +90,15 @@ void FGAS_PreProToolsStyle::Initialize()
         )
     );
 
+    // Register CastIcon_40.png as a brush
+    StyleInstance->Set(
+        "GAS.CastIcon",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("CastIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
     // Register PageBreakIcon_40.png as a brush
     StyleInstance->Set(
         "GAS.PageBreakIcon",

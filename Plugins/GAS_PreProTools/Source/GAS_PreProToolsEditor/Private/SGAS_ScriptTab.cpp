@@ -7,7 +7,10 @@
 #include "GAS_PreProToolsEditorModule.h"
 #include "GAS_ImportNumberingTypes.h"
 #include "GAS_ShotListTypes.h"
+#include "GAS_ShotIntentTypes.h"
+#include "ShotList/GAS_ShotListEighths.h"
 #include "SScriptWheelCatcher.h"
+#include "ShotList/GAS_ShotListBuilderV2.h"
 
 
 #include "ScriptLayoutEngine.h"
@@ -291,6 +294,116 @@ static FGASImportNumberingOptions PromptImportNumberingOptions()
     return Options;
 }
 
+void SGAS_ScriptTab::RebuildCastList()
+{
+    if (!CastListContainer.IsValid())
+    {
+        return;
+    }
+
+    CastListContainer->ClearChildren();
+
+    TArray<TSharedPtr<FString>> EnabledCast;
+    GetEnabledCastNames(EnabledCast);
+
+    for (FGASCastMember& Member : CastList)
+    {
+        CastListContainer->AddSlot()
+            .AutoHeight()
+            .Padding(2.f)
+            [
+                SNew(SCheckBox)
+                    .IsChecked_Lambda([&Member]()
+                        {
+                            return Member.bEnabled
+                                ? ECheckBoxState::Checked
+                                : ECheckBoxState::Unchecked;
+                        })
+                    .OnCheckStateChanged_Lambda([this, &Member](ECheckBoxState NewState)
+                        {
+                            Member.bEnabled = (NewState == ECheckBoxState::Checked);
+
+                            TArray<TSharedPtr<FString>> EnabledNames;
+                            GetEnabledCastNames(EnabledNames);
+
+                            if (ScriptPanel.IsValid())
+                            {
+                                ScriptPanel->SetEnabledCastNames(EnabledNames);
+                            }
+                        })
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::FromString(Member.Name))
+                    ]
+            ];
+    }
+
+}
+
+
+
+
+FReply SGAS_ScriptTab::OnOpenCastPopup()
+{
+    TSharedRef<SWindow> CastWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Cast")))
+        .ClientSize(FVector2D(320.f, 420.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    CastWindow->SetContent(
+        SNew(SVerticalBox)
+
+        + SVerticalBox::Slot()
+        .FillHeight(1.f)
+        [
+            SNew(SBorder)
+                .Padding(8.f)
+                [
+                    SNew(SScrollBox)
+
+                        + SScrollBox::Slot()
+                        [
+                            SAssignNew(CastListContainer, SVerticalBox)
+                        ]
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .HAlign(HAlign_Right)
+        .Padding(8.f, 12.f)
+        [
+            SNew(SButton)
+                .Text(FText::FromString(TEXT("Close")))
+                .OnClicked_Lambda(
+                    [CastWindow]()
+                    {
+                        CastWindow->RequestDestroyWindow();
+                        return FReply::Handled();
+                    }
+                )
+        ]
+        );
+
+    // Sync enabled cast → ScriptPanel before building UI
+    if (ScriptPanel.IsValid())
+    {
+        TArray<TSharedPtr<FString>> EnabledNames;
+        GetEnabledCastNames(EnabledNames);
+        ScriptPanel->SetEnabledCastNames(EnabledNames);
+    }
+
+
+    RebuildCastList();
+
+    FSlateApplication::Get().AddWindow(CastWindow);
+
+    return FReply::Handled();
+}
+
+
 
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
 {
@@ -407,6 +520,40 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                         .Padding(FMargin(0.f, 1.f))
                                 ]
 
+                                // --- CAST BUTTON -----------------------------------------
+                                + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(4.f)
+                                [
+                                    SNew(SBox)
+                                        .WidthOverride(48.f)
+                                        .HeightOverride(48.f)
+                                        [
+                                            SNew(SButton)
+                                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                                .HAlign(HAlign_Center)
+                                                .VAlign(VAlign_Center)
+                                                .ToolTipText(FText::FromString(TEXT("Cast")))
+                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnOpenCastPopup))
+                                                [
+                                                    SNew(SImage)
+                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.CastIcon"))
+                                                ]
+                                        ]
+                                ]
+
+
+                            // --- Divider --------------------------------------------
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(0, 12, 0, 12)
+                                [
+                                    SNew(SBorder)
+                                        .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+                                        .BorderBackgroundColor(FLinearColor(0.15f, 0.15f, 0.15f, 1.f))
+                                        .Padding(FMargin(0.f, 1.f))
+                                ]
+
                             // --- Edit Mode Toggle -----------------------------------
                             + SVerticalBox::Slot()
                                 .AutoHeight()
@@ -482,9 +629,6 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                                 ]
                                         ]
                                 ]
-
-
-
 
 
 
@@ -613,14 +757,30 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                     .WidthOverride(ScriptPanelWidth)
                                     [
                                         SAssignNew(ScriptScrollBox, SScrollBox)
-                                            .ConsumeMouseWheel(EConsumeMouseWheel::WhenScrollingPossible)
+                                            .ScrollBarAlwaysVisible(true)
+                                            .ConsumeMouseWheel(EConsumeMouseWheel::Always)
+                                            .AllowOverscroll(EAllowOverscroll::No)
+                                            .OnUserScrolled_Lambda(
+                                                [this](float NewOffset)
+                                                {
+                                                    UE_LOG(LogTemp, Warning, TEXT("[ScrollBox] UserScrolled = %.2f"), NewOffset);
+
+                                                    if (ScriptPanel.IsValid())
+                                                    {
+                                                        ScriptPanel->SetExternalScrollOffset(NewOffset);
+                                                    }
+                                                }
+                                            )
 
                                             + SScrollBox::Slot()
                                             [
                                                 SAssignNew(ScriptPanel, SGASScriptPanel)
                                             ]
 
+
+
                                     ]
+
                             ]
 
                         // =======================================================
@@ -646,6 +806,40 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                     ]
 
         ];
+        if (ScriptPanel.IsValid())
+        {
+            ScriptPanel->OnRequestExternalScroll.BindLambda(
+                [this](float NewOffset)
+                {
+                    if (!ScriptScrollBox.IsValid())
+                    {
+                        return;
+                    }
+
+                    // ScrollBox is the ONLY scroll authority
+                    const float ViewOffset =
+                        NewOffset - ScriptScrollBox->GetScrollOffset();
+
+                    ScriptScrollBox->SetScrollOffset(ViewOffset + ScriptScrollBox->GetScrollOffset());
+
+                }
+            );
+        }
+
+
+        // --------------------------------------------------
+        // Bind Shot List rebuild request from ScriptPanel
+        // --------------------------------------------------
+        if (ScriptPanel.IsValid())
+        {
+            ScriptPanel->OnRequestShotListRebuild.BindLambda(
+                [this]()
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("[ShotListV2] Rebuild requested from ScriptPanel"));
+                    RebuildShotList();
+                }
+            );
+        }
 
         // ------------------------------------------------------------
         // Wire script mutation → project dirty state
@@ -704,6 +898,7 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
             UE_LOG(LogTemp, Warning, TEXT("DEBUG: Created transient GAS PrePro Project"));
         }
 
+        RebuildCastUI();
 
 }
 
@@ -835,15 +1030,41 @@ FReply SGAS_ScriptTab::OnToggleSceneNumbers()
         TEXT("SCRIPT TAB: Scene numbers %s"),
         bShowSceneNumbers ? TEXT("ON") : TEXT("OFF"));
 
+    float SavedScrollOffset = 0.f;
+
+    if (ScriptScrollBox.IsValid())
+    {
+        SavedScrollOffset = ScriptScrollBox->GetScrollOffset();
+    }
+
     if (ScriptPanel.IsValid())
     {
         ScriptPanel->SetShowSceneNumbers(bShowSceneNumbers);
-
         ScriptPanel->RebuildLayout();
+    }
+
+    // 🔒 Restore scroll NEXT TICK (after Slate layout settles)
+    if (ScriptScrollBox.IsValid())
+    {
+        TWeakPtr<SScrollBox> WeakScrollBox = ScriptScrollBox;
+        const float OffsetToRestore = SavedScrollOffset;
+
+        FTSTicker::GetCoreTicker().AddTicker(
+            FTickerDelegate::CreateLambda([WeakScrollBox, OffsetToRestore](float)
+                {
+                    if (WeakScrollBox.IsValid())
+                    {
+                        WeakScrollBox.Pin()->SetScrollOffset(OffsetToRestore);
+                    }
+                    return false; // one-shot
+                })
+        );
     }
 
     return FReply::Handled();
 }
+
+
 
 
 FReply SGAS_ScriptTab::OnToggleShotMarking()
@@ -871,9 +1092,6 @@ FReply SGAS_ScriptTab::OnAddShotMarkerClicked()
 
     return FReply::Handled();
 }
-
-
-
 
 
 // ============================================================================
@@ -940,6 +1158,9 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
     // 4. Populate authoritative in-memory script (JSON-backed)
     // --------------------------------------------------------------------
     CurrentScript = Script;
+    BuildCastListFromScript();
+    RebuildCastUI();
+
     UE_LOG(
         LogTemp,
         Warning,
@@ -990,8 +1211,25 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
             CurrentScript.SceneNumbering
         );
 
-
     ScriptPanel->SetRenderedScript(Rendered);
+
+    TArray<FGASShotListSceneRow> SceneRowsV2;
+
+    BuildShotListFromScriptV2(
+        CurrentScript,
+        CurrentScript.SceneNumbering,
+        Rendered,
+        SceneRowsV2
+    );
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("[ShotListV2] Using %d V2 scene rows"),
+        SceneRowsV2.Num()
+    );
+
+
 
     // --------------------------------------------------------------------
     // 6. Clear markers (FDX has none)
@@ -1101,7 +1339,10 @@ FReply SGAS_ScriptTab::OnGeneratePageBreaks()
         ScriptPanel->RebuildLayout();
     }
 
+    RebuildShotList();
     return FReply::Handled();
+    
+
 }
 
 void SGAS_ScriptTab::EnsureScriptSaved()
@@ -1151,10 +1392,17 @@ void SGAS_ScriptTab::ClearScript()
         ScriptPanel->SetRenderedScript({});
     }
 
+    // ✅ Force the parent ScrollBox (the real scroll owner) back to top
+    if (ScriptScrollBox.IsValid())
+    {
+        ScriptScrollBox->SetScrollOffset(0.f);
+    }
+
     RebuildShotList();
 
     UE_LOG(LogTemp, Warning, TEXT("SCRIPT CLEARED"));
 }
+
 
 
 FReply SGAS_ScriptTab::OnToggleEditMode()
@@ -1177,6 +1425,100 @@ FReply SGAS_ScriptTab::OnToggleEditMode()
 
     return FReply::Handled();
 }
+
+void SGAS_ScriptTab::BuildCastListFromScript()
+{
+    CastList.Empty();
+
+    TSet<FString> UniqueNames;
+
+    for (const FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Type == EGASBlockType::Character)
+        {
+            FString Name = Block.Text.TrimStartAndEnd();
+
+            if (!Name.IsEmpty() && !UniqueNames.Contains(Name))
+            {
+                UniqueNames.Add(Name);
+
+                FGASCastMember Member;
+                Member.Name = Name;
+                Member.bEnabled = true;
+
+                CastList.Add(Member);
+            }
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[Cast] Built %d cast members"), CastList.Num());
+}
+
+void SGAS_ScriptTab::RebuildCastUI()
+{
+    if (!CastListContainer.IsValid())
+        return;
+
+    CastListContainer->ClearChildren();
+
+    if (CastList.Num() == 0)
+    {
+        CastListContainer->AddSlot()
+            .AutoHeight()
+            .Padding(4.f)
+            [
+                SNew(STextBlock)
+                    .Text(FText::FromString(TEXT("No characters found")))
+                    .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+            ];
+        return;
+    }
+
+    for (FGASCastMember& Member : CastList)
+    {
+        CastListContainer->AddSlot()
+            .AutoHeight()
+            .Padding(2.f)
+            [
+                SNew(SCheckBox)
+                    .IsChecked_Lambda([&Member]()
+                        {
+                            return Member.bEnabled
+                                ? ECheckBoxState::Checked
+                                : ECheckBoxState::Unchecked;
+                        })
+                    .OnCheckStateChanged_Lambda([&Member](ECheckBoxState State)
+                        {
+                            Member.bEnabled = (State == ECheckBoxState::Checked);
+                        })
+                    [
+                        SNew(STextBlock)
+                            .Text_Lambda([&Member]()
+                                {
+                                    return FText::FromString(Member.Name);
+                                })
+                    ]
+            ];
+    }
+}
+
+
+void SGAS_ScriptTab::GetEnabledCastNames(
+    TArray<TSharedPtr<FString>>& OutNames) const
+{
+    OutNames.Reset();
+
+    for (const FGASCastMember& Member : CastList)
+    {
+        if (Member.bEnabled && !Member.Name.IsEmpty())
+        {
+            OutNames.Add(MakeShared<FString>(Member.Name));
+        }
+    }
+}
+
+
+
 
 // ============================================================================
 // HELPER FUNCTIONS - Numbering style
@@ -1224,9 +1566,6 @@ void SGAS_ScriptTab::OnScriptParagraphClicked(int32 BlockIndex)
         NewMarker.MarkerType = EGASMarkerType::ShotMarker;
         NewMarker.ShotOrigin = EGASShotOrigin::User;
         NewMarker.BlockId = BlockId;
-
-        NewMarker.SceneShotIndex =
-            ScriptPanel->CountShotsForScene(BlockId);
 
         NewMarker.Metadata.Add(TEXT("Type"), TEXT("—"));
         NewMarker.Metadata.Add(TEXT("Lens"), TEXT("—"));
@@ -1288,59 +1627,41 @@ static FString ResolveShotLabel_Stub(
 void SGAS_ScriptTab::RebuildShotList()
 {
 
-    ShotListItems.Empty();
-    TSet<int32> ScenesWithShotHeader;
 
-
-    // -----------------------------------------
-    // Scene rows from authoritative script
-    // -----------------------------------------
-    TArray<FGASShotDefinitionListRow> SceneRows;
-
-    if (BuildShotListFromScript(
-        CurrentScript,
-        CurrentScript.SceneNumbering,
-        SceneRows))
+    // --------------------------------------------------
+    // V2 SCENE BUILD (authoritative)
+    // --------------------------------------------------
+    TArray<FGASShotListSceneRow> SceneRowsV2;
+    if (ScriptPanel.IsValid())
     {
-        ShotListItems.Reset();
+        const TArray<FRenderedParagraph>& Rendered =
+            ScriptPanel->GetRenderedParagraphs();
 
-        for (const FGASShotDefinitionListRow& Row : SceneRows)
+        if (Rendered.Num() == 0)
         {
-            ShotListItems.Add(MakeShared<FGASShotDefinitionListRow>(Row));
+            UE_LOG(LogTemp, Warning, TEXT("[ShotListV2] RenderedParagraphs is empty"));
+        }
+        else
+        {
+            BuildShotListFromScriptV2(
+                CurrentScript,
+                CurrentScript.SceneNumbering,
+                Rendered,
+                SceneRowsV2
+            );
 
-            if (CurrentScript.Blocks.IsValidIndex(Row.SceneBlockIndex))
-            {
-                UE_LOG(
-                    LogTemp,
-                    Warning,
-                    TEXT("[SCENE VERIFY] Index=%d Id=%s"),
-                    Row.SceneBlockIndex,
-                    *CurrentScript.Blocks[Row.SceneBlockIndex].Id
-                );
-            }
-            else
-            {
-                UE_LOG(
-                    LogTemp,
-                    Error,
-                    TEXT("[SCENE VERIFY] INVALID SceneBlockIndex=%d"),
-                    Row.SceneBlockIndex
-                );
-            }
+            UE_LOG(
+                LogTemp,
+                Warning,
+                TEXT("[ShotListV2] Built %d scene rows"),
+                SceneRowsV2.Num()
+            );
 
         }
+    }
 
-        UE_LOG(
-            LogTemp,
-            Warning,
-            TEXT("[ShotList] Script scene rebuild: %d scenes"),
-            SceneRows.Num()
-        );
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("[ShotList] No JSON script for scene rebuild"));
-    }
+#if 0 // LEGACY SHOT LIST PIPELINE (disabled during V2 swap)
+
 
     // -------------------------------------------------
     // Helper: find owning SceneBlockIndex for ANY block
@@ -1400,46 +1721,48 @@ void SGAS_ScriptTab::RebuildShotList()
 
     }
 
-    // Walk scenes in authoritative script order
-    for (const FGASShotDefinitionListRow& SceneRow : SceneRows)
+    // Walk V2 scenes in authoritative order for shot attachment
+    for (const FGASShotListSceneRow& Scene : SceneRowsV2)
     {
-        if (!CurrentScript.Blocks.IsValidIndex(SceneRow.SceneBlockIndex))
+        const FString& SceneBlockId = Scene.SceneId;
+
+        // Find legacy SceneBlockIndex from SceneId
+        int32 SceneBlockIndex = INDEX_NONE;
+        for (int32 i = 0; i < CurrentScript.Blocks.Num(); ++i)
+        {
+            if (CurrentScript.Blocks[i].Id == SceneBlockId)
+            {
+                SceneBlockIndex = i;
+                break;
+            }
+        }
+
+        if (!CurrentScript.Blocks.IsValidIndex(SceneBlockIndex))
         {
             continue;
         }
 
-        const FString& SceneBlockId =
-            CurrentScript.Blocks[SceneRow.SceneBlockIndex].Id;
-
-
         const TArray<const FGASMarker*>* UserShots =
             UserByScene.Find(SceneBlockId);
 
-        EGASShotNumberBaseStyle Policy = EGASShotNumberBaseStyle::By10;
-
-
         int32 ShotIndexZeroBased = 0;
 
-
-        // ---- USER SHOTS SECOND (APPEND ONLY) ----
         if (UserShots)
         {
             for (const FGASMarker* Marker : *UserShots)
             {
                 FGASShotDefinitionListRow ShotRow;
                 ShotRow.bIsShotRow = true;
-                ShotRow.SceneBlockIndex = SceneRow.SceneBlockIndex;
+                ShotRow.SceneBlockIndex = SceneBlockIndex;
+                ShotRow.SceneId = SceneBlockId;
                 ShotRow.MarkerId = Marker->Id;
 
                 ShotRow.DisplayName =
                     ResolveShotDisplayLabel(
                         CurrentScript,
-                        SceneRow.SceneBlockIndex,
+                        SceneBlockIndex,
                         ShotIndexZeroBased++
                     );
-
-
-
 
                 ShotListItems.Add(
                     MakeShared<FGASShotDefinitionListRow>(ShotRow)
@@ -1447,6 +1770,7 @@ void SGAS_ScriptTab::RebuildShotList()
             }
         }
     }
+
 
 
 
@@ -1511,6 +1835,8 @@ void SGAS_ScriptTab::RebuildShotList()
         ShotListItems = MoveTemp(OrderedItems);
     }
 
+#endif // LEGACY SHOT LIST PIPELINE
+
     // --------------------------------------------------
     // BUILD SCENE LIST UI (RIGHT PANEL)
     // --------------------------------------------------
@@ -1529,7 +1855,7 @@ void SGAS_ScriptTab::RebuildShotList()
 
     ShotListContainer->ClearChildren();
     // =====================================================
-    // Header Row For Scenes
+    // V2 SCENE HEADER ROW (STATIC)
     // =====================================================
     ShotListContainer->AddSlot()
         .AutoHeight()
@@ -1542,11 +1868,15 @@ void SGAS_ScriptTab::RebuildShotList()
                     SNew(SSplitter)
                         .Orientation(Orient_Horizontal)
 
-                        + SSplitter::Slot().Value(ColExpand)
+                        // Expand spacer (NO arrow in header)
+                        + SSplitter::Slot()
+                        .Value(0.06f)
                         [
-                            SNew(STextBlock).Text(FText::GetEmpty())
+                            SNew(STextBlock)
+                                .Text(FText::GetEmpty())
                         ]
 
+                        // PG
                         + SSplitter::Slot().Value(ColPage)
                         [
                             SNew(STextBlock)
@@ -1554,6 +1884,7 @@ void SGAS_ScriptTab::RebuildShotList()
                                 .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
                         ]
 
+                        // Scene #
                         + SSplitter::Slot().Value(ColScene)
                         [
                             SNew(STextBlock)
@@ -1561,6 +1892,7 @@ void SGAS_ScriptTab::RebuildShotList()
                                 .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
                         ]
 
+                        // Heading
                         + SSplitter::Slot().Value(ColHeading)
                         [
                             SNew(STextBlock)
@@ -1568,6 +1900,7 @@ void SGAS_ScriptTab::RebuildShotList()
                                 .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
                         ]
 
+                        // Length
                         + SSplitter::Slot().Value(ColLength)
                         [
                             SNew(STextBlock)
@@ -1575,6 +1908,7 @@ void SGAS_ScriptTab::RebuildShotList()
                                 .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
                         ]
 
+                        // Time
                         + SSplitter::Slot().Value(ColTime)
                         [
                             SNew(STextBlock)
@@ -1582,6 +1916,7 @@ void SGAS_ScriptTab::RebuildShotList()
                                 .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
                         ]
 
+                        // Set
                         + SSplitter::Slot().Value(ColSet)
                         [
                             SNew(STextBlock)
@@ -1589,451 +1924,285 @@ void SGAS_ScriptTab::RebuildShotList()
                                 .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
                         ]
 
+                        // Notes
                         + SSplitter::Slot().Value(ColNotes)
                         [
                             SNew(STextBlock)
                                 .Text(FText::FromString(TEXT("Notes")))
                                 .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
                         ]
-
                 ]
         ];
 
-
-
-    UE_LOG(
-        LogTemp,
-        Warning,
-        TEXT("[ShotList UI] Children AFTER clear = %d"),
-        ShotListContainer->GetChildren()->Num()
-    );
-
-
-    if (SceneRows.Num() == 0)
+    if (SceneRowsV2.Num() == 0)
     {
-        ShotListContainer->AddSlot()
-            .AutoHeight()
-            .Padding(8.f)
-            [
-                SNew(STextBlock)
-                    .Text(FText::FromString("No scenes found."))
-                    .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
-            ];
+        UE_LOG(LogTemp, Warning, TEXT("[ShotListV2] No scenes to render"));
         return;
     }
 
-    for (const TSharedPtr<FGASShotDefinitionListRow>& Row : ShotListItems)
+    for (const FGASShotListSceneRow& Scene : SceneRowsV2)
     {
-        if (!Row.IsValid())
-        {
-            continue;
-        }
+        ShotListContainer->AddSlot()
+            .AutoHeight()
+            .Padding(4.f, 2.f)
+            [
+                SNew(SSplitter)
+                    .Orientation(Orient_Horizontal)
 
-        // HARD GUARD
-        if (Row->bIsShotRow && Row->DisplayName.IsEmpty())
-        {
-            continue;
-        }
+                    // Expand arrow
+                    + SSplitter::Slot()
+                    .Value(0.06f)
+                    [
+                        SNew(SButton)
+                            .ButtonStyle(FAppStyle::Get(), "NoBorder")
+                            .OnClicked_Lambda([this, Scene]()
+                                {
+                                    if (ExpandedScenes.Contains(Scene.SceneId))
+                                        ExpandedScenes.Remove(Scene.SceneId);
+                                    else
+                                        ExpandedScenes.Add(Scene.SceneId);
 
-        // -----------------------------
-        // Scene row (multi-column)
-        // -----------------------------
-        if (!Row->bIsShotRow)
+                                    RebuildShotList();
+                                    return FReply::Handled();
+                                })
+                            [
+                                SNew(STextBlock)
+                                    .Text_Lambda([this, Scene]()
+                                        {
+                                            return ExpandedScenes.Contains(Scene.SceneId)
+                                                ? FText::FromString(TEXT("▼"))
+                                                : FText::FromString(TEXT("▶"));
+                                        })
+                            ]
+                    ]
+
+                // PG
+                + SSplitter::Slot().Value(ColPage)
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::AsNumber(Scene.StartPage))
+                    ]
+
+                    // Scene #
+                    + SSplitter::Slot().Value(ColScene)
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::FromString(Scene.SceneNumber))
+                    ]
+
+                    // Scene Heading (clickable)
+                    + SSplitter::Slot().Value(ColHeading)
+                    [
+                        SNew(SButton)
+                            .ButtonStyle(FAppStyle::Get(), "NoBorder")
+                            .ContentPadding(FMargin(0))
+                            .OnClicked_Lambda([this, SceneId = Scene.SceneId]()
+                                {
+                                    if (!ScriptPanel.IsValid() || !ScriptScrollBox.IsValid())
+                                    {
+                                        return FReply::Handled();
+                                    }
+
+                                    // Step 1: request the jump
+                                    ScriptPanel->ScrollToBlockId(SceneId);
+
+                                    return FReply::Handled();
+                                })
+
+
+
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(Scene.SceneHeading.ToUpper()))
+                            ]
+                    ]
+
+
+                    // Length
+                    + SSplitter::Slot().Value(ColLength)
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::FromString(Scene.FormattedLength))
+                    ]
+
+                    // Time (empty for now)
+                    + SSplitter::Slot().Value(ColTime)
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::GetEmpty())
+                    ]
+
+                    // Set (empty for now)
+                    + SSplitter::Slot().Value(ColSet)
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::GetEmpty())
+                    ]
+
+                    // Notes (empty for now)
+                    + SSplitter::Slot().Value(ColNotes)
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::GetEmpty())
+                    ]
+
+            ];
+
+        // --------------------------------------------------
+        // SHOTS (only if scene is expanded)
+        // --------------------------------------------------
+        if (ExpandedScenes.Contains(Scene.SceneId))
         {
+            // -----------------------------
+            // Shot Header Row (UI only)
+            // -----------------------------
             ShotListContainer->AddSlot()
                 .AutoHeight()
-                .Padding(4.f, 4.f)
+                .Padding(28.f, 4.f, 4.f, 2.f)
                 [
                     SNew(SSplitter)
                         .Orientation(Orient_Horizontal)
 
-                        + SSplitter::Slot()
-                        .Value(0.10f)
+                        // SHOT
+                        + SSplitter::Slot().Value(ColScene)
                         [
-                            SNew(SButton)
-                                .ButtonStyle(FAppStyle::Get(), "NoBorder")
-                                .OnClicked_Lambda([this, Row]()
-                                    {
-                                        if (!CurrentScript.Blocks.IsValidIndex(Row->SceneBlockIndex))
-                                        {
-                                            return FReply::Handled();
-                                        }
-
-                                        const FString& SceneBlockId =
-                                            CurrentScript.Blocks[Row->SceneBlockIndex].Id;
-
-                                        if (ExpandedScenes.Contains(SceneBlockId))
-                                        {
-                                            ExpandedScenes.Remove(SceneBlockId);
-                                        }
-                                        else
-                                        {
-                                            ExpandedScenes.Add(SceneBlockId);
-                                        }
-
-                                        RebuildShotList();
-                                        return FReply::Handled();
-                                    })
-                                [
-                                    SNew(STextBlock)
-                                        .Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
-                                        .Text_Lambda([this, Row]()
-                                            {
-                                                if (!CurrentScript.Blocks.IsValidIndex(Row->SceneBlockIndex))
-                                                {
-                                                    return FText::GetEmpty();
-                                                }
-
-                                                const FString& SceneBlockId =
-                                                    CurrentScript.Blocks[Row->SceneBlockIndex].Id;
-
-                                                return ExpandedScenes.Contains(SceneBlockId)
-                                                    ? FText::FromString(TEXT("▼"))
-                                                    : FText::FromString(TEXT("▶"));
-                                            })
-                                ]
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("SHOT")))
+                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
                         ]
 
-                        // Page
-                        + SSplitter::Slot()
-                            .Value(ColPage)
-                            .OnSlotResized(SSplitter::FOnSlotResized::CreateLambda(
-                                [this](float NewSize) { ColPage = NewSize; }))
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::AsNumber(Row->PageNumber))
-                            ]
+                        // TYPE (tight)
+                        + SSplitter::Slot().Value(ColType)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("TYPE")))
+                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+                        ]
 
+                        // 1/8
+                        + SSplitter::Slot().Value(ColLength)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("1/8")))
+                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+                        ]
 
-                        // Scene #
-                        +SSplitter::Slot()
-                            .Value(ColScene)
-                            .OnSlotResized(SSplitter::FOnSlotResized::CreateLambda(
-                                [this](float NewSize) { ColScene = NewSize; }))
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(Row->SceneNumber))
-                            ]
+                        // DESCRIPTION (long, user-added)
+                        + SSplitter::Slot().Value(ColDes)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("DESCRIPTION")))
+                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+                        ]
 
+                        // LENS
+                        + SSplitter::Slot().Value(ColLens)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("LENS")))
+                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+                        ]
 
-                            // Scene Heading
-                            +SSplitter::Slot()
-                            .Value(ColHeading)
-                            .OnSlotResized(SSplitter::FOnSlotResized::CreateLambda(
-                                [this](float NewSize) { ColHeading = NewSize; }))
-                            [
-                                SNew(SButton)
-                                    .ButtonStyle(FAppStyle::Get(), "NoBorder")
-                                    .ContentPadding(FMargin(2.f, 0.f))   // 👈 pull content left
-                                    .HAlign(HAlign_Left)                 // 👈 force left alignment
-                                    .OnClicked_Lambda([this, Row]()
-                                        {
-                                            ScrollToScene(*Row);
-                                            return FReply::Handled();
-                                        })
-                                    [
-                                        SNew(STextBlock)
-                                            .Text(FText::FromString(Row->SceneTitle))
-                                            .Justification(ETextJustify::Left)
-                                    ]
-                            ]
+                        // CAMERA (rig / movement flags)
+                        + SSplitter::Slot().Value(ColCamera)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("CAMERA")))
+                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+                        ]
 
-
-
-                        // Length
-                        +SSplitter::Slot()
-                            .Value(ColLength)
-                            .OnSlotResized(SSplitter::FOnSlotResized::CreateLambda(
-                                [this](float NewSize) { ColLength = NewSize; }))
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("—")))
-                            ]
-
-
-                        // Time
-                        +SSplitter::Slot()
-                            .Value(ColTime)
-                            .OnSlotResized(SSplitter::FOnSlotResized::CreateLambda(
-                                [this](float NewSize) { ColTime = NewSize; }))
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("—")))
-                            ]
-
-
-                        // Set
-                        +SSplitter::Slot()
-                            .Value(ColSet)
-                            .OnSlotResized(SSplitter::FOnSlotResized::CreateLambda(
-                                [this](float NewSize) { ColSet = NewSize; }))
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("—")))
-                            ]
-
-
-                        // Notes
-                        +SSplitter::Slot()
-                            .Value(ColNotes)
-                            .OnSlotResized(SSplitter::FOnSlotResized::CreateLambda(
-                                [this](float NewSize) { ColNotes = NewSize; }))
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("—")))
-                            ]
-
+                        // NOTES (long)
+                        + SSplitter::Slot().Value(ColNotes)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("NOTES")))
+                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+                        ]
                 ];
 
-        }
 
-
-
-        // -----------------------------
-        // Shot row
-        // -----------------------------
-        else
-        {
-            const int32 SceneIndex = Row->SceneBlockIndex;
-
-            // -------------------------------------------------
-            // Shot header row — ADD ONLY ONCE PER SCENE
-            // -------------------------------------------------
-            if (!ScenesWithShotHeader.Contains(SceneIndex))
+            // -----------------------------
+            // Shot Rows
+            // -----------------------------
+            for (const FGASShotListShotRow& Shot : Scene.Shots)
             {
-                ScenesWithShotHeader.Add(SceneIndex);
-
                 ShotListContainer->AddSlot()
                     .AutoHeight()
-                    .Padding(32.f, 2.f, 4.f, 2.f)
+                    .Padding(28.f, 2.f, 4.f, 2.f)
                     [
-                        SNew(SBorder)
-                            .Padding(FMargin(8.f, 2.f))
-                            .BorderImage(FAppStyle::Get().GetBrush("WhiteBrush"))
-                            .BorderBackgroundColor(FLinearColor(0.08f, 0.08f, 0.08f, 0.5f))
+                        SNew(SSplitter)
+                            .Orientation(Orient_Horizontal)
+
+                            + SSplitter::Slot().Value(ColScene)
                             [
-                                SNew(SSplitter)
-                                    .Orientation(Orient_Horizontal)
-
-                                    + SSplitter::Slot().Value(ColShot)
-                                    [
-                                        SNew(STextBlock)
-                                            .Text(FText::FromString(TEXT("Shot")))
-                                            .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
-                                    ]
-
-                                    + SSplitter::Slot().Value(ColType)
-                                    [
-                                        SNew(STextBlock)
-                                            .Text(FText::FromString(TEXT("Type")))
-                                            .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
-                                    ]
-
-                                    + SSplitter::Slot().Value(ColLength)
-                                    [
-                                        SNew(STextBlock)
-                                            .Text(FText::FromString(TEXT("PG")))
-                                            .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
-                                    ]
-
-                                    + SSplitter::Slot().Value(ColDes)
-                                    [
-                                        SNew(STextBlock)
-                                            .Text(FText::FromString(TEXT("Description")))
-                                            .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
-                                    ]
-
-                                    + SSplitter::Slot().Value(ColLens)
-                                    [
-                                        SNew(STextBlock)
-                                            .Text(FText::FromString(TEXT("Lens")))
-                                            .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
-                                    ]
-
-                                    + SSplitter::Slot().Value(ColCamera)
-                                    [
-                                        SNew(STextBlock)
-                                            .Text(FText::FromString(TEXT("Camera")))
-                                            .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
-                                    ]
-
-                                    + SSplitter::Slot().Value(ColNotes)
-                                    [
-                                        SNew(STextBlock)
-                                            .Text(FText::FromString(TEXT("Notes")))
-                                            .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
-                                    ]
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(Shot.ShotNumber))
                             ]
-                    ];
-            }
-            // -------------------------------------------------
-            // Shot DATA row (read-only, selectable)
-            // -------------------------------------------------
-            ShotListContainer->AddSlot()
-                .AutoHeight()
-                .Padding(32.f, 2.f, 4.f, 2.f)
-                [
-                    SNew(SBorder)
-                        .BorderImage(FAppStyle::Get().GetBrush("WhiteBrush"))
-                        .BorderBackgroundColor_Lambda([this, Row]()
-                            {
-                                return (Row->MarkerId == ActiveShotMarkerId)
-                                    ? FLinearColor(0.20f, 0.45f, 0.90f, 0.35f)   // selected
-                                    : FLinearColor(0.f, 0.f, 0.f, 0.f);         // normal
-                            })
-                        .OnMouseButtonDown_Lambda([this, Row](const FGeometry&, const FPointerEvent&)
-                            {
-                                ActiveShotMarkerId = Row->MarkerId;
-                                return FReply::Handled();
-                            })
-                        [
-                            SNew(SSplitter)
-                                .Orientation(Orient_Horizontal)
-
-                                // Shot #
-                                + SSplitter::Slot()
-                                .Value(ColShot)
+                            + SSplitter::Slot().Value(ColType)
+                            [
+                                SNew(STextBlock)
+                                    .Text(
+                                        Shot.ShotType.IsEmpty()
+                                        ? FText::FromString(TEXT("—"))
+                                        : FText::FromString(Shot.ShotType)
+                                    )
+                            ]
+                            + SSplitter::Slot().Value(ColLength)
+                            [
+                                SNew(STextBlock)
+                                    .Text(
+                                        Shot.LengthEighths > 0
+                                        ? FText::FromString(GAS_FormatPagesEighths(Shot.LengthEighths))
+                                        : FText::FromString(TEXT("—"))
+                                    )
+                            ]
+                            + SSplitter::Slot().Value(ColDes)
                                 [
-                                    SNew(STextBlock)
-                                        .Text(
-                                            Row->DisplayName.IsEmpty()
-                                            ? FText::GetEmpty()
-                                            : FText::FromString(Row->DisplayName)
+                                    SNew(SEditableTextBox)
+                                        .Text(FText::FromString(Shot.Description))
+                                        .OnTextCommitted_Lambda(
+                                            [this, Shot](const FText& NewText, ETextCommit::Type)
+                                            {
+                                                this->UpdateShotDescription(
+                                                    Shot.ShotId,
+                                                    NewText.ToString()
+                                                );
+
+                                            }
                                         )
                                 ]
 
-                            // Type
-                            + SSplitter::Slot()
-                                .Value(ColType)
-                                [
-                                    SNew(STextBlock)
-                                        .Text_Lambda([this, Row]()
-                                            {
-                                                const FGASMarker* Found = nullptr;
-                                                for (const FGASMarker& M : CurrentScript.Markers)
-                                                {
-                                                    if (M.Id == Row->MarkerId)
-                                                    {
-                                                        Found = &M;
-                                                        break;
-                                                    }
-                                                }
+                            + SSplitter::Slot().Value(ColLens)
+                            [
+                                SNew(STextBlock)
+                                    .Text(
+                                        Shot.Lens.IsEmpty()
+                                        ? FText::FromString(TEXT("—"))
+                                        : FText::FromString(Shot.Lens)
+                                    )
+                            ]
 
-                                                if (!Found) return FText::FromString(TEXT("—"));
-
-                                                const FString* V = Found->Metadata.Find(TEXT("Type"));
-                                                return (V && !V->IsEmpty())
-                                                    ? FText::FromString(*V)
-                                                    : FText::FromString(TEXT("—"));
-                                            })
-                                ]
-
-                            // Length
-                            + SSplitter::Slot()
-                                .Value(ColLength)
-                                [
-                                    SNew(STextBlock)
-                                        .Text(FText::FromString(TEXT("—")))
-                                ]
-
-                                // Description
-                                + SSplitter::Slot()
-                                .Value(ColDes)
-                                [
-                                    SNew(STextBlock)
-                                        .Text_Lambda([this, Row]()
-                                            {
-                                                const FGASMarker* Found = nullptr;
-                                                for (const FGASMarker& M : CurrentScript.Markers)
-                                                {
-                                                    if (M.Id == Row->MarkerId)
-                                                    {
-                                                        Found = &M;
-                                                        break;
-                                                    }
-                                                }
-
-                                                if (!Found) return FText::FromString(TEXT("—"));
-
-                                                const FString* V =
-                                                    Found->Metadata.Find(TEXT("Description"));
-
-                                                return (V && !V->IsEmpty())
-                                                    ? FText::FromString(*V)
-                                                    : FText::FromString(TEXT("—"));
-                                            })
-                                        .WrapTextAt(ColDes * ShotListPanelWidth)
-                                ]
-
-                            // Lens
-                            + SSplitter::Slot()
-                                .Value(ColLens)
-                                [
-                                    SNew(STextBlock)
-                                        .Text_Lambda([this, Row]()
-                                            {
-                                                const FGASMarker* Found = nullptr;
-                                                for (const FGASMarker& M : CurrentScript.Markers)
-                                                {
-                                                    if (M.Id == Row->MarkerId)
-                                                    {
-                                                        Found = &M;
-                                                        break;
-                                                    }
-                                                }
-
-                                                if (!Found) return FText::FromString(TEXT("—"));
-
-                                                const FString* V = Found->Metadata.Find(TEXT("Lens"));
-                                                return (V && !V->IsEmpty())
-                                                    ? FText::FromString(*V)
-                                                    : FText::FromString(TEXT("—"));
-                                            })
-                                ]
-
-                            // Camera
-                            + SSplitter::Slot()
-                                .Value(ColCamera)
-                                [
-                                    SNew(STextBlock)
-                                        .Text_Lambda([this, Row]()
-                                            {
-                                                const FGASMarker* Found = nullptr;
-                                                for (const FGASMarker& M : CurrentScript.Markers)
-                                                {
-                                                    if (M.Id == Row->MarkerId)
-                                                    {
-                                                        Found = &M;
-                                                        break;
-                                                    }
-                                                }
-
-                                                if (!Found) return FText::FromString(TEXT("—"));
-
-                                                const FString* V = Found->Metadata.Find(TEXT("Camera"));
-                                                return (V && !V->IsEmpty())
-                                                    ? FText::FromString(*V)
-                                                    : FText::FromString(TEXT("—"));
-                                            })
-                                ]
-
-                            // Notes
-                            + SSplitter::Slot()
-                                .Value(ColNotes)
-                                [
-                                    SNew(STextBlock)
-                                        .Text(FText::FromString(TEXT("—")))
-                                ]
-                        ]
-                ];
+                            + SSplitter::Slot().Value(ColCamera)
+                            [
+                                SNew(STextBlock).Text(FText::FromString(Shot.Camera))
+                            ]
 
 
-
+                            + SSplitter::Slot().Value(ColNotes)
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(Shot.Notes))
+                            ]
+                    ];
+            }
         }
 
     }
+    
 
 }
+
+
 
 void SGAS_ScriptTab::ScrollToScene(const FGASShotDefinitionListRow& Scene)
 {
@@ -2072,6 +2241,27 @@ void SGAS_ScriptTab::ScrollToScene(const FGASShotDefinitionListRow& Scene)
     ScriptPanel->ScrollToBlockId(BlockId);
 
 }
+
+void SGAS_ScriptTab::UpdateShotDescription(
+    const FGuid& ShotId,
+    const FString& NewDescription)
+{
+    if (!ScriptPanel.IsValid())
+    {
+        return;
+    }
+
+    ScriptPanel->ModifyShotMarkerMetadata(
+        ShotId,
+        TEXT("Description"),
+        NewDescription
+    );
+
+    MarkScriptDirty();
+}
+
+
+
 
 void SGAS_ScriptTab::SaveScriptToJson()
 {
@@ -2173,6 +2363,9 @@ void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
     }
 
     CurrentScript = MoveTemp(Loaded);
+    BuildCastListFromScript();
+    RebuildCastUI();
+
 
     UE_LOG(
         LogTemp,

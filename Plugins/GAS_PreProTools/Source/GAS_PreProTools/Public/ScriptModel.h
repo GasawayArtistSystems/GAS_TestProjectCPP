@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GAS_NumberingEnums.h"
+#include "GAS_ShotIntentTypes.h"
 #include "Misc/Optional.h"
 
 #include "ScriptModel.generated.h"
@@ -280,6 +281,19 @@ struct FGASScriptUndoSnapshot
     TArray<FGASUserPageBreak> UserPageBreaks;
 };
 
+USTRUCT()
+struct FGASShotCastMember
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FString CharacterName;
+
+    UPROPERTY()
+    bool bEnabled = true;
+};
+
+
 // ------------------------------------------------------------
 // FULL SCRIPT CONTAINER
 // ------------------------------------------------------------
@@ -315,6 +329,19 @@ struct GAS_PREPROTOOLS_API FGASScript
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FGASUserPageBreak> UserPageBreaks;
+
+    // =====================================================
+    // Shot Intent (Creative Meaning)
+    // Keyed by FGASMarker::Id
+    // =====================================================
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TMap<FString, FGASShotIntent> ShotIntents;
+
+
+    UPROPERTY()
+    TArray<FGASShotCastMember> ShotCast;
+
 
     // ------------------------------------------------------------
     // Undo / Redo Stacks (Authoritative)

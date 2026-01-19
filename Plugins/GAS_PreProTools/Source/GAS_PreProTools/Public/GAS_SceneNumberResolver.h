@@ -6,7 +6,7 @@
 // ------------------------------------------------------------
 // Scene Number Resolver (Read-only, Stateless)
 // ------------------------------------------------------------
-class FGASSceneNumberResolver
+struct GAS_PREPROTOOLS_API FGASSceneNumberResolver 
 {
 public:
     // Computes scene labels in script order.
