@@ -37,6 +37,8 @@ public:
     }
 
     FOnSceneSelected OnSceneSelected;
+    void RefreshShotList();
+
 
 private:
     void SetActiveTab(EGASMainTab NewTab);

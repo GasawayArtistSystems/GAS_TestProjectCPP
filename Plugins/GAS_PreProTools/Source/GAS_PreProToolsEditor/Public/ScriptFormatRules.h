@@ -17,6 +17,13 @@ namespace ScriptFormat
 
     static constexpr float LinesPerPageFudge = 1.0f;
 
+    static constexpr float UsablePageHeight =
+        PageHeight - MarginTop - MarginBottom;
+
+    static constexpr float EighthHeight =
+        UsablePageHeight / 8.f;
+
+
     // ------------------------------------------------------------------------
     // Absolute Column Layout (Final Draft–style)
     // ------------------------------------------------------------------------

@@ -41,6 +41,9 @@ struct FShotEntry
 
 DECLARE_DELEGATE_OneParam(FOnParagraphClicked, int32 /*ParagraphIndex*/);
 
+
+
+
 class SGAS_ScriptTab : public SCompoundWidget
 {
 public:
@@ -111,8 +114,18 @@ public:
     void GetEnabledCastNames(TArray<TSharedPtr<FString>>& OutNames) const;
 
     void UpdateShotDescription(const FGuid& ShotId, const FString& NewDescription);
+    void UpdateShotNotes(
+        const FGuid& ShotId,
+        const FString& NewNotes
+    );
+    void UpdateShotNotesExpanded(
+        const FGuid& ShotId,
+        bool bExpanded
+    );
 
+    DECLARE_MULTICAST_DELEGATE(FOnShotListNeedsRefresh);
 
+    FOnShotListNeedsRefresh OnShotListNeedsRefresh;
 
 
 private:

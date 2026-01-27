@@ -849,8 +849,12 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
             ScriptPanel->OnScriptMutated.BindLambda([this]()
                 {
                     UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: Script mutated → marking dirty"));
+
                     MarkScriptDirty();
+                    OnShotListNeedsRefresh.Broadcast();
                 });
+
+
         }
 
         // ------------------------------------------------------------
@@ -1627,7 +1631,6 @@ static FString ResolveShotLabel_Stub(
 void SGAS_ScriptTab::RebuildShotList()
 {
 
-
     // --------------------------------------------------
     // V2 SCENE BUILD (authoritative)
     // --------------------------------------------------
@@ -2190,8 +2193,19 @@ void SGAS_ScriptTab::RebuildShotList()
 
                             + SSplitter::Slot().Value(ColNotes)
                             [
-                                SNew(STextBlock)
+
+                                SNew(SMultiLineEditableTextBox)
                                     .Text(FText::FromString(Shot.Notes))
+                                    .AutoWrapText(true)
+                                    .OnTextCommitted_Lambda(
+                                        [this, Shot](const FText& NewText, ETextCommit::Type)
+                                        {
+                                            this->UpdateShotNotes(
+                                                Shot.ShotId,
+                                                NewText.ToString()
+                                            );
+                                        }
+                                    )
                             ]
                     ];
             }
@@ -2260,6 +2274,23 @@ void SGAS_ScriptTab::UpdateShotDescription(
     MarkScriptDirty();
 }
 
+void SGAS_ScriptTab::UpdateShotNotes(
+    const FGuid& ShotId,
+    const FString& NewNotes)
+{
+    if (!ScriptPanel.IsValid())
+    {
+        return;
+    }
+
+    ScriptPanel->ModifyShotMarkerMetadata(
+        ShotId,
+        TEXT("Notes"),
+        NewNotes
+    );
+
+    MarkScriptDirty();
+}
 
 
 

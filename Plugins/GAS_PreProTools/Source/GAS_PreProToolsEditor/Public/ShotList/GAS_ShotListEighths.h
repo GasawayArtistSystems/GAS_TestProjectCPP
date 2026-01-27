@@ -49,6 +49,14 @@ namespace GASShotListEighths
         int32 EndPage,
         float EndY
     );
+
+    // Shot-only eighths (ignores page breaks)
+    int32 ComputeShotEighths_Up(
+        float StartY,
+        float EndY,
+        float EighthHeightY
+    );
+
 }
 
 FString GAS_FormatPagesEighths(int32 TotalEighths);

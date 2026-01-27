@@ -142,6 +142,7 @@ TSharedRef<SWidget> SGAS_TestWindow::CreateScriptTabContent()
 {
     ScriptTab = SNew(SGAS_ScriptTab);
 
+    // Project load
     ScriptTab->OnProjectLoaded.BindLambda(
         [this](UGASPreProProject* InProject)
         {
@@ -150,12 +151,19 @@ TSharedRef<SWidget> SGAS_TestWindow::CreateScriptTabContent()
         }
     );
 
+    // 🔑 Script mutation → refresh shot list
+    ScriptTab->OnShotListNeedsRefresh.AddSP(
+        this,
+        &SGAS_TestWindow::RefreshShotList
+    );
+
     return SNew(SBorder)
         .Padding(4.f)
         [
             ScriptTab.ToSharedRef()
         ];
 }
+
 
 
 
@@ -172,10 +180,6 @@ TSharedRef<SWidget> SGAS_TestWindow::CreateShotListTabContent()
         ShotListItems.Add(MakeShared<FGASShotDefinitionListRow>(Row));
     }
 
-    if (ShotListView.IsValid())
-    {
-        ShotListView->RequestListRefresh();
-    }
 
 
     return SNew(SBorder)
@@ -281,3 +285,20 @@ FText SGAS_TestWindow::GetScriptTabLabel() const
     );
 }
 
+void SGAS_TestWindow::RefreshShotList()
+{
+    ShotListItems.Reset();
+
+    TArray<FGASShotDefinitionListRow> SceneRows;
+    BuildShotListFromJson(SceneRows);
+
+    for (const FGASShotDefinitionListRow& Row : SceneRows)
+    {
+        ShotListItems.Add(MakeShared<FGASShotDefinitionListRow>(Row));
+    }
+
+    if (ShotListView.IsValid())
+    {
+        ShotListView->RequestListRefresh();
+    }
+}

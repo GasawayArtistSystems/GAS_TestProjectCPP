@@ -67,6 +67,10 @@ struct FGASShotListShotRow
     UPROPERTY()
     FString Notes;                // User-entered
 
+    UPROPERTY()
+    bool bNotesExpanded = false;
+
+
     // -----------------------------
     // Shot tools / status (dropdown mask)
     // -----------------------------

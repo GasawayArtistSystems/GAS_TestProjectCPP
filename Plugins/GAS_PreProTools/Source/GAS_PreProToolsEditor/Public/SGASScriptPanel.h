@@ -125,6 +125,13 @@ public:
     int32 ShotRangeStartParagraph = INDEX_NONE;
     int32 ShotRangeCurrentParagraph = INDEX_NONE;
     void SetEnabledCastNames(const TArray<TSharedPtr<FString>>& InNames);
+    bool bPageBreakDidDrag = false;
+
+
+    int32 DraggedPageBreakTargetRenderIndex = INDEX_NONE;
+    int32 PendingDeletePageBreakIndex = INDEX_NONE;
+    float PageBreakClickStartY = 0.f;
+
 
     FOnRequestShotListRebuild OnRequestShotListRebuild;
 
@@ -165,6 +172,12 @@ private:
         const FGeometry& MyGeometry,
         const FPointerEvent& MouseEvent
     ) override;
+
+    virtual FReply OnMouseButtonDoubleClick(
+        const FGeometry& MyGeometry,
+        const FPointerEvent& MouseEvent
+    ) override;
+
 
     virtual FReply OnMouseMove(
         const FGeometry& MyGeometry,
@@ -218,7 +231,10 @@ private:
 
 
 
-
+    int32 CachedDraggingShotIndex = INDEX_NONE;
+    void EndAllDrags();
+    bool bDragMoved = false;
+        
 
     FString HitTestShot(const FVector2D& LocalPos) const;
     FString HitTestShotTail(const FVector2D& LocalPos) const;
@@ -254,7 +270,7 @@ private:
     // =========================================================
     void ApplyScriptEdit(const FGASScriptEdit& Edit);   
 
-    void OpenEditActionDialog(int32 BlockIndex);
+    void OpenEditActionDialog(int32 BlockIndex, const FText& WindowTitle);
     void OpenAddBlockDialog(int32 InsertAfterParagraphIndex);
     void InsertNewBlock(int32 InsertAfterParagraphIndex, int32 BlockTypeChoice);
     void OpenEditCharacterDialog(int32 BlockIndex);
@@ -362,10 +378,26 @@ private:
     mutable int32 PendingScrollParagraph = INDEX_NONE;
     mutable bool bForceScrollReset = false;
     mutable bool bSuppressScrollInput = false;
+    float ShotRangeStartLocalY = 0.f;
 
 
 
-    void OpenShotIntentPopup(const FString& MarkerId);
+
+    void OpenShotIntentPopup(const FString& MarkerId, bool bIsNewShot = false);
+
+    // =============================================================
+    // Block Type Context Menu (Edit Mode)
+    // =============================================================
+    void OpenChangeBlockTypeMenu(
+        int32 ParagraphIndex,
+        const FGeometry& MyGeometry,
+        const FPointerEvent& MouseEvent
+    );
+
+    bool CanChangeBlockType(int32 ParagraphIndex, EGASBlockType NewType) const;
+
+    void ApplyBlockTypeChange(int32 ParagraphIndex, EGASBlockType NewType);
+
 
     int32 ResolveParagraphForShot(float LocalY) const;
 
