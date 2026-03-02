@@ -64,27 +64,27 @@ struct FGASShotIntent
     // -------------------------------------------------
 
     // Must match FGASMarker::Id
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString MarkerId;
 
     // -------------------------------------------------
     // Creative Intent
     // -------------------------------------------------
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASShotType ShotType = EGASShotType::MS;
 
     // Character / subject identifier (string for now)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString SubjectId;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASLensIntent Lens = EGASLensIntent::L50;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASCameraBehavior CameraBehavior = EGASCameraBehavior::Static;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASFramingBias Framing = EGASFramingBias::Center;
 
     FString CharacterName;

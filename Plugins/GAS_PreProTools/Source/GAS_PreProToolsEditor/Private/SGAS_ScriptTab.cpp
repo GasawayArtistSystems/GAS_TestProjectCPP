@@ -8,10 +8,23 @@
 #include "GAS_ImportNumberingTypes.h"
 #include "GAS_ShotListTypes.h"
 #include "GAS_ShotIntentTypes.h"
+#include "GAS_SetManager.h"
+#include "SGASShotCastList.h"
 #include "ShotList/GAS_ShotListEighths.h"
 #include "SScriptWheelCatcher.h"
 #include "ShotList/GAS_ShotListBuilderV2.h"
-
+#include "GAS_PreProToolsStyle.h"
+#include "GASScriptAsset.h"
+#include "GAS_SetActor.h"
+#include "SGAS_SetBrowser.h"
+#include "GAS_SetDiscovery.h"
+#include "Actors/GAS_StageCenterActor.h"
+#include "GAS_StandInActor.h"
+#include "UI/Blocking/SGAS_BlockingCastWindow.h"
+#include "GAS_BlockingAnchorActor.h"
+#include "Actors/GAS_ShotCameraActor.h"
+#include "GASPreProLog.h"
+#include "GASBlockingAccess.h"
 
 #include "ScriptLayoutEngine.h"
 #include "JsonObjectConverter.h"
@@ -23,7 +36,12 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/SWindow.h"
+#include "Widgets/Input/SEditableTextBox.h"
 
+#include "ContentBrowserModule.h"
+#include "IContentBrowserSingleton.h"
+#include "Modules/ModuleManager.h"
 #include "DesktopPlatformModule.h"
 #include "Framework/Application/SlateApplication.h"
 #include "UObject/SavePackage.h"
@@ -31,15 +49,27 @@
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
+#include "FileHelpers.h"
 #include "Misc/MessageDialog.h"
-
-
-#include "GAS_PreProToolsStyle.h"
-#include "GASScriptAsset.h"
-
-
-// JSON persistence is temporarily disabled; we keep FileManager for GetScriptJsonPath.
+#include "EditorLevelUtils.h"
+#include "Editor.h"
+#include "LevelEditorSubsystem.h"
+#include "AssetToolsModule.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "ObjectTools.h"
+#include "IAssetTools.h"
+#include "PackageTools.h"
+#include "Framework/Docking/TabManager.h"
+#include "EngineUtils.h"
+#include "Engine/LevelStreamingDynamic.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/StaticMeshActor.h"
+#include "UObject/ConstructorHelpers.h"
 #include "HAL/FileManager.h"
+#include "Factories/WorldFactory.h"
+#include "EditorSubsystem.h"
+#include "Engine/LevelStreaming.h"
+
 
 
 // =======================================================
@@ -47,6 +77,184 @@
 // =======================================================
 static constexpr float ScriptPanelWidth = 810.f;
 static constexpr float ShotListPanelWidth = 910.f;
+
+// =======================================================
+// FOR BLOCKING SETUP
+// =======================================================
+static bool DuplicateSetIntoBlockingLevel(
+    const FString& SetLevelPath,
+    UWorld* BlockingWorld
+)
+{
+    if (!BlockingWorld)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("DuplicateSetIntoBlockingLevel: BlockingWorld NULL"));
+        return false;
+    }
+
+    // -----------------------------------------------------
+    // Prevent duplicate set bake
+    // -----------------------------------------------------
+    for (AActor* ExistingActor : BlockingWorld->PersistentLevel->Actors)
+    {
+        if (!ExistingActor)
+            continue;
+
+        FString Label = ExistingActor->GetActorLabel();
+
+        if (Label.EndsWith(TEXT("_SetRoot")))
+        {
+            UE_LOG(LogGASPrePro, Warning,
+                TEXT("DuplicateSetIntoBlockingLevel: Set already baked. Skipping."));
+            return true;
+        }
+    }
+
+    // -----------------------------------------------------
+    // Load set world as asset (DO NOT LoadMap)
+    // -----------------------------------------------------
+    UPackage* SetPackage = LoadPackage(nullptr, *SetLevelPath, LOAD_None);
+    if (!SetPackage)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("DuplicateSetIntoBlockingLevel: Failed to load package %s"), *SetLevelPath);
+        return false;
+    }
+
+    UWorld* SetWorld = UWorld::FindWorldInPackage(SetPackage);
+    if (!SetWorld)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("DuplicateSetIntoBlockingLevel: No world in package"));
+        return false;
+    }
+
+    ULevel* SetLevel = SetWorld->PersistentLevel;
+    ULevel* BlockingLevel = BlockingWorld->PersistentLevel;
+
+    if (!SetLevel || !BlockingLevel)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("DuplicateSetIntoBlockingLevel: Invalid levels"));
+        return false;
+    }
+
+    // -----------------------------------------------------
+    // First pass: spawn actors and store mapping
+    // -----------------------------------------------------
+    TMap<AActor*, AActor*> ActorMap;
+
+    for (AActor* Actor : SetLevel->Actors)
+    {
+        if (!Actor)
+            continue;
+
+        if (Actor->IsEditorOnly())
+            continue;
+
+        if (Actor->IsTemplate())
+            continue;
+
+        if (Actor->GetClass()->HasAnyClassFlags(CLASS_Transient))
+            continue;
+
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.OverrideLevel = BlockingLevel;
+        SpawnParams.SpawnCollisionHandlingOverride =
+            ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+        AActor* NewActor = BlockingWorld->SpawnActor<AActor>(
+            Actor->GetClass(),
+            Actor->GetActorTransform(),
+            SpawnParams
+        );
+
+        if (NewActor)
+        {
+            EditorUtilities::CopyActorProperties(Actor, NewActor);
+
+            // 🔥 Force proper editor registration
+            NewActor->ReregisterAllComponents();
+            NewActor->MarkComponentsRenderStateDirty();
+
+            ActorMap.Add(Actor, NewActor);
+        }
+    }
+
+    // -----------------------------------------------------
+    // Second pass: restore attachments
+    // -----------------------------------------------------
+    for (const TPair<AActor*, AActor*>& Pair : ActorMap)
+    {
+        AActor* OldActor = Pair.Key;
+        AActor* NewActor = Pair.Value;
+
+        AActor* OldParent = OldActor->GetAttachParentActor();
+        if (OldParent && ActorMap.Contains(OldParent))
+        {
+            AActor* NewParent = ActorMap[OldParent];
+            NewActor->AttachToActor(
+                NewParent,
+                FAttachmentTransformRules::KeepRelativeTransform
+            );
+        }
+    }
+
+    // -----------------------------------------------------
+    // Cleanup set package (prevent hidden world leaks)
+    // -----------------------------------------------------
+    SetWorld->MarkAsGarbage();
+    SetPackage->MarkAsGarbage();
+
+    CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+
+    return true;
+}
+
+static void GAS_SplitHeading_TimeOfDay(FString& InOutHeading, FString& OutTimeOfDay)
+{
+    OutTimeOfDay.Reset();
+
+    FString H = InOutHeading.TrimStartAndEnd();
+
+    int32 DashIdx = H.Find(TEXT(" - "), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+
+    if (DashIdx == INDEX_NONE)
+    {
+        DashIdx = H.Find(TEXT(" — "), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+    }
+
+    if (DashIdx == INDEX_NONE)
+    {
+        InOutHeading = H;
+        return;
+    }
+
+    FString Left = H.Left(DashIdx).TrimStartAndEnd();
+    FString Right = H.Mid(DashIdx + 3).TrimStartAndEnd();
+
+    if (Right.IsEmpty())
+    {
+        InOutHeading = H;
+        return;
+    }
+
+    while (Right.EndsWith(TEXT(".")) ||
+        Right.EndsWith(TEXT(",")) ||
+        Right.EndsWith(TEXT(";")) ||
+        Right.EndsWith(TEXT(":")))
+    {
+        Right.LeftChopInline(1);
+        Right = Right.TrimStartAndEnd();
+    }
+
+    if (Right.IsEmpty())
+    {
+        InOutHeading = H;
+        return;
+    }
+
+    InOutHeading = Left;
+    OutTimeOfDay = Right;
+}
+
 
 
 // ------------------------------------------------------------
@@ -333,7 +541,7 @@ void SGAS_ScriptTab::RebuildCastList()
                         })
                     [
                         SNew(STextBlock)
-                            .Text(FText::FromString(Member.Name))
+                            .Text(FText::FromString(Member.Name.ToUpper()))
                     ]
             ];
     }
@@ -341,10 +549,12 @@ void SGAS_ScriptTab::RebuildCastList()
 }
 
 
-
-
 FReply SGAS_ScriptTab::OnOpenCastPopup()
 {
+
+    // Ensure script is fully synced before opening Cast
+    CurrentScript.PostScriptMutation();
+
     TSharedRef<SWindow> CastWindow =
         SNew(SWindow)
         .Title(FText::FromString(TEXT("Cast")))
@@ -358,19 +568,12 @@ FReply SGAS_ScriptTab::OnOpenCastPopup()
         + SVerticalBox::Slot()
         .FillHeight(1.f)
         [
-            SNew(SBorder)
-                .Padding(8.f)
-                [
-                    SNew(SScrollBox)
+            SNew(SGASShotCastList)
+                .Script(&CurrentScript)
 
-                        + SScrollBox::Slot()
-                        [
-                            SAssignNew(CastListContainer, SVerticalBox)
-                        ]
-                ]
         ]
 
-    + SVerticalBox::Slot()
+        + SVerticalBox::Slot()
         .AutoHeight()
         .HAlign(HAlign_Right)
         .Padding(8.f, 12.f)
@@ -385,18 +588,8 @@ FReply SGAS_ScriptTab::OnOpenCastPopup()
                     }
                 )
         ]
-        );
+    );
 
-    // Sync enabled cast → ScriptPanel before building UI
-    if (ScriptPanel.IsValid())
-    {
-        TArray<TSharedPtr<FString>> EnabledNames;
-        GetEnabledCastNames(EnabledNames);
-        ScriptPanel->SetEnabledCastNames(EnabledNames);
-    }
-
-
-    RebuildCastList();
 
     FSlateApplication::Get().AddWindow(CastWindow);
 
@@ -404,11 +597,10 @@ FReply SGAS_ScriptTab::OnOpenCastPopup()
 }
 
 
-
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
 {
 
-    UE_LOG(LogTemp, Error, TEXT("=== GAS SCRIPT TAB CONSTRUCTED @ %s ==="), *FDateTime::Now().ToString());
+    UE_LOG(LogGASPrePro, Verbose, TEXT("=== GAS SCRIPT TAB CONSTRUCTED ==="));
 
     // --------------------------------------------------
     // Scene Numbering dropdown options
@@ -452,6 +644,7 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                                 .HAlign(HAlign_Center)
                                                 .VAlign(VAlign_Center)
                                                 .OnClicked(this, &SGAS_ScriptTab::OnAddShotMarkerClicked)
+                                                .ToolTipText(FText::FromString("Shot Marker"))
                                                 [
                                                     SNew(SImage)
                                                         .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.CameraIcon"))
@@ -475,6 +668,7 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                                 .HAlign(HAlign_Center)
                                                 .VAlign(VAlign_Center)
                                                 .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnToggleSceneNumbers))
+                                                .ToolTipText(FText::FromString("Scene Number"))
                                                 [
                                                     SNew(SImage)
                                                         .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SceneNumberIcon"))
@@ -533,11 +727,68 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                                 .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
                                                 .HAlign(HAlign_Center)
                                                 .VAlign(VAlign_Center)
-                                                .ToolTipText(FText::FromString(TEXT("Cast")))
-                                                .OnClicked(FOnClicked::CreateSP(this, &SGAS_ScriptTab::OnOpenCastPopup))
+                                                .ToolTipText(FText::FromString(TEXT("Edit Scene Cast")))
+                                                .IsEnabled(true)
+                                                .OnClicked_Lambda([this]()
+                                                    {
+                                                        if (!bBlockingActive)
+                                                        {
+                                                            UE_LOG(LogGASPrePro, Warning, TEXT("Blocking not active — window denied"));
+                                                            return FReply::Handled();
+                                                        }
+
+                                                        // -----------------------------------------------------
+                                                        // Resolve Scene Title
+                                                        // -----------------------------------------------------
+                                                        FString SceneTitle = TEXT("Unknown Scene");
+
+                                                        for (const FGASBlock& Block : CurrentScript.Blocks)
+                                                        {
+                                                            if (Block.Id == ActiveBlockingSceneId.ToString())
+                                                            {
+                                                                SceneTitle = Block.Text;
+                                                                break;
+                                                            }
+                                                        }
+
+                                                        const FString WindowTitle =
+                                                            FString::Printf(TEXT("CAST | %s"), *SceneTitle.ToUpper());
+
+                                                        TSharedRef<SWindow> Window =
+                                                            SNew(SWindow)
+                                                            .Title(FText::FromString(WindowTitle))
+                                                            .ClientSize(FVector2D(600.f, 400.f));
+
+                                                        Window->SetContent(
+                                                            SNew(SGAS_BlockingCastWindow)
+                                                            .SceneId(ActiveBlockingSceneId)
+                                                            .Script(&CurrentScript)
+                                                            .OnCastModified(
+                                                                SGAS_BlockingCastWindow::FOnCastModified::CreateSP(
+                                                                    this,
+                                                                    &SGAS_ScriptTab::OnBlockingCastModified
+                                                                )
+                                                            )
+                                                        );
+
+                                                        BlockingCastWindow = Window;
+
+                                                        Window->SetOnWindowClosed(FOnWindowClosed::CreateLambda(
+                                                            [this](const TSharedRef<SWindow>&)
+                                                            {
+                                                                BlockingCastWindow.Reset();
+                                                                UE_LOG(LogGASPrePro, Warning, TEXT("Cast window closed (blocking still active)"));
+                                                            }
+                                                        ));
+
+                                                        FSlateApplication::Get().AddWindow(Window);
+
+                                                        return FReply::Handled();
+                                                    })
                                                 [
                                                     SNew(SImage)
                                                         .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.CastIcon"))
+                                                        .ColorAndOpacity(FLinearColor::White)
                                                 ]
                                         ]
                                 ]
@@ -763,8 +1014,6 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                             .OnUserScrolled_Lambda(
                                                 [this](float NewOffset)
                                                 {
-                                                    UE_LOG(LogTemp, Warning, TEXT("[ScrollBox] UserScrolled = %.2f"), NewOffset);
-
                                                     if (ScriptPanel.IsValid())
                                                     {
                                                         ScriptPanel->SetExternalScrollOffset(NewOffset);
@@ -835,7 +1084,7 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
             ScriptPanel->OnRequestShotListRebuild.BindLambda(
                 [this]()
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("[ShotListV2] Rebuild requested from ScriptPanel"));
+                    UE_LOG(LogGASPrePro, Warning, TEXT("[ShotListV2] Rebuild requested from ScriptPanel"));
                     RebuildShotList();
                 }
             );
@@ -848,10 +1097,15 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
         {
             ScriptPanel->OnScriptMutated.BindLambda([this]()
                 {
-                    UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: Script mutated → marking dirty"));
+                    UE_LOG(LogGASPrePro, Warning, TEXT("SCRIPT TAB: Script mutated → marking dirty"));
 
                     MarkScriptDirty();
                     OnShotListNeedsRefresh.Broadcast();
+
+                    if (ScriptPanel.IsValid())
+                    {
+                        ScriptPanel->RebuildLayout();
+                    }
                 });
 
 
@@ -869,6 +1123,13 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
 
         }
 
+        if (ScriptPanel.IsValid())
+        {
+            ScriptPanel->OnShotActivated.BindRaw(
+                this,
+                &SGAS_ScriptTab::SetActiveBlockingShot
+            );
+        }
 
         RebuildShotList();
         LoadScriptFromJsonIfExists();
@@ -889,19 +1150,6 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
         }
 
         RebuildShotList();
-        // ------------------------------------------------------------
-        // TEMP: Create a project asset if none exists
-        // ------------------------------------------------------------
-        if (!ActiveProject)
-        {
-            ActiveProject = NewObject<UGASPreProProject>(
-                GetTransientPackage(),
-                UGASPreProProject::StaticClass()
-            );
-
-            UE_LOG(LogTemp, Warning, TEXT("DEBUG: Created transient GAS PrePro Project"));
-        }
-
         RebuildCastUI();
 
 }
@@ -1023,6 +1271,37 @@ FReply SGAS_ScriptTab::OnImportScript()
 FReply SGAS_ScriptTab::OnSaveScript()
 {
     SaveScriptToJson();
+
+
+#if WITH_EDITOR
+    TArray<UPackage*> PackagesToSave;
+
+    for (TObjectIterator<UWorld> It; It; ++It)
+    {
+        UWorld* World = *It;
+
+        if (!World || !World->PersistentLevel)
+        {
+            continue;
+        }
+
+        UPackage* Package = World->GetOutermost();
+        if (Package && Package->IsDirty())
+        {
+            PackagesToSave.Add(Package);
+        }
+    }
+
+    if (PackagesToSave.Num() > 0)
+    {
+        FEditorFileUtils::PromptForCheckoutAndSave(
+            PackagesToSave,
+            /*bCheckDirty=*/ false,
+            /*bPromptToSave=*/ false
+        );
+    }
+#endif
+
     return FReply::Handled();
 }
 
@@ -1030,7 +1309,7 @@ FReply SGAS_ScriptTab::OnToggleSceneNumbers()
 {
     bShowSceneNumbers = !bShowSceneNumbers;
 
-    UE_LOG(LogTemp, Warning,
+    UE_LOG(LogGASPrePro, Verbose,
         TEXT("SCRIPT TAB: Scene numbers %s"),
         bShowSceneNumbers ? TEXT("ON") : TEXT("OFF"));
 
@@ -1068,15 +1347,143 @@ FReply SGAS_ScriptTab::OnToggleSceneNumbers()
     return FReply::Handled();
 }
 
+void SGAS_ScriptTab::PromptCreateNewProject()
+{
+    TSharedPtr<SEditableTextBox> NameTextBox;
 
+    TSharedRef<SWindow> CreateWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Create New GAS Project")))
+        .ClientSize(FVector2D(400.f, 140.f))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
 
+    CreateWindow->SetContent(
+        SNew(SVerticalBox)
+
+        + SVerticalBox::Slot()
+        .Padding(10.f, 10.f, 10.f, 5.f)
+        .AutoHeight()
+        [
+            SNew(STextBlock)
+                .Text(FText::FromString(TEXT("Project Name")))
+        ]
+
+        + SVerticalBox::Slot()
+        .Padding(10.f, 0.f, 10.f, 10.f)
+        .AutoHeight()
+        [
+            SAssignNew(NameTextBox, SEditableTextBox)
+        ]
+
+        + SVerticalBox::Slot()
+        .Padding(10.f)
+        .HAlign(HAlign_Right)
+        .AutoHeight()
+        [
+            SNew(SHorizontalBox)
+
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .Padding(0.f, 0.f, 5.f, 0.f)
+                [
+                    SNew(SButton)
+                        .Text(FText::FromString(TEXT("Create")))
+                        .OnClicked_Lambda([this, NameTextBox, CreateWindow]()
+                            {
+                                if (!NameTextBox.IsValid())
+                                {
+                                    return FReply::Handled();
+                                }
+
+                                const FString EnteredName = NameTextBox->GetText().ToString().TrimStartAndEnd();
+
+                                if (EnteredName.IsEmpty())
+                                {
+                                    return FReply::Handled();
+                                }
+
+                                if (CreateNewProject(EnteredName))
+                                {
+                                    // Reset script state
+                                    CurrentScript = FGASScript();
+
+                                    // 🔹 IMPORTANT — notify panel of new script
+                                    if (ScriptPanel.IsValid())
+                                    {
+                                        ScriptPanel->SetScript(&CurrentScript);
+                                    }
+
+                                    RebuildShotList();
+                                    RebuildCastUI();
+
+                                    FSlateApplication::Get().RequestDestroyWindow(CreateWindow);
+                                }
+
+                                return FReply::Handled();
+                            })
+                ]
+
+            + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SButton)
+                        .Text(FText::FromString(TEXT("Cancel")))
+                        .OnClicked_Lambda([CreateWindow]()
+                            {
+                                FSlateApplication::Get().RequestDestroyWindow(CreateWindow);
+                                return FReply::Handled();
+                            })
+                ]
+        ]
+    );
+
+    FSlateApplication::Get().AddWindow(CreateWindow);
+}
+
+void SGAS_ScriptTab::PromptOpenProject()
+{
+    FAssetPickerConfig PickerConfig;
+    PickerConfig.Filter.ClassPaths.Add(UGASPreProProject::StaticClass()->GetClassPathName());
+    PickerConfig.SelectionMode = ESelectionMode::Single;
+    PickerConfig.bAllowNullSelection = false;
+
+    TSharedRef<SWindow> PickerWindow =
+        SNew(SWindow)
+        .Title(FText::FromString(TEXT("Open GAS Project")))
+        .ClientSize(FVector2D(600, 400))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    PickerConfig.OnAssetSelected = FOnAssetSelected::CreateLambda(
+        [this, PickerWindow](const FAssetData& AssetData)
+        {
+            FString AssetPath = AssetData.GetObjectPathString();
+
+            if (LoadProject(AssetPath))
+            {
+                UE_LOG(LogGASPrePro, Verbose, TEXT("Loaded Project via Picker"));
+            }
+
+            FSlateApplication::Get().RequestDestroyWindow(PickerWindow);
+        }
+    );
+
+    PickerWindow->SetContent(
+        FModuleManager::LoadModuleChecked<FContentBrowserModule>("ContentBrowser")
+        .Get()
+        .CreateAssetPicker(PickerConfig)
+    );
+
+    FSlateApplication::Get().AddWindow(PickerWindow);
+}
 
 FReply SGAS_ScriptTab::OnToggleShotMarking()
 {
     // Simple toggle for now – we'll wire this into real behavior later.
     bIsShotMarkingActive = !bIsShotMarkingActive;
 
-    UE_LOG(LogTemp, Log, TEXT("Shot marking %s"),
+    UE_LOG(LogGASPrePro, Log, TEXT("Shot marking %s"),
         bIsShotMarkingActive ? TEXT("ENABLED") : TEXT("DISABLED"));
 
     return FReply::Handled();
@@ -1086,7 +1493,7 @@ FReply SGAS_ScriptTab::OnAddShotMarkerClicked()
 {
     bShotSelectArmed = !bShotSelectArmed;
 
-    UE_LOG(LogTemp, Warning, TEXT("[ShotMarker] Shot mode = %s"),
+    UE_LOG(LogGASPrePro, Warning, TEXT("[ShotMarker] Shot mode = %s"),
         bShotSelectArmed ? TEXT("ON") : TEXT("OFF"));
 
     if (ScriptPanel.IsValid())
@@ -1097,6 +1504,148 @@ FReply SGAS_ScriptTab::OnAddShotMarkerClicked()
     return FReply::Handled();
 }
 
+bool SGAS_ScriptTab::CreateNewProject(const FString& ProjectName)
+{
+    if (ProjectName.IsEmpty())
+    {
+        return false;
+    }
+
+    FString CleanName = ProjectName;
+    CleanName.ReplaceInline(TEXT(" "), TEXT("_"));
+
+    const FString PackagePath =
+        FString::Printf(
+            TEXT("/Game/PrePro/Projects/%s"),
+            *CleanName
+        );
+
+    const FString AssetName = CleanName;
+    const FString FullPackagePath = PackagePath + TEXT("/") + AssetName;
+
+    // ------------------------------------------------------------
+    // If project already exists on disk, load it instead
+    // ------------------------------------------------------------
+    const FString ExistingFilePath =
+        FPackageName::LongPackageNameToFilename(
+            FullPackagePath,
+            FPackageName::GetAssetPackageExtension()
+        );
+
+    if (FPaths::FileExists(ExistingFilePath))
+    {
+        UE_LOG(LogGASPrePro, Warning, TEXT("Project already exists. Loading instead: %s"), *CleanName);
+
+        return LoadProject(FullPackagePath + TEXT(".") + AssetName);
+    }
+
+    // ------------------------------------------------------------
+    // Create new project asset
+    // ------------------------------------------------------------
+    UPackage* Package = CreatePackage(*FullPackagePath);
+    if (!Package)
+    {
+        return false;
+    }
+
+    Package->FullyLoad();
+
+    UGASPreProProject* NewProject =
+        NewObject<UGASPreProProject>(
+            Package,
+            UGASPreProProject::StaticClass(),
+            *AssetName,
+            RF_Public | RF_Standalone
+        );
+
+    if (!NewProject)
+    {
+        return false;
+    }
+
+    // Assign name
+    NewProject->ProjectName = CleanName;
+
+    // Mark dirty and register
+    NewProject->MarkPackageDirty();
+    FAssetRegistryModule::AssetCreated(NewProject);
+
+    // Save package to disk
+    const FString FilePath =
+        FPackageName::LongPackageNameToFilename(
+            FullPackagePath,
+            FPackageName::GetAssetPackageExtension()
+        );
+
+    FSavePackageArgs SaveArgs;
+    SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+    SaveArgs.SaveFlags = SAVE_None;
+
+    bool bSaved = UPackage::SavePackage(
+        Package,
+        NewProject,
+        *FilePath,
+        SaveArgs
+    );
+
+    if (!bSaved)
+    {
+        return false;
+    }
+
+    // Set active project
+    ActiveProject = NewProject;
+
+    // ------------------------------------------------------------
+    // Immediately prompt to import script after project creation
+    // ------------------------------------------------------------
+    FTSTicker::GetCoreTicker().AddTicker(
+        FTickerDelegate::CreateLambda([this](float)
+            {
+                OnImportScript();
+                return false; // run once
+            })
+    );
+
+    return true;
+}
+
+
+bool SGAS_ScriptTab::LoadProject(const FString& AssetPath)
+{
+    if (AssetPath.IsEmpty())
+    {
+        return false;
+    }
+    CurrentScript = FGASScript();
+
+    UGASPreProProject* LoadedProject =
+        LoadObject<UGASPreProProject>(
+            nullptr,
+            *AssetPath
+        );
+
+    if (!LoadedProject)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Failed to load project: %s"), *AssetPath);
+        return false;
+    }
+
+    ActiveProject = LoadedProject;
+
+    UE_LOG(LogGASPrePro, Verbose, TEXT("ACTIVE PROJECT POINTER: %p"), ActiveProject);
+
+    UE_LOG(LogGASPrePro, Verbose, TEXT("PROJECT LOADED: %s"), *ActiveProject->ProjectName);
+
+    // Load script JSON for this project
+    LoadScriptFromJsonIfExists();
+
+    // Rebuild UI
+    RebuildShotList();
+    RebuildCastUI();
+
+    return true;
+}
 
 // ============================================================================
 // LOAD SCRIPT (.FDX) — parse, layout, send to panel
@@ -1149,12 +1698,10 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
 
     if (!UGAS_FDXImporter::ImportFDXToScript(FilePath, Script, Options))
     {
-        UE_LOG(LogTemp, Error, TEXT("FDX import failed: %s"), *FilePath);
+        UE_LOG(LogGASPrePro, Error, TEXT("FDX import failed: %s"), *FilePath);
         return;
     }
 
-    // Overwrite current in-memory script (JSON-authoritative)
-    //CurrentScript = FGASScript();
 
 
 
@@ -1166,7 +1713,7 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
     RebuildCastUI();
 
     UE_LOG(
-        LogTemp,
+        LogGASPrePro,
         Warning,
         TEXT("[IMPORT VERIFY] Scene BaseStyle = %d  Style = %d"),
         (int32)CurrentScript.SceneNumbering.BaseStyle,
@@ -1188,7 +1735,7 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
     }
 
     UE_LOG(
-        LogTemp,
+        LogGASPrePro,
         Warning,
         TEXT("AFTER IMPORT: Blocks=%d  PageBreaks=%d"),
         CurrentScript.Blocks.Num(),
@@ -1226,13 +1773,6 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
         SceneRowsV2
     );
 
-    UE_LOG(
-        LogTemp,
-        Warning,
-        TEXT("[ShotListV2] Using %d V2 scene rows"),
-        SceneRowsV2.Num()
-    );
-
 
 
     // --------------------------------------------------------------------
@@ -1240,15 +1780,8 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
     // --------------------------------------------------------------------
 
     RebuildShotList();
-
-    UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: LoadScriptFromFDX finished"));
-
     MarkScriptDirty();
-
-
-
-    UE_LOG(LogTemp, Log, TEXT("Successfully loaded script from FDX: %s"), *FilePath);
-    OnSaveScript(); // make JSON authoritative immediately
+    OnSaveScript();
 
 }
 
@@ -1261,8 +1794,6 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
 
 FReply SGAS_ScriptTab::OnGeneratePageBreaks()
 {
-    UE_LOG(LogTemp, Warning, TEXT("Generate Page Breaks clicked"));
-
     // One-time bootstrap only
     if (CurrentScript.UserPageBreaks.Num() > 0)
     {
@@ -1326,13 +1857,6 @@ FReply SGAS_ScriptTab::OnGeneratePageBreaks()
             NewBreak.AfterBlockId = Block.Id;
             CurrentScript.UserPageBreaks.Add(NewBreak);
 
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT("[GEN] PAGE BREAK after BlockId='%s'"),
-                *Block.Id
-            );
-
             LinesOnPage = 0; // reset for next page
         }
     }
@@ -1351,8 +1875,6 @@ FReply SGAS_ScriptTab::OnGeneratePageBreaks()
 
 void SGAS_ScriptTab::EnsureScriptSaved()
 {
-    UE_LOG(LogTemp, Warning, TEXT("EnsureScriptSaved() called"));
-
     if (CurrentScript.Blocks.Num() == 0)
     {
         return;
@@ -1363,8 +1885,6 @@ void SGAS_ScriptTab::EnsureScriptSaved()
 
 void SGAS_ScriptTab::MarkScriptDirty()
 {
-    UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: MarkScriptDirty CALLED"));
-
     bIsScriptDirty = true;
 
     FGAS_PreProToolsEditorModule& Module =
@@ -1404,19 +1924,14 @@ void SGAS_ScriptTab::ClearScript()
 
     RebuildShotList();
 
-    UE_LOG(LogTemp, Warning, TEXT("SCRIPT CLEARED"));
+    UE_LOG(LogGASPrePro, Verbose, TEXT("SCRIPT CLEARED"));
 }
-
 
 
 FReply SGAS_ScriptTab::OnToggleEditMode()
 {
     bIsEditMode = !bIsEditMode;
 
-    UE_LOG(LogTemp, Error,
-        TEXT("EDIT MODE TOGGLED: %s"),
-        bIsEditMode ? TEXT("ON") : TEXT("OFF")
-    );
 
     if (ScriptPanel.IsValid())
     {
@@ -1424,7 +1939,7 @@ FReply SGAS_ScriptTab::OnToggleEditMode()
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("EDIT MODE: ScriptPanel INVALID"));
+        UE_LOG(LogGASPrePro, Error, TEXT("EDIT MODE: ScriptPanel INVALID"));
     }
 
     return FReply::Handled();
@@ -1434,29 +1949,16 @@ void SGAS_ScriptTab::BuildCastListFromScript()
 {
     CastList.Empty();
 
-    TSet<FString> UniqueNames;
-
-    for (const FGASBlock& Block : CurrentScript.Blocks)
+    for (const FGASCharacterDefinition& Def : CurrentScript.Cast)
     {
-        if (Block.Type == EGASBlockType::Character)
-        {
-            FString Name = Block.Text.TrimStartAndEnd();
+        FGASCastMember Member;
+        Member.Name = Def.CharacterName;
+        Member.bEnabled = Def.bEnabled;
 
-            if (!Name.IsEmpty() && !UniqueNames.Contains(Name))
-            {
-                UniqueNames.Add(Name);
-
-                FGASCastMember Member;
-                Member.Name = Name;
-                Member.bEnabled = true;
-
-                CastList.Add(Member);
-            }
-        }
+        CastList.Add(Member);
     }
-
-    UE_LOG(LogTemp, Log, TEXT("[Cast] Built %d cast members"), CastList.Num());
 }
+
 
 void SGAS_ScriptTab::RebuildCastUI()
 {
@@ -1506,21 +2008,788 @@ void SGAS_ScriptTab::RebuildCastUI()
     }
 }
 
+bool SGAS_ScriptTab::GetSceneCastForBlockId(const FString& SceneBlockId, TArray<FString>& OutSceneCast) const
+{
+    OutSceneCast.Reset();
 
-void SGAS_ScriptTab::GetEnabledCastNames(
-    TArray<TSharedPtr<FString>>& OutNames) const
+    if (SceneBlockId.IsEmpty())
+    {
+        return false;
+    }
+
+    for (const FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Id == SceneBlockId)
+        {
+            if (Block.CharactersInScene.Num() <= 0)
+            {
+                return false;
+            }
+
+            UE_LOG(LogGASPrePro, Warning,
+                TEXT("SCENE FILTER: %s → %d characters"),
+                *SceneBlockId,
+                Block.CharactersInScene.Num());
+
+            OutSceneCast.Reserve(Block.CharactersInScene.Num());
+
+            for (const FString& C : Block.CharactersInScene)
+            {
+                const FString Clean = C.TrimStartAndEnd();
+                if (!Clean.IsEmpty())
+                {
+                    OutSceneCast.Add(Clean);
+                }
+            }
+
+            return OutSceneCast.Num() > 0;
+        }
+    }
+
+    return false;
+}
+
+
+void SGAS_ScriptTab::GetEnabledCastNames_SceneAware(TArray<TSharedPtr<FString>>& OutNames) const
 {
     OutNames.Reset();
 
-    for (const FGASCastMember& Member : CastList)
+    // 1) Get global enabled cast (script-level cast)
+    TArray<TSharedPtr<FString>> EnabledGlobal;
+    EnabledGlobal.Reserve(CastList.Num());
+
+    for (const FGASCastMember& M : CastList)
     {
-        if (Member.bEnabled && !Member.Name.IsEmpty())
+        if (!M.bEnabled)
         {
-            OutNames.Add(MakeShared<FString>(Member.Name));
+            continue;
         }
+
+        const FString Clean = M.Name.TrimStartAndEnd();
+        if (!Clean.IsEmpty())
+        {
+            EnabledGlobal.Add(MakeShared<FString>(Clean));
+        }
+    }
+
+    // 2) Resolve "active scene" from current ScriptPanel selection
+    FString SceneBlockId;
+    if (ScriptPanel.IsValid())
+    {
+        SceneBlockId = ScriptPanel->GetSelectedBlockId();
+    }
+
+    // 3) If no active scene, return global
+    if (SceneBlockId.IsEmpty())
+    {
+        OutNames = MoveTemp(EnabledGlobal);
+        return;
+    }
+
+    // 4) Pull scene-level cast and intersect (scene order wins)
+    TArray<FString> SceneCast;
+    if (!GetSceneCastForBlockId(SceneBlockId, SceneCast))
+    {
+        // If scene has no derived cast, fall back to global
+        OutNames = MoveTemp(EnabledGlobal);
+        return;
+    }
+
+    TSet<FString> EnabledSet;
+    EnabledSet.Reserve(EnabledGlobal.Num());
+    for (const TSharedPtr<FString>& N : EnabledGlobal)
+    {
+        if (N.IsValid())
+        {
+            EnabledSet.Add(*N);
+        }
+    }
+
+    OutNames.Reserve(SceneCast.Num());
+    for (const FString& SceneName : SceneCast)
+    {
+        if (EnabledSet.Contains(SceneName))
+        {
+            OutNames.Add(MakeShared<FString>(SceneName));
+        }
+    }
+
+    // 5) If intersection is empty, fall back to global (prevents "empty dropdown" dead-end)
+    if (OutNames.Num() == 0)
+    {
+        OutNames = MoveTemp(EnabledGlobal);
     }
 }
 
+
+void SGAS_ScriptTab::GetEnabledCastNames(TArray<TSharedPtr<FString>>& OutNames) const
+{
+    // Scene-aware filtering hook (used by Blocking spawn dropdown without UI changes)
+    GetEnabledCastNames_SceneAware(OutNames);
+}
+
+
+// ============================================================================
+// BLOCKING FUNCTIONS
+// ============================================================================
+
+void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
+{
+    if (!ActiveProject)
+    {
+        return;
+    }
+
+    FGASBlock* SceneBlock = nullptr;
+
+    for (FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Id == SceneId && Block.Type == EGASBlockType::SceneHeading)
+        {
+            SceneBlock = &Block;
+            break;
+        }
+    }
+
+    if (!SceneBlock)
+    {
+        return;
+    }
+
+    if (!SceneBlock->BlockingLevelPath.IsEmpty())
+    {
+        FEditorFileUtils::LoadMap(SceneBlock->BlockingLevelPath, false, true);
+
+        bBlockingActive = true;
+        ActiveBlockingSceneId = FGuid(SceneId);
+
+        GASBlockingAccess::SetBlockingActive(true);
+        GASBlockingAccess::SetActiveSceneId(ActiveBlockingSceneId);
+
+        return;
+    }
+
+    // Otherwise show set browser
+    OpenSetSelectionWindow(SceneId);
+}
+
+void SGAS_ScriptTab::OpenSetSelectionWindow(const FString& SceneId)
+{
+    // Store pending SceneId
+    PendingBlockingSceneId = SceneId;
+
+    // Create and store window (NOT local)
+    ActiveSetBrowserWindow =
+        SNew(SWindow)
+        .Title(FText::FromString("Select Set for Blocking"))
+        .ClientSize(FVector2D(600, 500))
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    ActiveSetBrowserWindow->SetContent(
+        SNew(SGAS_SetBrowser)
+        .OwnerScriptTab(SharedThis(this))
+        .OnSetSelected(
+            FOnSetSelected::CreateLambda(
+                [this](const FGASSetDescriptor& Descriptor)
+                {
+                    AssignSetToPendingScene(Descriptor.SetId);
+                }
+            )
+        )
+    );
+
+    FSlateApplication::Get().AddWindow(ActiveSetBrowserWindow.ToSharedRef());
+}
+
+
+
+bool SGAS_ScriptTab::CreateBlockingLevelForScene(
+    FGASBlock& SceneBlock,
+    const FGASSetDescriptor& SelectedSet
+)
+{
+    if (!ActiveProject)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Blocking: ActiveProject null."));
+        return false;
+    }
+
+    const FString ProjectName = ActiveProject->ProjectName;
+    const FString SceneId = SceneBlock.Id;
+
+    const FString FolderPath =
+        TEXT("/Game/PrePro/Projects/") +
+        ProjectName +
+        TEXT("/Blocking/Scenes/");
+
+    // Find scene index among scene headings
+    int32 SceneIndex = 0;
+    int32 Counter = 1;
+
+    for (const FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Type == EGASBlockType::SceneHeading)
+        {
+            if (Block.Id == SceneId)
+            {
+                SceneIndex = Counter;
+                break;
+            }
+            Counter++;
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Resolve authoritative scene number
+    // ------------------------------------------------------------
+
+    // Find zero-based scene index
+    int32 ZeroBasedSceneIndex = 0;
+
+    for (int32 i = 0; i < CurrentScript.Blocks.Num(); ++i)
+    {
+        if (CurrentScript.Blocks[i].Type == EGASBlockType::SceneHeading)
+        {
+            if (CurrentScript.Blocks[i].Id == SceneBlock.Id)
+            {
+                break;
+            }
+            ZeroBasedSceneIndex++;
+        }
+    }
+
+    FString NumberPart = GASSceneNumbering::MakeSceneNumber(
+        ZeroBasedSceneIndex,
+        CurrentScript.SceneNumbering.BaseStyle
+    );
+
+    // Sanitize heading text
+    FString HeadingPart = SceneBlock.Text.ToUpper();
+
+    HeadingPart.ReplaceInline(TEXT("."), TEXT(""));
+    HeadingPart.ReplaceInline(TEXT("-"), TEXT("_"));
+    HeadingPart.ReplaceInline(TEXT(" "), TEXT("_"));
+    HeadingPart.ReplaceInline(TEXT("/"), TEXT("_"));
+    HeadingPart.ReplaceInline(TEXT("\\"), TEXT("_"));
+    HeadingPart.ReplaceInline(TEXT(":"), TEXT(""));
+    HeadingPart.ReplaceInline(TEXT(","), TEXT(""));
+    HeadingPart.ReplaceInline(TEXT("'"), TEXT(""));
+    HeadingPart.ReplaceInline(TEXT("\""), TEXT(""));
+
+    // Final name
+    const FString MapName =
+        NumberPart +
+        TEXT("_") +
+        HeadingPart +
+        TEXT("_BLOCKING");
+
+    const FString FullAssetPath = FolderPath + MapName;
+
+    // ------------------------------------------------------------
+    // Create new empty map properly
+    // ------------------------------------------------------------
+    UWorld* NewWorld = UEditorLoadingAndSavingUtils::NewBlankMap(false);
+
+    if (!NewWorld)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Blocking: Failed to create blank map."));
+        return false;
+    }
+
+    // Save it to desired path
+    if (!UEditorLoadingAndSavingUtils::SaveMap(NewWorld, FullAssetPath))
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Blocking: Failed to save blank map."));
+        return false;
+    }
+
+
+
+    // Persist path
+    SceneBlock.BlockingLevelPath = FullAssetPath;
+
+    // Open map
+    UEditorLoadingAndSavingUtils::LoadMap(FullAssetPath);
+
+    // Activate blocking
+    bBlockingActive = true;
+    ActiveBlockingSceneId = FGuid(SceneBlock.Id);
+
+    GASBlockingAccess::SetBlockingActive(true);
+    GASBlockingAccess::SetActiveSceneId(ActiveBlockingSceneId);
+
+    // Stream selected set
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Blocking: Editor world null."));
+        return false;
+    }
+
+
+    return true;
+}
+
+void SGAS_ScriptTab::SpawnSelectedSet(const FString& LevelPath)
+{
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        UE_LOG(LogGASPrePro, Warning, TEXT("SpawnSelectedSet: No world"));
+        return;
+    }
+
+    UE_LOG(LogGASPrePro, Warning, TEXT("Streaming level: %s"), *LevelPath);
+
+    bool bSuccess = false;
+
+    ULevelStreamingDynamic* StreamingLevel =
+        ULevelStreamingDynamic::LoadLevelInstance(
+            World,
+            LevelPath,
+            FVector::ZeroVector,
+            FRotator::ZeroRotator,
+            bSuccess
+        );
+
+    if (!bSuccess || !StreamingLevel)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Failed to stream level: %s"), *LevelPath);
+    }
+}
+
+void SGAS_ScriptTab::OpenCastWindowForScene(FString SceneId)
+{
+    // Activate blocking state
+    bBlockingActive = true;
+    ActiveBlockingSceneId = FGuid(SceneId);
+
+    FString SceneTitle = TEXT("Unknown Scene");
+
+    for (const FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Id == SceneId)
+        {
+            SceneTitle = Block.Text;
+            break;
+        }
+    }
+
+    const FString WindowTitle =
+        FString::Printf(TEXT("CAST | %s"), *SceneTitle.ToUpper());
+
+    TSharedRef<SWindow> Window =
+        SNew(SWindow)
+        .Title(FText::FromString(WindowTitle))
+        .ClientSize(FVector2D(600.f, 400.f));
+
+    Window->SetContent(
+        SNew(SGAS_BlockingCastWindow)
+        .SceneId(ActiveBlockingSceneId)
+        .Script(&CurrentScript)
+        .OnCastModified(
+            SGAS_BlockingCastWindow::FOnCastModified::CreateSP(
+                this,
+                &SGAS_ScriptTab::OnBlockingCastModified
+            )
+        )
+    );
+
+    BlockingCastWindow = Window;
+
+    Window->SetOnWindowClosed(FOnWindowClosed::CreateLambda(
+        [this](const TSharedRef<SWindow>&)
+        {
+            BlockingCastWindow.Reset();
+
+            // Do NOT stop blocking here anymore.
+            UE_LOG(LogGASPrePro, Warning, TEXT("Cast window closed (blocking still active)"));
+        }
+    ));
+
+    FSlateApplication::Get().AddWindow(Window);
+}
+
+void SGAS_ScriptTab::OnBlockingCastModified()
+{
+    UE_LOG(LogGASPrePro, Warning, TEXT("Blocking cast modified — saving"));
+
+    MarkScriptDirty();
+    SaveScriptToJson();
+
+    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (World)
+    {
+        World->MarkPackageDirty();
+    }
+}
+
+void SGAS_ScriptTab::SpawnSceneCast(FGASBlock* SceneBlock)
+{
+    if (!SceneBlock)
+    {
+        return;
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        return;
+    }
+
+    // Spawn into persistent level explicitly
+    ULevel* TargetLevel = World->PersistentLevel;
+    if (!TargetLevel)
+    {
+        return;
+    }
+
+    float XOffset = 0.f;
+
+    for (const FString& CharacterName : SceneBlock->CharactersInScene)
+    {
+
+        // -----------------------------------------------------
+        // Prevent duplicate cast spawn
+        // -----------------------------------------------------
+        FString UpperName = CharacterName.ToUpper();
+
+        bool bAlreadyExists = false;
+
+        for (AActor* Existing : TargetLevel->Actors)
+        {
+            if (!Existing)
+                continue;
+
+            if (Existing->GetActorLabel() == UpperName)
+            {
+                bAlreadyExists = true;
+                break;
+            }
+        }
+
+        if (bAlreadyExists)
+        {
+            continue;
+        }
+
+
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.OverrideLevel = TargetLevel;
+        SpawnParams.Name = MakeUniqueObjectName(
+            TargetLevel,
+            AGAS_StandInActor::StaticClass(),
+            FName(*UpperName)
+        );
+        SpawnParams.SpawnCollisionHandlingOverride =
+            ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+        AGAS_StandInActor* StandIn =
+            World->SpawnActor<AGAS_StandInActor>(
+                AGAS_StandInActor::StaticClass(),
+                FVector(XOffset, 0.f, 0.f),
+                FRotator::ZeroRotator,
+                SpawnParams
+            );
+
+        if (StandIn)
+        {
+            StandIn->GAS_CharacterId = UpperName;
+            StandIn->SetActorLabel(UpperName);
+
+            // Make selectable + undoable
+            StandIn->SetFlags(RF_Transactional);
+            StandIn->SetIsTemporarilyHiddenInEditor(false);
+            StandIn->SetActorEnableCollision(true);
+            StandIn->SetActorHiddenInGame(false);
+        }
+
+        XOffset += 150.f;
+    }
+}
+
+void SGAS_ScriptTab::LoadSetForBlocking(const FName& SetId)
+{
+    if (!GEditor)
+    {
+        return;
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // 1. Remove existing streamed GAS set levels
+    // ------------------------------------------------------------
+    TArray<ULevelStreaming*> LevelsToRemove;
+
+    for (ULevelStreaming* StreamingLevel : World->GetStreamingLevels())
+    {
+        if (!StreamingLevel)
+        {
+            continue;
+        }
+
+        const FString PackageName = StreamingLevel->GetWorldAssetPackageName();
+
+        if (PackageName.Contains(TEXT("/Game/PrePro/Blocking/Sets/")))
+        {
+            LevelsToRemove.Add(StreamingLevel);
+        }
+    }
+
+    for (ULevelStreaming* Level : LevelsToRemove)
+    {
+        World->RemoveStreamingLevel(Level);
+    }
+
+    // ------------------------------------------------------------
+    // 2. Find set descriptor
+    // ------------------------------------------------------------
+    const TArray<FGASSetDescriptor>& Sets =
+        FGASSetDiscovery::GetAvailableSets();
+
+    FString LevelPath;
+
+    for (const FGASSetDescriptor& Set : Sets)
+    {
+        if (Set.SetId == SetId)
+        {
+            LevelPath = Set.LevelPath;
+            break;
+        }
+    }
+
+    if (LevelPath.IsEmpty())
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Set level not found for %s"), *SetId.ToString());
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // 3. Load streaming level
+    // ------------------------------------------------------------
+    bool bSuccess = false;
+
+    ULevelStreamingDynamic* StreamingLevel =
+        ULevelStreamingDynamic::LoadLevelInstance(
+            World,
+            LevelPath,
+            FVector::ZeroVector,
+            FRotator::ZeroRotator,
+            bSuccess
+        );
+
+    if (!StreamingLevel || !bSuccess)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Failed to stream set level: %s"), *LevelPath);
+        return;
+    }
+
+
+    if (!StreamingLevel)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("Failed to stream set level: %s"), *LevelPath);
+        return;
+    }
+
+    StreamingLevel->SetShouldBeVisible(true);
+    StreamingLevel->SetShouldBeLoaded(true);
+
+    UE_LOG(LogGASPrePro, Warning, TEXT("Loaded set level: %s"), *LevelPath);
+}
+
+void SGAS_ScriptTab::OnDeleteBlockingScene(const FString& SceneId)
+{
+    FGASBlock* SceneBlock = nullptr;
+
+    for (FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Id == SceneId &&
+            Block.Type == EGASBlockType::SceneHeading)
+        {
+            SceneBlock = &Block;
+            break;
+        }
+    }
+
+    if (!SceneBlock || SceneBlock->BlockingLevelPath.IsEmpty())
+    {
+        return;
+    }
+
+    const FString BlockingPath = SceneBlock->BlockingLevelPath;
+
+    const EAppReturnType::Type Result =
+        FMessageDialog::Open(
+            EAppMsgType::YesNo,
+            FText::FromString(TEXT("Delete blocking level for this scene?"))
+        );
+
+    if (Result != EAppReturnType::Yes)
+    {
+        return;
+    }
+
+    UObject* Asset = LoadObject<UObject>(nullptr, *BlockingPath);
+
+    if (!Asset)
+    {
+        return;
+    }
+
+    TArray<UObject*> AssetsToDelete;
+    AssetsToDelete.Add(Asset);
+
+    const int32 NumDeleted = ObjectTools::DeleteObjects(AssetsToDelete);
+
+    // Only clear if deletion actually happened
+    if (NumDeleted > 0)
+    {
+        SceneBlock->BlockingLevelPath.Empty();
+        SceneBlock->AssignedSetId = NAME_None; // optional if you want set cleared too
+
+        RebuildShotList();
+    }
+
+    // If deleting currently active blocking scene, clear state
+    if (ActiveBlockingSceneId.ToString() == SceneId)
+    {
+        ActiveBlockingSceneId.Invalidate();
+        bBlockingActive = false;
+    }
+
+}
+
+void SGAS_ScriptTab::ResumePendingBlocking()
+{
+    if (PendingBlockingSceneId.IsEmpty())
+    {
+        return;
+    }
+
+    FString SceneId = PendingBlockingSceneId;
+    PendingBlockingSceneId.Empty();
+
+    OnStartBlockingScene(SceneId);
+}
+
+void SGAS_ScriptTab::AssignSetToPendingScene(FName SelectedSetId)
+{
+    const FString SceneId = PendingBlockingSceneId;
+
+    if (SceneId.IsEmpty())
+    {
+        UE_LOG(LogGASPrePro, Warning, TEXT("AssignSetToPendingScene: No pending SceneId"));
+        return;
+    }
+
+    // Resolve SceneBlock from authoritative script
+    FGASBlock* SceneBlock = nullptr;
+
+    for (FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Id == SceneId)
+        {
+            SceneBlock = &Block;
+            break;
+        }
+    }
+
+    if (!SceneBlock)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("AssignSetToPendingScene: SceneBlock not found."));
+        return;
+    }
+
+    // Resolve set descriptor
+    const TArray<FGASSetDescriptor>& Sets = FGASSetDiscovery::GetAvailableSets();
+
+    const FGASSetDescriptor* Found = nullptr;
+    for (const FGASSetDescriptor& Set : Sets)
+    {
+        if (Set.SetId == SelectedSetId)
+        {
+            Found = &Set;
+            break;
+        }
+    }
+
+    if (!Found)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("AssignSetToPendingScene: Set not found: %s"), *SelectedSetId.ToString());
+        return;
+    }
+
+    // Create blocking level and assign path
+    if (!CreateBlockingLevelForScene(*SceneBlock, *Found))
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("AssignSetToPendingScene: Failed to create blocking level."));
+        return;
+    }
+
+    // Persist script change
+    MarkScriptDirty();
+    SaveScriptToJson();
+
+    // -----------------------------------------------------
+    // Load blocking level
+    // -----------------------------------------------------
+    UEditorLoadingAndSavingUtils::LoadMap(SceneBlock->BlockingLevelPath);
+
+    UWorld* BlockingWorld = GEditor->GetEditorWorldContext().World();
+    if (!BlockingWorld)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("AssignSetToPendingScene: BlockingWorld NULL"));
+        return;
+    }
+
+    // -----------------------------------------------------
+    // Duplicate set into blocking map
+    // -----------------------------------------------------
+    if (!DuplicateSetIntoBlockingLevel(Found->LevelPath, BlockingWorld))
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("AssignSetToPendingScene: Duplication failed"));
+        return;
+    }
+
+    // -----------------------------------------------------
+    // Spawn cast BEFORE saving
+    // -----------------------------------------------------
+    SpawnSceneCast(SceneBlock);
+
+    // -----------------------------------------------------
+    // Mark dirty + save
+    // -----------------------------------------------------
+    BlockingWorld->MarkPackageDirty();
+
+    FString Filename = FPackageName::LongPackageNameToFilename(
+        SceneBlock->BlockingLevelPath,
+        FPackageName::GetMapPackageExtension()
+    );
+
+    FSavePackageArgs SaveArgs;
+    SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+    SaveArgs.SaveFlags = SAVE_NoError;
+
+    UPackage* Package = BlockingWorld->GetOutermost();
+    UPackage::SavePackage(Package, BlockingWorld, *Filename, SaveArgs);
+
+    UE_LOG(LogGASPrePro, Warning, TEXT("AssignSetToPendingScene: Set + Cast baked into blocking map"));
+
+    // Close window
+    if (ActiveSetBrowserWindow.IsValid())
+    {
+        ActiveSetBrowserWindow->RequestDestroyWindow();
+        ActiveSetBrowserWindow.Reset();
+    }
+
+    PendingBlockingSceneId.Empty();
+}
 
 
 
@@ -1552,7 +2821,7 @@ void SGAS_ScriptTab::ApplySceneNumberingBaseStyle(EGASSceneNumberBaseStyle InBas
 // ============================================================================
 void SGAS_ScriptTab::OnScriptParagraphClicked(int32 BlockIndex)
 {
-    UE_LOG(LogTemp, Error, TEXT("SCRIPT TAB: Paragraph clicked index=%d"), BlockIndex);
+    UE_LOG(LogGASPrePro, Error, TEXT("SCRIPT TAB: Paragraph clicked index=%d"), BlockIndex);
 
     // Make sure index is valid
     if (!CurrentScript.Blocks.IsValidIndex(BlockIndex))
@@ -1642,7 +2911,7 @@ void SGAS_ScriptTab::RebuildShotList()
 
         if (Rendered.Num() == 0)
         {
-            UE_LOG(LogTemp, Warning, TEXT("[ShotListV2] RenderedParagraphs is empty"));
+            UE_LOG(LogGASPrePro, Verbose, TEXT("[ShotListV2] RenderedParagraphs is empty"));
         }
         else
         {
@@ -1653,12 +2922,48 @@ void SGAS_ScriptTab::RebuildShotList()
                 SceneRowsV2
             );
 
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT("[ShotListV2] Built %d scene rows"),
-                SceneRowsV2.Num()
-            );
+
+            // --------------------------------------------------
+            // Normalize Scene Heading + Time (Display Only)
+            // --------------------------------------------------
+            for (FGASShotListSceneRow& Scene : SceneRowsV2)
+            {
+                if (!Scene.TimeOfDayOverride.IsEmpty())
+                {
+                    continue;
+                }
+
+                FString ParsedTOD;
+                FString DisplayHeading = Scene.SceneHeading;
+
+                GAS_SplitHeading_TimeOfDay(DisplayHeading, ParsedTOD);
+
+                if (!ParsedTOD.IsEmpty() && DisplayHeading != Scene.SceneHeading)
+                {
+                    Scene.SceneHeading = DisplayHeading;
+                    Scene.TimeOfDayOverride = ParsedTOD;
+                }
+            }
+
+            // --------------------------------------------------
+            // Copy Assigned Set from Script Blocks into V2 rows
+            // --------------------------------------------------
+            for (FGASShotListSceneRow& Scene : SceneRowsV2)
+            {
+                for (const FGASBlock& Block : CurrentScript.Blocks)
+                {
+                    if (Block.Id == Scene.SceneId &&
+                        Block.Type == EGASBlockType::SceneHeading)
+                    {
+                        Scene.SetId = Block.AssignedSetId.IsNone()
+                            ? FString()
+                            : Block.AssignedSetId.ToString();
+
+                        break;
+                    }
+                }
+            }
+
 
         }
     }
@@ -1849,8 +3154,8 @@ void SGAS_ScriptTab::RebuildShotList()
     }
 
     UE_LOG(
-        LogTemp,
-        Warning,
+        LogGASPrePro,
+        Verbose,
         TEXT("[ShotList UI] Children BEFORE clear = %d"),
         ShotListContainer->GetChildren()->Num()
     );
@@ -1939,7 +3244,7 @@ void SGAS_ScriptTab::RebuildShotList()
 
     if (SceneRowsV2.Num() == 0)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[ShotListV2] No scenes to render"));
+        UE_LOG(LogGASPrePro, Verbose, TEXT("[ShotListV2] No scenes to render"));
         return;
     }
 
@@ -1996,30 +3301,122 @@ void SGAS_ScriptTab::RebuildShotList()
                     // Scene Heading (clickable)
                     + SSplitter::Slot().Value(ColHeading)
                     [
-                        SNew(SButton)
-                            .ButtonStyle(FAppStyle::Get(), "NoBorder")
-                            .ContentPadding(FMargin(0))
-                            .OnClicked_Lambda([this, SceneId = Scene.SceneId]()
+                        SNew(SBorder)
+                            .OnMouseButtonDown_Lambda(
+                                [this, Scene](const FGeometry&, const FPointerEvent& MouseEvent)
                                 {
-                                    if (!ScriptPanel.IsValid() || !ScriptScrollBox.IsValid())
+                                    if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
                                     {
+                                        FMenuBuilder MenuBuilder(true, nullptr);
+
+                                        // Find blocking path from script block
+                                        FString BlockingPath;
+
+                                        for (const FGASBlock& Block : CurrentScript.Blocks)
+                                        {
+                                            if (Block.Id == Scene.SceneId &&
+                                                Block.Type == EGASBlockType::SceneHeading)
+                                            {
+                                                BlockingPath = Block.BlockingLevelPath;
+                                                break;
+                                            }
+                                        }
+                                        UE_LOG(LogGASPrePro, Warning, TEXT("Scene %s BlockingPath: %s"),
+                                            *Scene.SceneId,
+                                            *BlockingPath);
+                                        const bool bHasBlocking = !BlockingPath.IsEmpty();
+
+                                        if (!bHasBlocking)
+                                        {
+                                            MenuBuilder.AddMenuEntry(
+                                                FText::FromString(TEXT("Start Blocking")),
+                                                FText::FromString(TEXT("Create blocking level for this scene")),
+                                                FSlateIcon(),
+                                                FUIAction(
+                                                    FExecuteAction::CreateLambda(
+                                                        [this, SceneId = Scene.SceneId]()
+                                                        {
+                                                            this->OnStartBlockingScene(SceneId);
+                                                        }
+                                                    )
+                                                )
+                                            );
+                                        }
+                                        else
+                                        {
+                                            MenuBuilder.AddMenuEntry(
+                                                FText::FromString(TEXT("Edit Blocking")),
+                                                FText::FromString(TEXT("Open existing blocking level")),
+                                                FSlateIcon(),
+                                                FUIAction(
+                                                    FExecuteAction::CreateLambda(
+                                                        [this, SceneId = Scene.SceneId]()
+                                                        {
+                                                            this->OnStartBlockingScene(SceneId);
+                                                        }
+                                                    )
+                                                )
+                                            );
+
+                                            MenuBuilder.AddMenuEntry(
+                                                FText::FromString("Edit Cast"),
+                                                FText::FromString("Modify cast for this blocking scene."),
+                                                FSlateIcon(),
+                                                FUIAction(
+                                                    FExecuteAction::CreateLambda(
+                                                        [this, SceneId = Scene.SceneId]()
+                                                        {
+                                                            this->OpenCastWindowForScene(SceneId);
+                                                        }
+                                                    )
+                                                )
+                                            );
+
+                                            MenuBuilder.AddMenuEntry(
+                                                FText::FromString(TEXT("Delete Blocking")),
+                                                FText::FromString(TEXT("Delete blocking level for this scene")),
+                                                FSlateIcon(),
+                                                FUIAction(
+                                                    FExecuteAction::CreateLambda(
+                                                        [this, SceneId = Scene.SceneId]()
+                                                        {
+                                                            this->OnDeleteBlockingScene(SceneId);
+                                                        }
+                                                    )
+                                                )
+                                            );
+                                        }
+
+
+                                        FSlateApplication::Get().PushMenu(
+                                            AsShared(),
+                                            FWidgetPath(),
+                                            MenuBuilder.MakeWidget(),
+                                            MouseEvent.GetScreenSpacePosition(),
+                                            FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu)
+                                        );
+
                                         return FReply::Handled();
                                     }
 
-                                    // Step 1: request the jump
-                                    ScriptPanel->ScrollToBlockId(SceneId);
+                                    // Left click → scroll to scene
+                                    if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+                                    {
+                                        if (ScriptPanel.IsValid())
+                                        {
+                                            ScriptPanel->ScrollToBlockId(Scene.SceneId);
+                                        }
+                                        return FReply::Handled();
+                                    }
 
-                                    return FReply::Handled();
-                                })
-
-
-
+                                    return FReply::Unhandled();
+                                }
+                            )
                             [
                                 SNew(STextBlock)
                                     .Text(FText::FromString(Scene.SceneHeading.ToUpper()))
                             ]
                     ]
-
 
                     // Length
                     + SSplitter::Slot().Value(ColLength)
@@ -2028,19 +3425,55 @@ void SGAS_ScriptTab::RebuildShotList()
                             .Text(FText::FromString(Scene.FormattedLength))
                     ]
 
-                    // Time (empty for now)
+                    // Time
                     + SSplitter::Slot().Value(ColTime)
                     [
                         SNew(STextBlock)
-                            .Text(FText::GetEmpty())
+                            .Text(FText::FromString(Scene.TimeOfDayOverride.ToUpper()))
                     ]
 
-                    // Set (empty for now)
-                    + SSplitter::Slot().Value(ColSet)
-                    [
-                        SNew(STextBlock)
-                            .Text(FText::GetEmpty())
-                    ]
+
+                    // Set
+                        +SSplitter::Slot().Value(ColSet)
+                        [
+                            SNew(SBorder)
+                                .Padding(2.f)
+                                [
+                                    SNew(STextBlock)
+                                        .Text_Lambda([this, SceneId = Scene.SceneId]()
+                                            {
+                                                for (const FGASBlock& Block : CurrentScript.Blocks)
+                                                {
+                                                    if (Block.Id == SceneId)
+                                                    {
+                                                        if (!Block.BlockingLevelPath.IsEmpty())
+                                                        {
+                                                            return FText::FromString(TEXT("✔"));
+                                                        }
+                                                        break;
+                                                    }
+                                                }
+
+                                                return FText::GetEmpty();
+                                            })
+                                        .ColorAndOpacity(FLinearColor(0.2f, 0.8f, 0.2f, 1.f))
+                                        .ToolTipText_Lambda([this, SceneId = Scene.SceneId]()
+                                            {
+                                                for (const FGASBlock& Block : CurrentScript.Blocks)
+                                                {
+                                                    if (Block.Id == SceneId)
+                                                    {
+                                                        return Block.BlockingLevelPath.IsEmpty()
+                                                            ? FText::GetEmpty()
+                                                            : FText::FromString(Block.BlockingLevelPath);
+                                                    }
+                                                }
+
+                                                return FText::GetEmpty();
+                                            })
+                                ]
+                        ]
+
 
                     // Notes (empty for now)
                     + SSplitter::Slot().Value(ColNotes)
@@ -2222,13 +3655,13 @@ void SGAS_ScriptTab::ScrollToScene(const FGASShotDefinitionListRow& Scene)
 {
     if (!ScriptPanel.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("ScrollToScene: ScriptPanel invalid"));
+        UE_LOG(LogGASPrePro, Warning, TEXT("ScrollToScene: ScriptPanel invalid"));
         return;
     }
 
     if (!CurrentScript.Blocks.IsValidIndex(Scene.SceneBlockIndex))
     {
-        UE_LOG(LogTemp, Warning,
+        UE_LOG(LogGASPrePro, Warning,
             TEXT("ScrollToScene: invalid SceneBlockIndex %d"),
             Scene.SceneBlockIndex
         );
@@ -2238,13 +3671,13 @@ void SGAS_ScriptTab::ScrollToScene(const FGASShotDefinitionListRow& Scene)
     const FString& BlockId =
         CurrentScript.Blocks[Scene.SceneBlockIndex].Id;
 
-    UE_LOG(LogTemp, Warning,
+    UE_LOG(LogGASPrePro, Warning,
         TEXT("ScrollToScene: SceneBlockIndex=%d  BlockId=%s"),
         Scene.SceneBlockIndex,
         *BlockId
     );
 
-    UE_LOG(LogTemp, Warning,
+    UE_LOG(LogGASPrePro, Warning,
         TEXT("[SCENE VERIFY] Index=%d Id=%s"),
         Scene.SceneBlockIndex,
         *CurrentScript.Blocks[Scene.SceneBlockIndex].Id
@@ -2296,28 +3729,57 @@ void SGAS_ScriptTab::UpdateShotNotes(
 
 void SGAS_ScriptTab::SaveScriptToJson()
 {
-    UE_LOG(LogTemp, Warning, TEXT("SCRIPT TAB: SaveScriptToJson CALLED"));
 
-    FString JsonPath = GetAuthoritativeScriptJsonPath();
+    const FString JsonPath = GetAuthoritativeScriptJsonPath();
 
+    if (JsonPath.IsEmpty())
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("SCRIPT TAB: JsonPath is EMPTY — aborting save"));
+        return;
+    }
+
+    UE_LOG(LogGASPrePro, Warning, TEXT("SCRIPT TAB: JSON save path = %s"), *JsonPath);
+
+    // ------------------------------------------------------------
     // Build JSON from FGASScript
+    // ------------------------------------------------------------
     FString OutputString;
     if (!FJsonObjectConverter::UStructToJsonObjectString(CurrentScript, OutputString))
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to convert script to JSON."));
+        UE_LOG(LogGASPrePro, Error, TEXT("SCRIPT TAB: Failed to convert script to JSON"));
         return;
     }
 
-    // Save to file
+    // ------------------------------------------------------------
+    // Ensure directory exists
+    // ------------------------------------------------------------
+    const FString Directory = FPaths::GetPath(JsonPath);
+
+    if (!IFileManager::Get().DirectoryExists(*Directory))
+    {
+        UE_LOG(LogGASPrePro, Warning, TEXT("SCRIPT TAB: Creating directory: %s"), *Directory);
+
+        if (!IFileManager::Get().MakeDirectory(*Directory, true))
+        {
+            UE_LOG(LogGASPrePro, Error, TEXT("SCRIPT TAB: Failed to create directory: %s"), *Directory);
+            return;
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Save file
+    // ------------------------------------------------------------
     if (!FFileHelper::SaveStringToFile(OutputString, *JsonPath))
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to write JSON file: %s"), *JsonPath);
+        UE_LOG(LogGASPrePro, Error, TEXT("SCRIPT TAB: Failed to write JSON file: %s"), *JsonPath);
         return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("Saved script JSON incl. UserPageBreakParagraphs → %s"), *JsonPath);
+    UE_LOG(LogGASPrePro, Log, TEXT("SCRIPT TAB: Saved script JSON → %s"), *JsonPath);
 
-    // --- CLEAR DIRTY STATE (this was the missing part) ---
+    // ------------------------------------------------------------
+    // Clear dirty state
+    // ------------------------------------------------------------
     FGAS_PreProToolsEditorModule& Module =
         FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
             "GAS_PreProToolsEditor"
@@ -2327,6 +3789,7 @@ void SGAS_ScriptTab::SaveScriptToJson()
     bIsScriptDirty = false;
 }
 
+
 FReply SGAS_ScriptTab::OnClearScriptConfirm()
 {
     const FText DialogText = FText::FromString(
@@ -2335,26 +3798,121 @@ FReply SGAS_ScriptTab::OnClearScriptConfirm()
 
     const FText DialogTitle = FText::FromString(TEXT("Confirm Clear"));
 
-    // Correct UE 5.5+ signature:
     EAppReturnType::Type Result = FMessageDialog::Open(
         EAppMsgType::OkCancel,
         DialogText,
         &DialogTitle
     );
 
-    if (Result == EAppReturnType::Ok)
+    if (Result != EAppReturnType::Ok)
     {
-        OnClearScriptClicked();
+        return FReply::Handled();
     }
+
+    // ------------------------------------------------------------
+    // Check for blocking levels
+    // ------------------------------------------------------------
+    bool bHasBlockingLevels = false;
+
+    for (const FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Type == EGASBlockType::SceneHeading &&
+            !Block.BlockingLevelPath.IsEmpty())
+        {
+            bHasBlockingLevels = true;
+            break;
+        }
+    }
+
+    if (bHasBlockingLevels)
+    {
+        const FText BlockingText = FText::FromString(
+            TEXT("This will also DELETE all blocking levels associated with this script.\nContinue?")
+        );
+
+        const FText BlockingTitle = FText::FromString(TEXT("Delete Blocking Levels?"));
+
+        EAppReturnType::Type BlockingResult = FMessageDialog::Open(
+            EAppMsgType::OkCancel,
+            BlockingText,
+            &BlockingTitle
+        );
+
+        if (BlockingResult != EAppReturnType::Ok)
+        {
+            return FReply::Handled();
+        }
+
+        // ------------------------------------------------------------
+        // Delete all blocking levels
+        // ------------------------------------------------------------
+        for (FGASBlock& Block : CurrentScript.Blocks)
+        {
+            if (Block.Type != EGASBlockType::SceneHeading)
+            {
+                continue;
+            }
+
+            if (Block.BlockingLevelPath.IsEmpty())
+            {
+                continue;
+            }
+
+            // --------------------------------------------------------
+            // If this blocking level is currently open, switch first
+            // --------------------------------------------------------
+            if (GEditor)
+            {
+                UWorld* CurrentWorld = GEditor->GetEditorWorldContext().World();
+
+                if (CurrentWorld)
+                {
+                    const FString CurrentMapPath =
+                        CurrentWorld->GetOutermost()->GetName();
+
+                    if (CurrentMapPath == Block.BlockingLevelPath)
+                    {
+                        FEditorFileUtils::LoadMap(TEXT("/Engine/Maps/Templates/Template_Default"), false, true);
+                    }
+                }
+            }
+
+            // --------------------------------------------------------
+            // Now safely load and delete the asset
+            // --------------------------------------------------------
+            UObject* Asset = LoadObject<UObject>(
+                nullptr,
+                *Block.BlockingLevelPath
+            );
+
+            if (!Asset)
+            {
+                continue;
+            }
+
+            TArray<UObject*> AssetsToDelete;
+            AssetsToDelete.Add(Asset);
+
+            ObjectTools::DeleteObjects(AssetsToDelete);
+
+            Block.BlockingLevelPath.Empty();
+            Block.AssignedSetId = NAME_None;
+        }
+
+    }
+
+    // Finally clear script
+    OnClearScriptClicked();
 
     return FReply::Handled();
 }
+
 
 FReply SGAS_ScriptTab::OnToggleAddMode()
 {
     bIsAddMode = !bIsAddMode;
 
-    UE_LOG(LogTemp, Warning,
+    UE_LOG(LogGASPrePro, Warning,
         TEXT("ADD MODE TOGGLED: %s"),
         bIsAddMode ? TEXT("ON") : TEXT("OFF")
     );
@@ -2371,25 +3929,25 @@ void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
 {
     const FString ScriptPath = GetAuthoritativeScriptJsonPath();
 
-    UE_LOG(LogTemp, Warning, TEXT("[GAS] Looking for script JSON at: %s"), *ScriptPath);
+    UE_LOG(LogGASPrePro, Verbose, TEXT("[GAS] Looking for script JSON at: %s"), *ScriptPath);
 
     if (!FPaths::FileExists(ScriptPath))
     {
-        UE_LOG(LogTemp, Warning, TEXT("[GAS] No saved script JSON found."));
+        UE_LOG(LogGASPrePro, Warning, TEXT("[GAS] No saved script JSON found."));
         return;
     }
 
     FString JsonString;
     if (!FFileHelper::LoadFileToString(JsonString, *ScriptPath))
     {
-        UE_LOG(LogTemp, Error, TEXT("[GAS] Failed to read script JSON: %s"), *ScriptPath);
+        UE_LOG(LogGASPrePro, Error, TEXT("[GAS] Failed to read script JSON: %s"), *ScriptPath);
         return;
     }
 
     FGASScript Loaded;
     if (!FJsonObjectConverter::JsonObjectStringToUStruct(JsonString, &Loaded, 0, 0))
     {
-        UE_LOG(LogTemp, Error, TEXT("[GAS] Failed to parse script JSON: %s"), *ScriptPath);
+        UE_LOG(LogGASPrePro, Error, TEXT("[GAS] Failed to parse script JSON: %s"), *ScriptPath);
         return;
     }
 
@@ -2399,8 +3957,8 @@ void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
 
 
     UE_LOG(
-        LogTemp,
-        Warning,
+        LogGASPrePro,
+        Verbose,
         TEXT("[GAS] Loaded script JSON OK: Blocks=%d PageBreaks=%d Markers=%d"),
         CurrentScript.Blocks.Num(),
         CurrentScript.UserPageBreaks.Num(),
@@ -2428,9 +3986,20 @@ void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
 
 FString SGAS_ScriptTab::GetAuthoritativeScriptJsonPath() const
 {
-    const FString Dir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("GAS"));
-    IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
-    return FPaths::Combine(Dir, TEXT("CurrentScript.gasjson"));
+    if (!ActiveProject || ActiveProject->ProjectName.IsEmpty())
+    {
+        return TEXT("");
+    }
+
+    FString BaseDir =
+        FPaths::ProjectSavedDir() + TEXT("GAS/");
+
+    FString ProjectDir =
+        BaseDir + ActiveProject->ProjectName + TEXT("/");
+
+    IFileManager::Get().MakeDirectory(*ProjectDir, true);
+
+    return ProjectDir + TEXT("Script.gasjson");
 }
 
 void SGAS_ScriptTab::ScrollToSceneBlock(const FString& BlockId)
@@ -2465,3 +4034,197 @@ FSlateColor SGAS_ScriptTab::GetShotButtonTint() const
         ? FLinearColor(0.25f, 0.6f, 1.f, 1.0f)   // 🔵 shot mode armed
         : FLinearColor(0.7f, 0.7f, 0.7f, 0.8f);  // ⚪ idle
 }
+
+FGASScript* SGAS_ScriptTab::GetCurrentScript()
+{
+    return &CurrentScript;
+}
+
+void SGAS_ScriptTab::SetActiveBlockingShot(const FGuid& ShotId)
+{
+    if (!ShotId.IsValid())
+    {
+        return;
+    }
+
+    ActiveBlockingShotId = ShotId;
+
+    UE_LOG(LogGASPrePro, Warning,
+        TEXT("SetActiveBlockingShot: %s"),
+        *ActiveBlockingShotId.ToString());
+
+}
+
+FGuid SGAS_ScriptTab::GetActiveBlockingShot() const
+{
+    return ActiveBlockingShotId;
+}
+
+void SGAS_ScriptTab::NotifyShotCameraBound(const FGuid& ShotId)
+{
+    for (FGASMarker& Marker : CurrentScript.Markers)
+    {
+        if (Marker.MarkerType == EGASMarkerType::ShotMarker &&
+            Marker.MarkerGuid == ShotId)
+        {
+            Marker.PromoteToCameraPlaced();
+            MarkScriptDirty();
+            OnSaveScript();
+
+            UE_LOG(LogGASPrePro, Warning,
+                TEXT("Shot promoted to CameraPlaced: %s"),
+                *ShotId.ToString());
+
+            break;
+        }
+    }
+}
+
+#if WITH_EDITOR
+
+void SGAS_ScriptTab::BindToExistingShotCameras()
+{
+
+    if (!GEditor)
+    {
+        return;
+    }
+    BoundShotCameras.Empty();
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        return;
+    }
+
+    for (TActorIterator<AGAS_ShotCameraActor> It(World); It; ++It)
+    {
+        AGAS_ShotCameraActor* Cam = *It;
+        if (!IsValid(Cam))
+        {
+            continue;
+        }
+
+        // Prevent double-binding
+        if (BoundShotCameras.Contains(Cam))
+        {
+            continue;
+        }
+
+        Cam->OnShotCameraMoved.AddSP(this, &SGAS_ScriptTab::HandleShotCameraMoved);
+        BoundShotCameras.Add(Cam);
+    }
+}
+
+void SGAS_ScriptTab::HandleShotCameraMoved(const FString& MarkerId, const FTransform& NewTransform)
+{
+    if (!bBlockingActive)
+    {
+        return;
+    }
+    FGASMarker* Found = nullptr;
+
+    for (FGASMarker& M : CurrentScript.Markers)
+    {
+        if (M.Id == MarkerId)
+        {
+            Found = &M;
+            break;
+        }
+    }
+
+    if (!Found)
+    {
+        UE_LOG(LogGASPrePro, Warning, TEXT("HandleShotCameraMoved: Marker not found: %s"), *MarkerId);
+        return;
+    }
+
+    // Authoritative mutation (sets bHasCamera, stores transform, promotes spatial state)
+    Found->BindCameraTransform(NewTransform);
+
+    // Your existing dirty + save pipeline
+    MarkScriptDirty();
+    EnsureScriptSaved();
+}
+
+void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)
+{
+    if (!GEditor)
+    {
+        return;
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+    {
+        return;
+    }
+
+    // Build quick lookup of existing camera actors by MarkerId
+    TMap<FString, AGAS_ShotCameraActor*> ExistingByMarkerId;
+
+    for (TActorIterator<AGAS_ShotCameraActor> It(World); It; ++It)
+    {
+        AGAS_ShotCameraActor* Cam = *It;
+        if (!IsValid(Cam))
+        {
+            continue;
+        }
+
+        if (!Cam->MarkerId.IsEmpty())
+        {
+            ExistingByMarkerId.Add(Cam->MarkerId, Cam);
+        }
+    }
+
+    // Spawn / snap cameras based on authoritative marker data
+    for (const FGASMarker& Marker : CurrentScript.Markers)
+    {
+        // Only shot markers for this scene
+        if (Marker.MarkerType != EGASMarkerType::ShotMarker)
+        {
+            continue;
+        }
+
+        if (Marker.BlockId != SceneBlockId)
+        {
+            continue;
+        }
+
+        if (!Marker.bHasCamera)
+        {
+            continue;
+        }
+
+        const FString& MarkerId = Marker.Id;
+
+        if (AGAS_ShotCameraActor** FoundCamPtr = ExistingByMarkerId.Find(MarkerId))
+        {
+            AGAS_ShotCameraActor* FoundCam = *FoundCamPtr;
+            FoundCam->SetActorTransform(Marker.CameraTransform);
+            continue;
+        }
+
+        FActorSpawnParameters Params;
+        Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+        AGAS_ShotCameraActor* NewCam =
+            World->SpawnActor<AGAS_ShotCameraActor>(
+                AGAS_ShotCameraActor::StaticClass(),
+                Marker.CameraTransform,
+                Params
+            );
+
+        if (!IsValid(NewCam))
+        {
+            UE_LOG(LogGASPrePro, Warning, TEXT("RehydrateShotCamerasForScene: Failed to spawn camera for marker %s"), *MarkerId);
+            continue;
+        }
+
+        NewCam->MarkerId = MarkerId;
+        ExistingByMarkerId.Add(MarkerId, NewCam);
+    }
+}
+
+
+#endif

@@ -25,16 +25,16 @@ struct FGASScriptBlock
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid BlockID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Text;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASBlockType BlockType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid SceneID;
 
     // Deterministic default for CDO
@@ -60,28 +60,33 @@ struct FGASScene
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
     FGuid SceneID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SceneLabel;     // e.g. "010", "20", "EXT1"
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString SceneLabel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString HeadingText;    // Raw scene heading text
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString HeadingText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGuid> BlockIDs; // Blocks belonging to this scene
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    TArray<FGuid> BlockIDs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGuid> ShotIDs;  // Shots that START in this scene
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    TArray<FGuid> ShotIDs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString BlockingLevelPath;
 
     FGASScene()
         : SceneID(FGuid())
         , SceneLabel(TEXT(""))
         , HeadingText(TEXT(""))
+        , BlockingLevelPath(TEXT(""))
     {
     }
 };
+
 
 /*
 ===============================================================================
@@ -98,16 +103,16 @@ struct FGASShotDefinitionMarker
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid ShotID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid StartBlockID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid EndBlockID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Notes;
 
     FGASShotDefinitionMarker()
@@ -135,6 +140,13 @@ class GAS_PREPROTOOLSEDITOR_API UGASPreProProject : public UDataAsset
     GENERATED_BODY()
 
 public:
+
+    /*-----------------------------------------
+        PROJECT IDENTITY
+    ------------------------------------------*/
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Project")
+    FString ProjectName;
 
     /*-----------------------------------------
         SCRIPT CONTENT

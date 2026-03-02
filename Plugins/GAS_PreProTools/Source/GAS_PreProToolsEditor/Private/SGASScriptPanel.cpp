@@ -17,7 +17,9 @@
 #include "ScriptModel.h"
 #include "GAS_ShotListSelection.h"
 #include "GAS_ShotListRules.h"
+#include "GAS_ShotIntentTypes.h"
 #include "ScriptLayoutEngine.h"
+#include "GASPreProLog.h"
 
 #include "Rendering/DrawElements.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -157,25 +159,6 @@ static void ValidateShotMarkerInvariants(
 //  Helpers part 1
 // =============================================================
 
-static void GatherScriptCharacters(
-    const FGASScript* Script,
-    TSet<FString>& OutCharacters)
-{
-    if (!Script)
-        return;
-
-    for (const FGASBlock& Block : Script->Blocks)
-    {
-        if (Block.Type == EGASBlockType::Character)
-        {
-            FString Name = Block.Text.TrimStartAndEnd();
-            if (!Name.IsEmpty())
-            {
-                OutCharacters.Add(Name);
-            }
-        }
-    }
-}
 
 void SGASScriptPanel::ModifyShotMarkerMetadata(
     const FGuid& ShotId,
@@ -202,37 +185,6 @@ void SGASScriptPanel::ModifyShotMarkerMetadata(
 }
 
 
-static void SyncShotCastWithScript(
-    FGASScript* Script,
-    const TSet<FString>& ScriptCharacters)
-{
-    if (!Script)
-        return;
-
-    // Build lookup of existing cast members
-    TMap<FString, FGASShotCastMember*> Existing;
-    for (FGASShotCastMember& Member : Script->ShotCast)
-    {
-        Existing.Add(Member.CharacterName, &Member);
-    }
-
-    // Add new characters
-    for (const FString& Name : ScriptCharacters)
-    {
-        if (!Existing.Contains(Name))
-        {
-            FGASShotCastMember NewMember;
-            NewMember.CharacterName = Name;
-            NewMember.bEnabled = true;
-            Script->ShotCast.Add(NewMember);
-        }
-    }
-
-    // DO NOT remove missing characters yet
-    // (user may want to keep disabled legacy entries)
-}
-
-
 class SGASShotCastList : public SCompoundWidget
 {
 public:
@@ -243,6 +195,11 @@ public:
     void Construct(const FArguments& InArgs)
     {
         Script = InArgs._Script;
+
+        if (Script)
+        {
+            Script->PostScriptMutation(); // 🔹 FORCE SYNC ON OPEN
+        }
 
         ChildSlot
             [
@@ -257,37 +214,37 @@ public:
         Rebuild();
     }
 
+    void Refresh()
+    {
+        Rebuild();
+    }
+
     void Rebuild()
     {
+        UE_LOG(LogGASPrePro, Error,
+            TEXT("CAST REBUILD | Script=%p Cast=%d"),
+            Script,
+            Script ? Script->Cast.Num() : -1
+        );
+
         if (!Script || !ListBox.IsValid())
             return;
 
         ListBox->ClearChildren();
 
-        for (FGASShotCastMember& Member : Script->ShotCast)
+        for (const FGASCharacterDefinition& Character : Script->Cast)
         {
             ListBox->AddSlot()
                 .AutoHeight()
                 .Padding(2.f)
                 [
-                    SNew(SCheckBox)
-                        .IsChecked_Lambda([&Member]()
-                            {
-                                return Member.bEnabled
-                                    ? ECheckBoxState::Checked
-                                    : ECheckBoxState::Unchecked;
-                            })
-                        .OnCheckStateChanged_Lambda([&Member](ECheckBoxState NewState)
-                            {
-                                Member.bEnabled = (NewState == ECheckBoxState::Checked);
-                            })
-                        [
-                            SNew(STextBlock)
-                                .Text(FText::FromString(Member.CharacterName))
-                        ]
+                    SNew(STextBlock)
+                        .Text(FText::FromString(Character.CharacterName))
                 ];
         }
     }
+
+
 
 private:
     FGASScript* Script = nullptr;
@@ -565,7 +522,6 @@ private:
 };
 
 
-
 // =============================================================
 //  Construct
 // =============================================================
@@ -581,12 +537,63 @@ void SGASScriptPanel::Construct(const FArguments& InArgs)
 
     ChildSlot
         [
-            SNew(SBorder)
-                .Padding(0)
-                .BorderImage(FCoreStyle::Get().GetBrush("NoBrush"))
-                .Clipping(EWidgetClipping::ClipToBoundsAlways)
-                .ToolTipText(FText::FromString(TEXT("TOOLTIP TEST")))
+            SNew(SOverlay)
+
+                // =========================================================
+                // Script surface root (existing content is injected here)
+                // =========================================================
+                +SOverlay::Slot()
+                [
+                    SAssignNew(ScriptRootBorder, SBorder)
+                        .Padding(0)
+                        .BorderImage(FCoreStyle::Get().GetBrush("NoBrush"))
+                        .Clipping(EWidgetClipping::ClipToBoundsAlways)
+                ]
+
+                // =========================================================
+                // Shot pill tooltip (lightweight, non-modal)
+                // =========================================================
+                +SOverlay::Slot()
+                [
+                    SAssignNew(ShotTooltipWidget, SBox)
+                        .Visibility_Lambda([this]()
+                            {
+                                return HoveredShotMarkerId.IsEmpty()
+                                    ? EVisibility::Collapsed
+                                    : EVisibility::HitTestInvisible;
+                            })
+                        .Padding_Lambda([this]()
+                            {
+                                FVector2D PillPos;
+
+                                if (!GetShotPillLocalPos(HoveredShotMarkerId, PillPos))
+                                {
+                                    return FMargin(0.f);
+                                }
+
+                                return FMargin(
+                                    PillPos.X + ShotPillWidth + 6.f,
+                                    PillPos.Y - 6.f,
+                                    0.f,
+                                    0.f
+                                );
+                            })
+
+                        [
+                            SNew(SBorder)
+                                .Padding(FMargin(6.f, 2.f))
+                                .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+                                .BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.85f))
+                                [
+                                    SNew(STextBlock)
+                                        .Text(this, &SGASScriptPanel::GetHoveredShotTooltipText)
+                                        .Font(FAppStyle::GetFontStyle("SmallFont"))
+                                        .ColorAndOpacity(FLinearColor::White)
+                                ]
+                        ]
+                ]
         ];
+
 
 
 
@@ -596,6 +603,28 @@ void SGASScriptPanel::RebuildLayout()
 {
     if (!SourceScript)
         return;
+
+    // 🔹 EMPTY SCRIPT STATE
+    if (SourceScript->Blocks.Num() == 0)
+    {
+        ScriptRootBorder->SetContent(
+            SNew(SBorder)
+            .Padding(60.f)
+            .HAlign(HAlign_Center)
+            .VAlign(VAlign_Center)
+            [
+                SNew(STextBlock)
+                    .Text(FText::FromString(TEXT("No Script Loaded\n\nImport a script to begin.")))
+                    .Justification(ETextJustify::Center)
+                    .Font(FAppStyle::GetFontStyle("NormalFont"))
+            ]
+        );
+
+        RenderedParagraphs.Empty();
+        bNeedsRedraw = true;
+
+        return;
+    }
 
     // Panel width: fall back to something sane if geometry is tiny at startup
     float PanelWidth = GetCachedGeometry().GetLocalSize().X;
@@ -612,61 +641,66 @@ void SGASScriptPanel::RebuildLayout()
             SourceScript->SceneNumbering
         );
 
-
-
-    SetRenderedScript(NewRendered);   // updates RenderedParagraphs + bNeedsRedraw
+    SetRenderedScript(NewRendered);
 
     // ------------------------------------------------------------
     // Auto-adjust shot tail to paragraph end
-    // (keeps tail attached when text grows)
     // ------------------------------------------------------------
-    if (SourceScript)
+    for (FGASMarker& M : SourceScript->Markers)
     {
-        for (FGASMarker& M : SourceScript->Markers)
+        if (M.MarkerType != EGASMarkerType::ShotMarker)
+            continue;
+
+        if (!RenderedParagraphs.IsValidIndex(M.ParagraphIndex))
+            continue;
+
+        if (M.ShotLineEndY < 0.f)
+            continue;
+
+        const FRenderedParagraph& P =
+            RenderedParagraphs[M.ParagraphIndex];
+
+        const float ParagraphEndY =
+            P.TopY + P.Height;
+
+        if (M.ShotLineEndY <= ParagraphEndY + ScriptFormat::LineHeight)
         {
-            if (M.MarkerType != EGASMarkerType::ShotMarker)
-                continue;
-
-            if (!RenderedParagraphs.IsValidIndex(M.ParagraphIndex))
-                continue;
-
-            // Only adjust tails that are defined
-            if (M.ShotLineEndY < 0.f)
-                continue;
-
-            const FRenderedParagraph& P =
-                RenderedParagraphs[M.ParagraphIndex];
-
-            const float ParagraphEndY =
-                P.TopY + P.Height;
-
-            // Clamp tail to paragraph end if it was at or below it
-            if (M.ShotLineEndY <= ParagraphEndY + ScriptFormat::LineHeight)
-            {
-                M.ShotLineEndY = ParagraphEndY;
-            }
+            M.ShotLineEndY = ParagraphEndY;
         }
     }
-
 
     if (OnRequestFullRedraw.IsBound())
     {
         OnRequestFullRedraw.Execute();
     }
-
-
 }
 
 void SGASScriptPanel::SetScript(FGASScript* InScript)
 {
     SourceScript = InScript;
 
-    // Fresh script = fresh layout
+    if (!SourceScript || SourceScript->Blocks.Num() == 0)
+    {
+        ScriptRootBorder->SetContent(
+            SNew(SBorder)
+            .Padding(60.f)
+            .HAlign(HAlign_Center)
+            .VAlign(VAlign_Center)
+            [
+                SNew(STextBlock)
+                    .Text(FText::FromString(TEXT("No Script Loaded\n\nImport a script to begin.")))
+                    .Justification(ETextJustify::Center)
+                    .Font(FAppStyle::GetFontStyle("NormalFont"))
+            ]
+        );
+
+        RenderedParagraphs.Empty();
+        bNeedsRedraw = true;
+        return;
+    }
+
     RebuildLayout();
 
-    // ------------------------------------------------------------
-    // Reset scroll state on script load
-    // ------------------------------------------------------------
     ScrollOffsetY = 0.f;
     PendingScrollBlockId.Reset();
     PendingScrollParagraph = INDEX_NONE;
@@ -686,14 +720,6 @@ void SGASScriptPanel::SetScript(FGASScript* InScript)
 void SGASScriptPanel::SetRenderedScript(const TArray<FRenderedParagraph>& InParagraphs)
 {
     RenderedParagraphs = InParagraphs;
-
-    if (SourceScript)
-    {
-        TSet<FString> ScriptCharacters;
-        GatherScriptCharacters(SourceScript, ScriptCharacters);
-        SyncShotCastWithScript(SourceScript, ScriptCharacters);
-
-    }
 
 
     bNeedsRedraw = true;
@@ -790,9 +816,7 @@ void SGASScriptPanel::ApplyScriptEdit(const FGASScriptEdit& Edit)
 
 }
 
-void SGASScriptPanel::ApplyTextEdit(
-    const FString& BlockId,
-    const FString& NewText)
+void SGASScriptPanel::ApplyTextEdit(const FString& BlockId,const FString& NewText)
 {
     if (!SourceScript)
         return;
@@ -808,14 +832,12 @@ void SGASScriptPanel::ApplyTextEdit(
 
     if (OnScriptMutated.IsBound())
     {
-        UE_LOG(LogTemp, Warning, TEXT("SCRIPT MUTATED → notifying owner"));
         OnScriptMutated.Execute();
     }
 
 
     RebuildLayout();
 }
-
 
 int32 SGASScriptPanel::HitTestAddGutter(float MouseY) const
 {
@@ -885,7 +907,6 @@ void SGASScriptPanel::TryEditParagraph(int32 BlockIndex)
     }
 }
 
-
 void SGASScriptPanel::OpenEditActionDialog(
     int32 BlockIndex,
     const FText& WindowTitle
@@ -894,7 +915,7 @@ void SGASScriptPanel::OpenEditActionDialog(
 
     if (!SourceScript || !SourceScript->Blocks.IsValidIndex(BlockIndex))
     {
-        UE_LOG(LogTemp, Error, TEXT("OpenEditActionDialog: SourceScript null or invalid index %d"), BlockIndex);
+        UE_LOG(LogGASPrePro, Error, TEXT("OpenEditActionDialog: SourceScript null or invalid index %d"), BlockIndex);
         return;
     }
 
@@ -1063,6 +1084,8 @@ void SGASScriptPanel::OpenEditCharacterDialog(int32 BlockIndex)
                                     {
                                         SourceScript->Blocks[BlockIndex].Text =
                                             CachedEditText.ToString().ToUpper();
+
+                                        SourceScript->PostScriptMutation();   // 🔥 THIS WAS MISSING
 
                                         FGAS_PreProToolsEditorModule& Module =
                                             FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
@@ -1377,6 +1400,8 @@ void SGASScriptPanel::OpenEditDialogueDialog(int32 BlockIndex)
                                         SourceScript->Blocks[BlockIndex].Text =
                                             CachedEditText.ToString();
 
+                                        SourceScript->PostScriptMutation();
+
                                         FGAS_PreProToolsEditorModule& Module =
                                             FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
                                                 "GAS_PreProToolsEditor"
@@ -1434,6 +1459,8 @@ void SGASScriptPanel::OpenEditDialogueDialog(int32 BlockIndex)
                                         {
                                             SourceScript->Blocks[BlockIndex].Text =
                                                 CachedEditText.ToString();
+
+                                            SourceScript->PostScriptMutation();
 
                                             FGAS_PreProToolsEditorModule& Module =
                                                 FModuleManager::LoadModuleChecked<FGAS_PreProToolsEditorModule>(
@@ -1681,7 +1708,6 @@ void SGASScriptPanel::OnEditCancelled()
     RebuildLayout();
     Invalidate(EInvalidateWidget::LayoutAndVolatility);
 }
-
 
 void SGASScriptPanel::OpenDeleteBlockDialog(int32 BlockIndex)
 {
@@ -1944,12 +1970,16 @@ void SGASScriptPanel::CommitShotAtParagraph(
     float CommitX
 )
 {
-    // UNDO SNAPSHOT — before adding shot
-    SourceScript->CaptureUndoSnapshot();
-
+    UE_LOG(LogGASPrePro, Warning, TEXT("RenderedParagraphs.Num = %d"), RenderedParagraphs.Num());
 
     if (!SourceScript)
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("CommitShotAtParagraph: SourceScript NULL"));
         return;
+    }
+
+    // UNDO SNAPSHOT — before adding shot
+    SourceScript->CaptureUndoSnapshot();
 
     // --------------------------------------------------
     // Incoming values are ALREADY script-space
@@ -1983,6 +2013,26 @@ void SGASScriptPanel::CommitShotAtParagraph(
 
     const FString& SceneBlockId = ScenePara.BlockId;
 
+    // --------------------------------------------------
+    // TEMP DEBUG: Verify we are checking the right scene block
+    // --------------------------------------------------
+    FGASBlock* SceneBlockPtr = nullptr;
+
+    for (FGASBlock& B : SourceScript->Blocks)
+    {
+        if (B.Id == SceneBlockId && B.Type == EGASBlockType::SceneHeading)
+        {
+            SceneBlockPtr = &B;
+            break;
+        }
+    }
+
+
+    // --------------------------------------------------
+    // Determine Blocking State (Authoritative)
+    // --------------------------------------------------
+    const bool bHasBlocking =
+        (SceneBlockPtr && !SceneBlockPtr->BlockingLevelPath.IsEmpty());
 
 
     FGASMarker NewMarker;
@@ -2023,13 +2073,7 @@ void SGASScriptPanel::CommitShotAtParagraph(
 
 
 
-    UE_LOG(
-        LogTemp,
-        Warning,
-        TEXT("[ShotMarker] Created shot %d in scene %s"),
-        NewMarker.ShotIndex,
-        *SceneBlockId
-    );
+
 
 
     // Position (SCRIPT SPACE ONLY)
@@ -2077,45 +2121,68 @@ void SGASScriptPanel::CommitShotAtParagraph(
 
     NewMarker.LineIndex = LineIndex;
 
+    // --------------------------------------------------
+    // Set blocking resolution state (SpatialState authoritative)
+    // --------------------------------------------------
+
+    if (!bHasBlocking)
+    {
+        NewMarker.SetSpatialState(EGASShotSpatialState::NoBlocking);
+    }
+    else
+    {
+        NewMarker.SetSpatialState(EGASShotSpatialState::BlockingReady);
+    }
+
+    // TEMP TEST: give this shot a camera
+    NewMarker.BindCameraTransform(FTransform::Identity);
+
+
+    // ------------------------------------------------------------
+    // Add marker
+    // ------------------------------------------------------------
     SourceScript->Markers.Add(NewMarker);
 
     // ------------------------------------------------------------
-    // Auto-create Shot Intent (default)
+    // Auto-create Shot Intent (default) BEFORE popup
     // ------------------------------------------------------------
-    if (SourceScript)
+    FGASShotIntent NewIntent;
+    NewIntent.MarkerId = NewMarker.Id;
+    NewIntent.ShotType = EGASShotType::MS;
+    NewIntent.Lens = EGASLensIntent::L50;
+    NewIntent.CameraBehavior = EGASCameraBehavior::Static;
+    NewIntent.Framing = EGASFramingBias::Center;
+    NewIntent.SubjectId = TEXT("");
+
+    SourceScript->ShotIntents.Add(NewMarker.Id, NewIntent);
+
+    // ------------------------------------------------------------
+    // Notify + redraw
+    // ------------------------------------------------------------
+    if (OnShotActivated.IsBound())
     {
-        FGASShotIntent NewIntent;
-        NewIntent.MarkerId = NewMarker.Id;
-
-        // Defaults are already set in struct,
-        // but this is explicit and future-safe
-        NewIntent.ShotType = EGASShotType::MS;
-        NewIntent.Lens = EGASLensIntent::L50;
-        NewIntent.CameraBehavior = EGASCameraBehavior::Static;
-        NewIntent.Framing = EGASFramingBias::Center;
-        NewIntent.SubjectId = TEXT("");
-
-        SourceScript->ShotIntents.Add(NewMarker.Id, NewIntent);
+        OnShotActivated.Execute(NewMarker.MarkerGuid);
     }
 
+    OnScriptMutated.ExecuteIfBound();
+    bNeedsRedraw = true;
+
     // ------------------------------------------------------------
-    // Open Shot Intent popup AFTER layout stabilizes (next tick)
+    // Open popup AFTER Slate finishes this input event
     // ------------------------------------------------------------
     FTSTicker::GetCoreTicker().AddTicker(
         FTickerDelegate::CreateLambda(
-            [this, MarkerId = NewMarker.Id](float)
+            [WeakThis = TWeakPtr<SGASScriptPanel>(SharedThis(this)),
+            MarkerId = NewMarker.Id](float)
             {
-                OpenShotIntentPopup(MarkerId, /*bIsNewShot=*/true);
+                if (WeakThis.IsValid())
+                {
+                    WeakThis.Pin()->OpenShotIntentPopup(MarkerId, true);
+                }
                 return false; // one-shot
             }
         )
     );
-
-
-
-
-    OnScriptMutated.ExecuteIfBound();
-    bNeedsRedraw = true;
 }
 
 void SGASScriptPanel::EndAllDrags()
@@ -2131,6 +2198,94 @@ void SGASScriptPanel::EndAllDrags()
 
     FSlateApplication::Get().ReleaseMouseCapture();
 }
+
+FText SGASScriptPanel::GetHoveredShotTooltipText() const
+{
+    if (!SourceScript || HoveredShotMarkerId.IsEmpty())
+    {
+        return FText::GetEmpty();
+    }
+
+    const FGASShotIntent* ShotIntent =
+        SourceScript->ShotIntents.Find(HoveredShotMarkerId);
+
+    if (!ShotIntent)
+    {
+        return FText::GetEmpty();
+    }
+
+    TArray<FString> Parts;
+
+    // --------------------------------------------------
+    // Shot Type (always)
+    // --------------------------------------------------
+    Parts.Add(
+        StaticEnum<EGASShotType>()
+        ->GetNameStringByValue((int64)ShotIntent->ShotType)
+    );
+
+    // --------------------------------------------------
+    // Lens Intent (optional enum)
+    // --------------------------------------------------
+    if ((int64)ShotIntent->Lens != 0)
+    {
+        Parts.Add(
+            StaticEnum<EGASLensIntent>()
+            ->GetNameStringByValue((int64)ShotIntent->Lens)
+        );
+    }
+
+    // --------------------------------------------------
+    // Camera Behavior (optional enum)
+    // --------------------------------------------------
+    if ((int64)ShotIntent->CameraBehavior != 0)
+    {
+        Parts.Add(
+            StaticEnum<EGASCameraBehavior>()
+            ->GetNameStringByValue((int64)ShotIntent->CameraBehavior)
+        );
+    }
+
+    return FText::FromString(
+        FString::Join(Parts, TEXT(" · "))
+    );
+}
+
+
+
+bool SGASScriptPanel::GetShotPillLocalPos(
+    const FString& ShotId,
+    FVector2D& OutLocalPos
+) const
+{
+    if (!SourceScript || ShotId.IsEmpty())
+    {
+        return false;
+    }
+
+    const FGASMarker* Marker =
+        SourceScript->Markers.FindByPredicate(
+            [&](const FGASMarker& M)
+            {
+                return M.Id == ShotId &&
+                    M.MarkerType == EGASMarkerType::ShotMarker;
+            }
+        );
+
+    if (!Marker)
+    {
+        return false;
+    }
+
+    // Marker coords are script-space; convert to panel-local (scroll-safe)
+    OutLocalPos = FVector2D(
+        Marker->ScreenX,
+        Marker->ScreenY - ScrollOffsetY
+    );
+
+    return true;
+}
+
 
 
 // STOPPED CHECKING ALL CODE RIGHT HERE!! /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2171,6 +2326,41 @@ int32 SGASScriptPanel::OnPaint(
 
     ShotHitRects.Reset();
 
+    // ------------------------------------------------------------
+    // EMPTY SCRIPT STATE
+    // ------------------------------------------------------------
+    if (SourceScript && SourceScript->Blocks.Num() == 0)
+    {
+
+
+        const FString Message = TEXT("No Script Loaded\n\nImport a script to begin.");
+
+        const FVector2D TextSize =
+            FSlateApplication::Get()
+            .GetRenderer()
+            ->GetFontMeasureService()
+            ->Measure(Message, FontInfo);
+
+        const FVector2D CenterPos(
+            (AllottedGeometry.GetLocalSize().X - TextSize.X) * 0.5f,
+            (AllottedGeometry.GetLocalSize().Y - TextSize.Y) * 0.5f
+        );
+
+        FSlateDrawElement::MakeText(
+            OutDrawElements,
+            LayerId,
+            AllottedGeometry.ToPaintGeometry(
+                TextSize,
+                FSlateLayoutTransform(CenterPos)
+            ),
+            FText::FromString(Message),
+            FontInfo,
+            ESlateDrawEffect::None,
+            FLinearColor(0.45f, 0.45f, 0.45f, 1.f)
+        );
+
+        return LayerId + 1;
+    }
 
     // ------------------------------------------------------------
     // Build Scene → Shot stack map DONE
@@ -2312,16 +2502,7 @@ int32 SGASScriptPanel::OnPaint(
                     const bool bIsSelected =
                         (SelectedShotMarkerId == Shot->Id);
 
-                    const FString* ShotType =
-                        Shot->Metadata.Find(TEXT("Type"));
-
-                    const bool bIsShotDefined =
-                        (ShotType && !ShotType->IsEmpty() && *ShotType != TEXT("—"));
-
-                    const FLinearColor ShotLineColor =
-                        bIsShotDefined
-                        ? FLinearColor(0.25f, 0.6f, 1.f, 0.9f)      // BLUE
-                        : FLinearColor(0.95f, 0.85f, 0.25f, 0.95f); // YELLOW
+                    const FLinearColor ShotLineColor = Shot->Color;
 
 
                     // ------------------------------------------------------------
@@ -2479,6 +2660,16 @@ int32 SGASScriptPanel::OnPaint(
                     const FVector2D TextSize =
                         FontMeasureService->Measure(ShotLabel, FontInfo);
 
+                    const float Luminance =
+                        (Shot->Color.R * 0.299f) +
+                        (Shot->Color.G * 0.587f) +
+                        (Shot->Color.B * 0.114f);
+
+                    const FLinearColor TextColor =
+                        (Luminance > 0.6f)
+                        ? FLinearColor::Black
+                        : FLinearColor::White;
+
                     FSlateDrawElement::MakeText(
                         OutDrawElements,
                         LayerId + 3,
@@ -2492,9 +2683,8 @@ int32 SGASScriptPanel::OnPaint(
                         ShotLabel,
                         FontInfo,
                         ESlateDrawEffect::None,
-                        bIsShotDefined
-                        ? FLinearColor(1.f, 1.f, 1.f, 1.f)   // WHITE on blue
-                        : FLinearColor(0.f, 0.f, 0.f, 1.f)   // BLACK on yellow
+                        TextColor
+
 
                     );
 
@@ -2760,6 +2950,7 @@ int32 SGASScriptPanel::OnPaint(
     bNeedsRedraw = false;
 
 #if WITH_EDITOR
+    // Editor-only sanity check — non-mutating
     if (SourceScript)
     {
         ValidateShotMarkerInvariants(
@@ -2774,9 +2965,6 @@ int32 SGASScriptPanel::OnPaint(
 
     return LayerId + 10;
 }
-
-
-
 
 
 FString SGASScriptPanel::GetSourceTextForBlock(const FString& BlockId) const
@@ -2794,7 +2982,6 @@ FString SGASScriptPanel::GetSourceTextForBlock(const FString& BlockId) const
 
     return FString();
 }
-
 
 void SGASScriptPanel::SetShowSceneNumbers(bool bInShow)
 {
@@ -2823,52 +3010,8 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     const FPointerEvent& MouseEvent
 )
 {
-    // ------------------------------------------------------------
-    // Right-click: Change Block Type (Edit Mode only)
-    // ------------------------------------------------------------
-    if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
-    {
-        if (!bEditMode || !SourceScript)
-        {
-            return FReply::Unhandled();
-        }
-
-        const FVector2D LocalPos =
-            MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
-
-        const float ScriptY = LocalPos.Y;
-        const int32 ParagraphIndex = HitTestParagraph(ScriptY);
-
-        if (ParagraphIndex != INDEX_NONE)
-        {
-            OpenChangeBlockTypeMenu(ParagraphIndex, MyGeometry, MouseEvent);
-            return FReply::Handled();
-        }
-
-        return FReply::Unhandled();
-    }
-
-
-    // ------------------------------------------------------------
-    // Guard: do not start a new interaction while dragging
-    // ------------------------------------------------------------
-    if (bIsDraggingShot || bIsResizingShotTail || bIsDraggingPageBreak || bIsShotRangeDragging)
-    {
-        return FReply::Handled();
-    }
-
-    // ------------------------------------------------------------
-    // ALT + LMB is reserved for shot drag — do NOT process here
-    // ------------------------------------------------------------
-
-    const bool bLeftMouse =
-        MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton;
-
     const FVector2D LocalPos =
         MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
-
-    const float MouseY = LocalPos.Y;
-
 
     // ============================================================
     // SHOT DELETE (RMB on pill) — CONFIRM
@@ -2984,10 +3127,94 @@ FReply SGASScriptPanel::OnMouseButtonDown(
         }
     }
 
+    // ------------------------------------------------------------
+    // Right-click: Change Block Type (Edit Mode only)
+    // ------------------------------------------------------------
+    if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
+    {
+        if (!bEditMode || !SourceScript)
+        {
+            return FReply::Unhandled();
+        }
+
+        const float ScriptY = LocalPos.Y;
+        const int32 ParagraphIndex = HitTestParagraph(ScriptY);
+
+        if (ParagraphIndex != INDEX_NONE)
+        {
+            OpenChangeBlockTypeMenu(ParagraphIndex, MyGeometry, MouseEvent);
+            return FReply::Handled();
+        }
+
+        return FReply::Unhandled();
+    }
+
+
+    // ------------------------------------------------------------
+    // Guard: do not start a new interaction while dragging
+    // ------------------------------------------------------------
+    if (bIsDraggingShot || bIsResizingShotTail || bIsDraggingPageBreak || bIsShotRangeDragging)
+    {
+        return FReply::Handled();
+    }
+
+    // ------------------------------------------------------------
+    // ALT + LMB is reserved for shot drag — do NOT process here
+    // ------------------------------------------------------------
+
+    const bool bLeftMouse =
+        MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton;
+
+    //const FVector2D LocalPos =
+    //    MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+
+    const float MouseY = LocalPos.Y;
+
+
+    // ============================================================
+    // PAGE BREAK DRAG (ALT + LMB)
+    // ============================================================
+    if (bEditMode && MouseEvent.IsAltDown() && bLeftMouse && SourceScript)
+    {
+        constexpr float PageBreakHitTolerance = 40.f;
+
+        const float MouseDocY = LocalPos.Y; // your layout appears already doc space
+
+        for (int32 BreakIndex = 0; BreakIndex < SourceScript->UserPageBreaks.Num(); ++BreakIndex)
+        {
+            const FString& AfterBlockId = SourceScript->UserPageBreaks[BreakIndex].AfterBlockId;
+
+            for (const FRenderedParagraph& P : RenderedParagraphs)
+            {
+                if (!P.bStartsPage)
+                    continue;
+
+                const int32 PrevIndex = P.ParagraphIndex - 1;
+                if (!RenderedParagraphs.IsValidIndex(PrevIndex))
+                    continue;
+
+                if (RenderedParagraphs[PrevIndex].BlockId != AfterBlockId)
+                    continue;
+
+                if (FMath::Abs(MouseDocY - P.TopY) <= PageBreakHitTolerance)
+                {
+                    bIsDraggingPageBreak = true;
+                    DraggedPageBreakIndex = BreakIndex;
+                    DragPreviewY = P.TopY;
+
+                    return FReply::Handled().CaptureMouse(AsShared());
+                }
+            }
+        }
+
+        return FReply::Handled();
+    }
+
+
     // ============================================================
     // 1️⃣ SHOT ICON HIT TEST (ALT + LMB DRAG)
     // ============================================================
-    else if (bLeftMouse && MouseEvent.IsAltDown())
+    if (bLeftMouse && MouseEvent.IsAltDown())
 
     {
         const FString HitShotId = HitTestShot(LocalPos);
@@ -3062,6 +3289,15 @@ FReply SGASScriptPanel::OnMouseButtonDown(
 
         if (ParaIndex != INDEX_NONE)
         {
+
+            // -------------------------------------------------
+            // Block new shot markers while Shot Intent popup is open
+            // -------------------------------------------------
+            if (bShotIntentPopupOpen)
+            {
+                return FReply::Handled();
+            }
+
             bIsShotRangeDragging = true;
 
             ShotRangeStartParagraph = ParaIndex;
@@ -3160,57 +3396,6 @@ FReply SGASScriptPanel::OnMouseButtonDown(
 
 
 
-    // ============================================================
-    // PAGE BREAK DRAG (ALT + LMB)
-    // ============================================================
-    if (bEditMode && MouseEvent.IsAltDown() && bLeftMouse)
-    {
-        constexpr float PageBreakHitTolerance = 40.f;
-
-        for (int32 BreakIndex = 0;
-            BreakIndex < SourceScript->UserPageBreaks.Num();
-            ++BreakIndex)
-        {
-            const FString& AfterBlockId =
-                SourceScript->UserPageBreaks[BreakIndex].AfterBlockId;
-
-            for (const FRenderedParagraph& P : RenderedParagraphs)
-            {
-                if (!P.bStartsPage)
-                    continue;
-
-                const int32 PrevIndex = P.ParagraphIndex - 1;
-                if (!RenderedParagraphs.IsValidIndex(PrevIndex))
-                    continue;
-
-                if (RenderedParagraphs[PrevIndex].BlockId != AfterBlockId)
-                    continue;
-
-                if (FMath::Abs(MouseY - P.TopY) <= PageBreakHitTolerance)
-                {
-                    // ------------------------------------------------------------
-                    // Record potential DELETE intent (ALT + click, no drag yet)
-                    // ------------------------------------------------------------
-                    PendingDeletePageBreakIndex = BreakIndex;
-                    PageBreakClickStartY = MouseY;
-                    bPageBreakDidDrag = false;
-
-                    // ------------------------------------------------------------
-                    // Begin drag (will cancel delete if mouse moves)
-                    // ------------------------------------------------------------
-                    bIsDraggingPageBreak = true;
-                    DraggedPageBreakIndex = BreakIndex;
-                    DragPreviewY = P.TopY;
-
-                    return FReply::Handled()
-                        .CaptureMouse(AsShared());
-                }
-
-            }
-        }
-
-        return FReply::Handled();
-    }
 
 
 
@@ -3439,6 +3624,92 @@ FReply SGASScriptPanel::OnMouseMove(
             bNeedsRedraw = true;
         }
 
+        // ------------------------------------------------------------
+        // Shot pill tooltip window (explicit, pill-anchored)
+        // ------------------------------------------------------------
+        if (bShotIntentPopupOpen || bShotAddArmed || bIsDraggingShot || bIsResizingShotTail || bIsShotRangeDragging)
+        {
+            // Hard suppress tooltip during other interactions
+            ShotHoverTooltipShotId.Empty();
+
+            if (ShotHoverTooltipWindow.IsValid())
+            {
+                ShotHoverTooltipWindow->RequestDestroyWindow();
+                ShotHoverTooltipWindow.Reset();
+            }
+
+            return FReply::Handled();
+        }
+
+        if (HoveredShotMarkerId.IsEmpty())
+        {
+            ShotHoverTooltipShotId.Empty();
+
+            if (ShotHoverTooltipWindow.IsValid())
+            {
+                ShotHoverTooltipWindow->RequestDestroyWindow();
+                ShotHoverTooltipWindow.Reset();
+            }
+
+            return FReply::Handled();
+        }
+
+        // Only update when hover target changes
+        if (ShotHoverTooltipShotId != HoveredShotMarkerId)
+        {
+            ShotHoverTooltipShotId = HoveredShotMarkerId;
+
+            if (ShotHoverTooltipWindow.IsValid())
+            {
+                ShotHoverTooltipWindow->RequestDestroyWindow();
+                ShotHoverTooltipWindow.Reset();
+            }
+
+            ShotHoverTooltipWindow =
+                SNew(SWindow)
+                .SizingRule(ESizingRule::Autosized)
+                .SupportsMaximize(false)
+                .SupportsMinimize(false)
+                .HasCloseButton(false)
+                .IsTopmostWindow(true)
+                .FocusWhenFirstShown(false);
+
+            ShotHoverTooltipWindow->SetContent(
+                SNew(SBorder)
+                .Padding(FMargin(6.f, 2.f))
+                .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+                .BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.85f))
+                [
+                    SNew(STextBlock)
+                        .Text(this, &SGASScriptPanel::GetHoveredShotTooltipText)
+                        .Font(FAppStyle::GetFontStyle("SmallFont"))
+                        .ColorAndOpacity(FLinearColor::White)
+                ]
+            );
+
+            FSlateApplication::Get().AddWindow(ShotHoverTooltipWindow.ToSharedRef(), /*bShowImmediately=*/true);
+        }
+
+        // Reposition every move while hovering so it stays pill-anchored during scroll/drag
+        if (ShotHoverTooltipWindow.IsValid())
+        {
+            FVector2D PillLocal;
+            if (GetShotPillLocalPos(ShotHoverTooltipShotId, PillLocal))
+            {
+                // Anchor to pill: right side, slight up
+                const FVector2D TooltipLocalPos(
+                    PillLocal.X + ShotPillWidth + 8.f,
+                    PillLocal.Y - 6.f
+                );
+
+                const FVector2D TooltipScreenPos =
+                    MyGeometry.LocalToAbsolute(TooltipLocalPos);
+
+                ShotHoverTooltipWindow->MoveWindowTo(TooltipScreenPos);
+            }
+        }
+
+
     }
 
     if (bIsDraggingPageBreak && bEditMode)
@@ -3464,16 +3735,12 @@ FReply SGASScriptPanel::OnMouseMove(
         // ------------------------------------------------------------
         // SNAP to nearest paragraph by INDEX (scroll-safe)
         // ------------------------------------------------------------
-        int32 BestRenderIndex = INDEX_NONE;
+        int32 BestRenderIndex = 0; // default to first valid paragraph
         float BestDist = TNumericLimits<float>::Max();
 
         for (int32 i = 0; i < RenderedParagraphs.Num(); ++i)
         {
             const FRenderedParagraph& P = RenderedParagraphs[i];
-
-            // Cannot insert before first paragraph
-            if (P.ParagraphIndex == 0)
-                continue;
 
             const float Dist = FMath::Abs(MouseDocY - P.TopY);
             if (Dist < BestDist)
@@ -3510,6 +3777,7 @@ FReply SGASScriptPanel::OnMouseButtonUp(
     const FPointerEvent& MouseEvent
 )
 {
+    UE_LOG(LogGASPrePro, Warning, TEXT("OnMouseButtonUp fired"));
     // ------------------------------------------------------------
     // PAGE BREAK DELETE (ALT + CLICK, NO DRAG)
     // ------------------------------------------------------------
@@ -3574,6 +3842,7 @@ FReply SGASScriptPanel::OnMouseButtonUp(
                 const int32 InsertIndex =
                     CountShotsForScene(RenderedParagraphs[SceneParaIndex].BlockId);
 
+                UE_LOG(LogGASPrePro, Warning, TEXT("Calling CommitShotAtParagraph"));
                 CommitShotAtParagraph(
                     SceneParaIndex,
                     InsertIndex,
@@ -3598,7 +3867,7 @@ FReply SGASScriptPanel::OnMouseButtonUp(
     const FVector2D LocalPos =
         MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 
-    const float ReleaseY = LocalPos.Y;
+    const float ReleaseDocY = LocalPos.Y + ScrollOffsetY;
 
     // ------------------------------------------------------------
     // Shot tail resize COMMIT
@@ -3710,27 +3979,29 @@ FReply SGASScriptPanel::OnMouseButtonUp(
         return FReply::Handled().ReleaseMouseCapture();
     }
 
-
     // ------------------------------------------------------------
     // PAGE BREAK DRAG COMMIT (ONLY if dragging)
     // ------------------------------------------------------------
     if (bIsDraggingPageBreak)
     {
+        UE_LOG(LogGASPrePro, Error,
+            TEXT("PB COMMIT CHECK | DragIdx=%d"),
+            DraggedPageBreakIndex);
 
-        // ------------------------------------------------------------
-        // Resolve commit target from SNAP location (authoritative)
-        // ------------------------------------------------------------
         int32 TargetRenderIndex = INDEX_NONE;
+
+        float BestDist = TNumericLimits<float>::Max();
 
         for (int32 i = 0; i < RenderedParagraphs.Num(); ++i)
         {
-            if (FMath::IsNearlyEqual(RenderedParagraphs[i].TopY, DragPreviewY, 0.5f))
+            const float Dist = FMath::Abs(ReleaseDocY - RenderedParagraphs[i].TopY);
+
+            if (Dist < BestDist)
             {
+                BestDist = Dist;
                 TargetRenderIndex = i;
-                break;
             }
         }
-
         // ------------------------------------------------------------
         // Clamp PAGE BREAK ordering (prevent crossing neighbors)
         // ------------------------------------------------------------
@@ -3739,6 +4010,8 @@ FReply SGASScriptPanel::OnMouseButtonUp(
         if (SourceScript &&
             SourceScript->UserPageBreaks.IsValidIndex(DraggedPageBreakIndex + 1))
         {
+
+
             const FString& NextAfterBlockId =
                 SourceScript->UserPageBreaks[DraggedPageBreakIndex + 1].AfterBlockId;
 
@@ -4058,17 +4331,6 @@ void SGASScriptPanel::Tick(
                 OnRequestExternalScroll.Execute(Para.TopY);
             }
 
-
-
-
-            UE_LOG(
-                LogTemp,
-                Warning,
-                TEXT("SCROLL JUMP FINAL → Para=%d TopY=%.1f Offset=%.1f"),
-                TargetPara,
-                Para.TopY,
-                ScrollOffsetY
-            );
         }
 
         PendingScrollBlockId.Empty();
@@ -4150,9 +4412,6 @@ void SGASScriptPanel::SetExternalScrollOffset(float InOffset)
 }
 
 
-
-
-
 // =========================================================
 // Shot Selection
 // =========================================================
@@ -4168,9 +4427,7 @@ void SGASScriptPanel::EnterShotSelectionMode()
     ShotStartParagraphIndex = INDEX_NONE;
     ShotCurrentParagraphIndex = INDEX_NONE;
 
-    UE_LOG(LogTemp, Warning, TEXT("[SHOT] Shot selection mode ARMED"));
 }
-
 
 int32 SGASScriptPanel::ResolveSceneIndexAtY(float ScriptY) const
 {
@@ -4186,9 +4443,6 @@ int32 SGASScriptPanel::ResolveSceneIndexAtY(float ScriptY) const
 
     return INDEX_NONE;
 }
-
-
-
 
 int32 SGASScriptPanel::CountShotsForScene(const FString& SceneBlockId) const
 {
@@ -4208,8 +4462,6 @@ int32 SGASScriptPanel::CountShotsForScene(const FString& SceneBlockId) const
 
     return Count;
 }
-
-
 
 void SGASScriptPanel::SetAddShotArmed(bool bArmed)
 {
@@ -4249,8 +4501,6 @@ int32 SGASScriptPanel::FindOwningSceneParagraphIndex(int32 StartParagraphIndex) 
 
     return INDEX_NONE;
 }
-
-
 
 FString SGASScriptPanel::HitTestShot(const FVector2D& LocalPos) const
 {
@@ -4317,8 +4567,6 @@ void SGASScriptPanel::SetEnabledCastNames(
     RebuildEnabledCastOptions();
 }
 
-
-
 void SGASScriptPanel::RebuildEnabledCastOptions()
 {
     EnabledCastOptions.Reset();
@@ -4338,14 +4586,22 @@ void SGASScriptPanel::RebuildEnabledCastOptions()
     }
 }
 
-
 // =============================================================
 // Shot Intent Popup (STUB)
 // =============================================================
 void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, bool bIsNewShot)
-
-
 {
+    UE_LOG(LogGASPrePro, Warning, TEXT("OpenShotIntentPopup called. bShotIntentPopupOpen = %s"),
+        bShotIntentPopupOpen ? TEXT("TRUE") : TEXT("FALSE"));
+    // -------------------------------------------------
+    // Prevent multiple Shot Intent popups
+    // -------------------------------------------------
+    if (bShotIntentPopupOpen)
+    {
+        return;
+    }
+
+    bShotIntentPopupOpen = true;
 
     // -------------------------------------------------
     // Ensure enabled cast options are ready
@@ -4408,15 +4664,12 @@ void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, bool bIsNewSh
 
     ShotWindow->SetOnWindowClosed(
         FOnWindowClosed::CreateLambda(
-            [](const TSharedRef<SWindow>&)
+            [this](const TSharedRef<SWindow>&)
             {
-                // No-op: OK / Cancel control all commits
+            bShotIntentPopupOpen = false;
             }
         )
     );
-
-
-
 
 
     ShotWindow->SetContent(
@@ -4745,6 +4998,7 @@ void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, bool bIsNewSh
                                                             bNeedsRedraw = true;
                                                         }
 
+                                                        bShotIntentPopupOpen = false;
                                                         ShotWindow->RequestDestroyWindow();
                                                         return FReply::Handled();
                                                     }
@@ -4835,7 +5089,7 @@ void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, bool bIsNewSh
                                                             }
                                                         }
 
-
+                                                        bShotIntentPopupOpen = false;
                                                         ShotWindow->RequestDestroyWindow();
                                                         return FReply::Handled();
                                                     }

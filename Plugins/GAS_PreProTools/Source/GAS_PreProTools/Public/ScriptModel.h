@@ -4,6 +4,8 @@
 #include "GAS_NumberingEnums.h"
 #include "GAS_ShotIntentTypes.h"
 #include "Misc/Optional.h"
+#include "Misc/Guid.h"
+
 
 #include "ScriptModel.generated.h"
 
@@ -58,6 +60,33 @@ enum class EGASDualRole : uint8
     Right
 };
 
+// ============================================================
+// Shot Spatial State (replaces color-as-state)
+// ============================================================
+
+UENUM(BlueprintType)
+enum class EGASShotSpatialState : uint8
+{
+    NoBlocking      UMETA(DisplayName = "No Blocking"),
+    BlockingReady   UMETA(DisplayName = "Blocking Ready"),
+    CameraPlaced    UMETA(DisplayName = "Camera Placed"),
+    Locked          UMETA(DisplayName = "Locked")
+};
+
+FORCEINLINE FLinearColor GAS_SpatialStateToColor(EGASShotSpatialState InState)
+{
+    switch (InState)
+    {
+    case EGASShotSpatialState::NoBlocking:     return FLinearColor::Red;
+    case EGASShotSpatialState::BlockingReady:  return FLinearColor::Yellow;
+
+        // Future (not implemented yet) — still give stable colors now.
+    case EGASShotSpatialState::CameraPlaced:   return FLinearColor(0.f, 1.f, 1.f);
+    case EGASShotSpatialState::Locked:         return FLinearColor::Green;
+    default:                                   return FLinearColor::Red;
+    }
+}
+
 // ------------------------------------------------------------
 // SCRIPT BLOCK (REPLACES FScriptParagraph)
 // ------------------------------------------------------------
@@ -66,43 +95,57 @@ struct FGASBlock
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Id;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASBlockType Type = EGASBlockType::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Text;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Speaker;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString CharacterName;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TArray<FString> CharacterExtensions;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     float IndentLeft = 0.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     float IndentRight = 0.f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TMap<FString, FString> Metadata;
+
+    UPROPERTY()
+    FString BlockingLevelPath;
+
+    UPROPERTY()
+    FName AssignedSetId;
+
+    // ------------------------------------------------------------
+    // Scene-Level Cast (Derived)
+    // ------------------------------------------------------------
+    UPROPERTY()
+    TArray<FString> CharactersInScene;
+
+
 
     // ------------------------------------------------------------
     // Dual Dialogue
     // ------------------------------------------------------------
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     bool bIsDualDialogue = false;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASDualRole DualRole = EGASDualRole::None;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     bool bIsExplicitDualDialogue = false;
 
     FGASBlock() {}
@@ -119,13 +162,16 @@ struct FGASMarker
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Id;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FGuid MarkerGuid;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASMarkerType MarkerType = EGASMarkerType::ShotMarker;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASShotOrigin ShotOrigin = EGASShotOrigin::Derived;
 
     UPROPERTY()
@@ -134,13 +180,13 @@ struct FGASMarker
     UPROPERTY()
     int32 SceneShotIndex = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString BlockId;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     int32 CharOffset = 0;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     int32 LineIndex = -1;
 
     UPROPERTY()
@@ -157,25 +203,84 @@ struct FGASMarker
     float ShotLineEndY = -1.f;
 
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Notes;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FLinearColor Color = FLinearColor::Yellow;
+    // -----------------------------
+    // Spatial state (authoritative)
+    // -----------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    EGASShotSpatialState SpatialState = EGASShotSpatialState::NoBlocking;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    // -----------------------------
+    // Visuals (derived; do NOT treat as state)
+    // -----------------------------
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GAS")
+    FLinearColor Color = FLinearColor::Red;
+
+    FORCEINLINE void RefreshDerivedColor()
+    {
+        Color = GAS_SpatialStateToColor(SpatialState);
+    }
+
+    FORCEINLINE void SetSpatialState(EGASShotSpatialState InState)
+    {
+        SpatialState = InState;
+        RefreshDerivedColor();
+    }
+
+    FORCEINLINE void PromoteToCameraPlaced()
+    {
+        // Only allow promotion from BlockingReady
+        if (SpatialState == EGASShotSpatialState::BlockingReady)
+        {
+            SetSpatialState(EGASShotSpatialState::CameraPlaced);
+        }
+    }
+
+    FORCEINLINE void PromoteToLocked()
+    {
+        if (SpatialState == EGASShotSpatialState::CameraPlaced)
+        {
+            SetSpatialState(EGASShotSpatialState::Locked);
+        }
+    }
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TMap<FString, FString> Metadata;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     int32 ParagraphIndex = INDEX_NONE;
 
 
-    FGASMarker() {}
+    FGASMarker()
+        : MarkerGuid(FGuid::NewGuid())
+    {
+    }
 
     bool operator==(const FGASMarker& Other) const
     {
         return Id == Other.Id;
     }
+
+    // --------------------------------------------------
+    // Camera Data (One camera per shot)
+    // --------------------------------------------------
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS|Camera")
+    bool bHasCamera = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS|Camera")
+    FTransform CameraTransform = FTransform::Identity;
+
+    FORCEINLINE void BindCameraTransform(const FTransform& InTransform)
+    {
+        bHasCamera = true;
+        CameraTransform = InTransform;
+
+        PromoteToCameraPlaced();
+    }
+
 };
 
 
@@ -203,7 +308,7 @@ struct FGASUserPageBreak
     GENERATED_BODY()
 
     // Page break occurs AFTER this block (stable identity)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString AfterBlockId;
 
     FGASUserPageBreak() {}
@@ -230,10 +335,10 @@ struct FGASSceneNumberingSettings
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASSceneNumberBaseStyle BaseStyle = EGASSceneNumberBaseStyle::By10;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASNumberingStyle Style = EGASNumberingStyle::FromScript;
 };
 
@@ -279,7 +384,26 @@ struct FGASScriptUndoSnapshot
 
     UPROPERTY()
     TArray<FGASUserPageBreak> UserPageBreaks;
+
+    UPROPERTY()
+    TMap<FString, FGASShotIntent> ShotIntents;
 };
+
+// ------------------------------------------------------------
+// Character Registry Entry (Authoritative Identity)
+// ------------------------------------------------------------
+USTRUCT()
+struct FGASCharacter
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FGuid Id;
+
+    UPROPERTY()
+    FName Name;
+};
+
 
 USTRUCT()
 struct FGASShotCastMember
@@ -293,6 +417,31 @@ struct FGASShotCastMember
     bool bEnabled = true;
 };
 
+// ------------------------------------------------------------
+// Script-Level Character Definition
+// ------------------------------------------------------------
+USTRUCT(BlueprintType)
+struct FGASCharacterDefinition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString CharacterName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString DefaultMeshPath;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bEnabled;
+
+    FGASCharacterDefinition()
+        : CharacterName(TEXT(""))
+        , DefaultMeshPath(TEXT(""))
+        , bEnabled(true)
+    {
+    }
+};
+
 
 // ------------------------------------------------------------
 // FULL SCRIPT CONTAINER
@@ -302,32 +451,38 @@ struct GAS_PREPROTOOLS_API FGASScript
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Title;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Uuid;
 
     // ------------------------------------------------------------
     // Scene Numbering Settings (Authoritative)
     // ------------------------------------------------------------
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGASSceneNumberingSettings SceneNumbering;
 
     // ------------------------------------------------------------
     // Shot Numbering Policy (Authoritative)
     // ------------------------------------------------------------
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASShotNumberingPolicy ShotNumberingPolicy =
         EGASShotNumberingPolicy::Numeric_1s;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TArray<FGASBlock> Blocks;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    // ------------------------------------------------------------
+    // Script-Level Cast (Authoritative Character Definitions)
+    // ------------------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    TArray<FGASCharacterDefinition> Cast;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TArray<FGASMarker> Markers;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TArray<FGASUserPageBreak> UserPageBreaks;
 
     // =====================================================
@@ -335,12 +490,22 @@ struct GAS_PREPROTOOLS_API FGASScript
     // Keyed by FGASMarker::Id
     // =====================================================
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TMap<FString, FGASShotIntent> ShotIntents;
 
 
+    // ------------------------------------------------------------
+    // Character Registry (authoritative, stable IDs)
+    // Derived from Character blocks via sync
+    // ------------------------------------------------------------
     UPROPERTY()
-    TArray<FGASShotCastMember> ShotCast;
+    TArray<FGASCharacter> Characters;
+
+
+    void RegisterCharactersFromBlocks();
+
+    void EnsureScriptCastDefinitionsExist();
+    void RebuildSceneCharacterLists();
 
 
     // ------------------------------------------------------------
@@ -365,6 +530,12 @@ struct GAS_PREPROTOOLS_API FGASScript
 
     void Undo();
     void Redo();
+
+    // ------------------------------------------------------------
+    // Post-mutation sync (authoritative)
+    // ------------------------------------------------------------
+    void PostScriptMutation();
+
 
     FGASScript() {}
 };

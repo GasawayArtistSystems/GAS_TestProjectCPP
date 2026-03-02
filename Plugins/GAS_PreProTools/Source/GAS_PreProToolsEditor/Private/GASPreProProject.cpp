@@ -1,5 +1,6 @@
 ﻿#include "GASPreProProject.h"
 #include "Logging/LogMacros.h"
+#include "GASPreProLog.h"
 
 // Why: create stable defaults, assign runtime GUIDs when adding entities.
 
@@ -30,7 +31,7 @@ FGuid UGASPreProProject::AddShot()
 
     ShotDefinitions.Add(NewShot);
 
-    UE_LOG(LogTemp, Warning, TEXT("DEBUG: AddShot() created Shot %s"),
+    UE_LOG(LogGASPrePro, Warning, TEXT("DEBUG: AddShot() created Shot %s"),
         *NewShot.ShotId.ToString()
     );
 
@@ -105,7 +106,7 @@ void UGASPreProProject::BuildDerivedShotList(
         if (!Marker)
         {
             UE_LOG(
-                LogTemp,
+                LogGASPrePro,
                 Warning,
                 TEXT("[BuildDerivedShotList] Shot %s has no marker"),
                 *Shot.ShotId.ToString()
@@ -123,7 +124,7 @@ void UGASPreProProject::BuildDerivedShotList(
         if (!StartIndex || !EndIndex)
         {
             UE_LOG(
-                LogTemp,
+                LogGASPrePro,
                 Warning,
                 TEXT(
                     "[BuildDerivedShotList] Shot %s has invalid anchors "
@@ -162,12 +163,12 @@ void UGASPreProProject::BuildDerivedShotList(
     );
 
 #if WITH_EDITOR
-    UE_LOG(LogTemp, Warning, TEXT("---- Derived Shot List ----"));
+    UE_LOG(LogGASPrePro, Verbose, TEXT("---- Derived Shot List ----"));
 
     for (const FGASDerivedShotRow& Row : OutShots)
     {
         UE_LOG(
-            LogTemp,
+            LogGASPrePro,
             Warning,
             TEXT("SHOT %s  [%d → %d]"),
             *Row.ShotId.ToString(),
@@ -198,7 +199,7 @@ void UGASPreProProject::PostLoad()
 
         ShotMarkers.Add(Marker);
 
-        UE_LOG(LogTemp, Warning, TEXT("DEBUG: Injected test shot + marker"));
+        UE_LOG(LogGASPrePro, Warning, TEXT("DEBUG: Injected test shot + marker"));
     }
 
     TArray<FGASDerivedShotRow> DebugShots;

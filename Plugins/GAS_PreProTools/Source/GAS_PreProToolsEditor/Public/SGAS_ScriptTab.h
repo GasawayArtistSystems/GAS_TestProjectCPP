@@ -21,6 +21,10 @@ class STextBlock;
 class SImage;
 class SGAS_TestWindow;
 
+struct FGASBlock;
+struct FGASSetDescriptor;
+struct FGASImportNumberingOptions;
+
 // =====================================================
 // Cast Management (Editor-only)
 // =====================================================
@@ -62,6 +66,12 @@ public:
     FReply OnToggleAddMode();
 
     void ClearScript();
+
+    FGASScript* GetCurrentScript();
+    const FGASScript& GetScript() const
+    {
+        return CurrentScript;
+    }
 
     // =========================================================
     // Project Ownership Handoff
@@ -111,6 +121,8 @@ public:
     
     void AddShotMarkerForScene(const FString& SceneBlockId);
 
+
+
     void GetEnabledCastNames(TArray<TSharedPtr<FString>>& OutNames) const;
 
     void UpdateShotDescription(const FGuid& ShotId, const FString& NewDescription);
@@ -127,6 +139,36 @@ public:
 
     FOnShotListNeedsRefresh OnShotListNeedsRefresh;
 
+    void ResumePendingBlocking();
+    void LoadSetForBlocking(const FName& SetId);
+    void SetActiveBlockingShot(const FGuid& ShotId);
+    FGuid GetActiveBlockingShot() const;
+
+    // Currently loaded blocking level (long package name)
+    FString ActiveBlockingLevelPath;
+
+    void OpenSetSelectionWindow(const FString& SceneId);
+    void AssignSetToPendingScene(FName SelectedSetId);
+    void SpawnSelectedSet(const FString& SetPath);
+    void SpawnSceneCast(FGASBlock* SceneBlock);
+
+    void NotifyShotCameraBound(const FGuid& ShotId);
+
+    bool CreateBlockingLevelForScene(
+        FGASBlock& SceneBlock,
+        const FGASSetDescriptor& SelectedSet
+    );
+
+    // ------------------------------------------------------------
+    // Scene-aware character spawn filtering (Blocking)
+    // ------------------------------------------------------------
+    bool GetSceneCastForBlockId(const FString& SceneBlockId, TArray<FString>& OutSceneCast) const;
+    void GetEnabledCastNames_SceneAware(TArray<TSharedPtr<FString>>& OutNames) const;
+
+    bool CreateNewProject(const FString& ProjectName);
+    bool LoadProject(const FString& AssetPath);
+    void PromptCreateNewProject();
+    void PromptOpenProject();
 
 private:
 
@@ -194,6 +236,16 @@ private:
     bool bIsAddMode = false;
     bool bShowSceneNumbers = false;
 
+    FGuid ActiveBlockingShotId;
+
+#if WITH_EDITOR
+    void BindToExistingShotCameras();
+    void HandleShotCameraMoved(const FString& MarkerId, const FTransform& NewTransform);
+    void RehydrateShotCamerasForScene(const FString& SceneBlockId);
+
+    TSet<TWeakObjectPtr<class AGAS_ShotCameraActor>> BoundShotCameras;
+#endif
+
     // =========================================================
     // Project / Document
     // =========================================================
@@ -229,7 +281,7 @@ private:
     float ColScene = 0.15f;
     float ColHeading = 1.0f;
     float ColLength = 0.20f;
-    float ColTime = 0.20f;
+    float ColTime = 0.50f;
     float ColSet = 0.50f;
     float ColNotes = 1.0f;
 
@@ -240,10 +292,28 @@ private:
     float ColLens = 0.10f;
     float ColCamera = 0.20f;
 
+    void OnStartBlockingScene(const FString& SceneId);
+    void OnDeleteBlockingScene(const FString& SceneId);
+    void OpenCastWindowForScene(FString SceneId);
+    void OnBlockingCastModified();
+
+
+
+
     // --------------------------------------------------
     // Shot selection
     // --------------------------------------------------
     FString ActiveShotMarkerId;
 
+    // --------------------------------------------------
+     // BLOCKING
+     // --------------------------------------------------
+    FString PendingBlockingSceneId;
+    TSharedPtr<SWindow> ActiveSetBrowserWindow;
+    TWeakPtr<SWindow> BlockingCastWindow;
+
+    // Blocking State
+    FGuid ActiveBlockingSceneId;
+    bool bBlockingActive = false;
 
 };

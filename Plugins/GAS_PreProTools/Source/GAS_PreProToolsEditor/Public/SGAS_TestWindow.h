@@ -68,10 +68,8 @@ private:
         const TSharedRef<STableViewBase>& OwnerTable
     );
 
-    TSharedPtr<SGAS_ScriptTab> ScriptTab;
     TSharedPtr<SGAS_ScriptTab> ScriptTabWidget;
 
     TSharedPtr<SListView<TSharedPtr<FGASShotDefinitionListRow>>> ShotListView;
-
 };
 

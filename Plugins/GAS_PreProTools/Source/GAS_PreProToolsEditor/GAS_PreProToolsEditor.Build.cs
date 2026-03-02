@@ -12,11 +12,13 @@ public class GAS_PreProToolsEditor : ModuleRules
             "CoreUObject",
             "Engine",
             "GAS_PreProTools",
+            "GAS_TestProjectCPP",
             "Slate",
             "SlateCore",
             "EditorSubsystem",
             "UnrealEd",
-            "InputCore"
+            "InputCore",
+            "CinematicCamera"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

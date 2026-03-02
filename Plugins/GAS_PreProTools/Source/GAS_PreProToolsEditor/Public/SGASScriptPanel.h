@@ -120,6 +120,10 @@ public:
     void SetAddShotArmed(bool bArmed);
     void SetShotAddArmed(bool bInArmed);
 
+    DECLARE_DELEGATE_OneParam(FOnShotActivated, const FGuid&);
+
+    FOnShotActivated OnShotActivated;
+
     // Shot range selection (drag)
     bool bIsShotRangeDragging = false;
     int32 ShotRangeStartParagraph = INDEX_NONE;
@@ -147,6 +151,9 @@ public:
 
     FOnRequestExternalScroll OnRequestExternalScroll;
 
+    FGASScript* GetSourceScript() const { return SourceScript; }
+
+    void OpenShotIntentPopup(const FString& MarkerId, bool bIsNewShot = false);
 
 
 private:
@@ -261,8 +268,37 @@ private:
     TSharedPtr<FString> SelectedShotIntentSubject;
 
     void RebuildEnabledCastOptions();
+    TSharedPtr<class SGASShotCastList> ShotCastListWidget;
+
 
     UGASShotListSelectionState* ShotSelectionState = nullptr;
+
+
+    // --------------------------------------------------
+    // Shot Intent Popup Guard
+    // --------------------------------------------------
+    bool bShotIntentPopupOpen = false;
+
+    FText GetHoveredShotTooltipText() const;
+    bool GetShotPillLocalPos(
+        const FString& ShotId,
+        FVector2D& OutLocalPos
+    ) const;
+
+
+    // --------------------------------------------------
+    // Root container for script surface (persistent)
+    // --------------------------------------------------
+    TSharedPtr<SBorder> ScriptRootBorder;
+
+    // --------------------------------------------------
+    // Shot pill tooltip widget
+    // --------------------------------------------------
+    TSharedPtr<SWidget> ShotTooltipWidget;
+    TSharedPtr<SWindow> ShotHoverTooltipWindow;
+    FString ShotHoverTooltipShotId;
+
+
 
 
     // =========================================================
@@ -379,11 +415,6 @@ private:
     mutable bool bForceScrollReset = false;
     mutable bool bSuppressScrollInput = false;
     float ShotRangeStartLocalY = 0.f;
-
-
-
-
-    void OpenShotIntentPopup(const FString& MarkerId, bool bIsNewShot = false);
 
     // =============================================================
     // Block Type Context Menu (Edit Mode)

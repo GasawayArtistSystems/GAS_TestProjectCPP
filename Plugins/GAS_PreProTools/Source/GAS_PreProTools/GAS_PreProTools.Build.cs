@@ -1,4 +1,4 @@
-using UnrealBuildTool;
+﻿using UnrealBuildTool;
 using System.IO;
 
 public class GAS_PreProTools : ModuleRules
@@ -23,8 +23,16 @@ public class GAS_PreProTools : ModuleRules
             "SlateCore",
             "ApplicationCore",
             "Json",
-            "JsonUtilities"
+            "JsonUtilities",
+
+            // 🔥 REQUIRED FOR MAP CREATION / SAVE
+            "UnrealEd",
+            "EditorSubsystem",
+            "LevelEditor",
+            "AssetRegistry",
+            "AssetTools"
         });
+
 
         PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));
     }

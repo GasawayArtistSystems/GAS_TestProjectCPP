@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "GAS_NumberingEnums.generated.h"
 
 UENUM(BlueprintType)
 enum class EGASNumberingStyle : uint8
