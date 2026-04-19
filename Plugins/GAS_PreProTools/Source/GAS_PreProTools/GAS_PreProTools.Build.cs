@@ -7,6 +7,8 @@ public class GAS_PreProTools : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+        bUseUnity = false; // 🔥 ADD THIS
+
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Core",
@@ -18,22 +20,7 @@ public class GAS_PreProTools : ModuleRules
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Projects",
-            "Slate",
-            "SlateCore",
-            "ApplicationCore",
-            "Json",
-            "JsonUtilities",
-
-            // 🔥 REQUIRED FOR MAP CREATION / SAVE
-            "UnrealEd",
-            "EditorSubsystem",
-            "LevelEditor",
-            "AssetRegistry",
-            "AssetTools"
+            "Projects"
         });
-
-
-        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));
     }
 }
