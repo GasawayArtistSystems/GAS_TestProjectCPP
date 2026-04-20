@@ -3178,7 +3178,7 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     // ------------------------------------------------------------
     if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
     {
-        if (!bEditMode || !SourceScript)
+        if (!SourceScript)
         {
             return FReply::Unhandled();
         }

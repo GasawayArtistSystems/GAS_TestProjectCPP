@@ -526,7 +526,7 @@ struct GAS_PREPROTOOLS_API FGASScript
     void RebuildSceneCharacterLists();
 
     FGASCharacterDefinition* FindCharacterDefinition(const FString& CharacterName);
-
+    const FGASCharacterDefinition* FindCharacterDefinition(const FString& CharacterName) const;
 
     // ------------------------------------------------------------
     // Undo / Redo Stacks (Authoritative)

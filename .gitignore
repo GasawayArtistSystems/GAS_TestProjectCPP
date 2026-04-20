@@ -80,3 +80,5 @@ Thumbs.db
 # Logs
 *.log
 
+# GAS - Ignore local test projects
+Content/PrePro/Projects/

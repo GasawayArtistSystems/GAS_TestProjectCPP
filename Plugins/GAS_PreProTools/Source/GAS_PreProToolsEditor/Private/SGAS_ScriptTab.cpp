@@ -141,24 +141,6 @@ void SGAS_ScriptTab::OnNewProjectAspectChanged(TSharedPtr<FString> NewValue, ESe
     }
 }
 
-// =======================================================
-// For CAMERAS ---- MAY CHANGE AND PUT INTO GAS_CameraUtils.h / .cpp
-// =======================================================
-static float GetShotDistance(EGASShotType ShotType)
-{
-    switch (ShotType)
-    {
-    case EGASShotType::ECU: return 80.f;
-    case EGASShotType::CU:  return 120.f;
-    case EGASShotType::MCU: return 180.f;
-    case EGASShotType::MS:  return 300.f;
-    case EGASShotType::MLS: return 450.f;
-    case EGASShotType::WS:  return 700.f;
-    case EGASShotType::EWS: return 1200.f;
-
-    default: return 300.f;
-    }
-}
 
 static float GetShotHeightOffset(EGASShotType ShotType)
 {

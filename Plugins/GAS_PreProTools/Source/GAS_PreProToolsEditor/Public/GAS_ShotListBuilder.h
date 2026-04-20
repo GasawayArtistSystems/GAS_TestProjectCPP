@@ -21,6 +21,7 @@ bool BuildShotListFromScript(
     TArray<FGASShotDefinitionListRow>& OutRows
 );
 
+float GetShotDistance(EGASShotType ShotType);
 
 // ============================================================
 // FUTURE Shot List Builder (Scene + Shots)
