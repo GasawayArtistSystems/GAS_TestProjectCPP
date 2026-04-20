@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "CineCameraActor.h"
 #include "GAS_ShotIntentTypes.generated.h"
 
 // =====================================================
@@ -88,5 +89,11 @@ struct FGASShotIntent
     EGASFramingBias Framing = EGASFramingBias::Center;
 
     FString CharacterName;
+
+    UPROPERTY()
+    FString CameraName;
+
+    UPROPERTY(Transient)
+    TWeakObjectPtr<ACineCameraActor> CameraActor;
 
 };

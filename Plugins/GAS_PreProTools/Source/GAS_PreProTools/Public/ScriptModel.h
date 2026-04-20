@@ -479,6 +479,8 @@ struct GAS_PREPROTOOLS_API FGASScript
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
     TArray<FGASCharacterDefinition> Cast;
 
+    const FGASCharacterDefinition* FindCharacterDefinition(const FString& CharacterName) const;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TArray<FGASMarker> Markers;
 

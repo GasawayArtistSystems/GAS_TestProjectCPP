@@ -6,7 +6,7 @@
 #include "GAS_ShotCameraActor.generated.h"
 
 UCLASS()
-class GAS_PREPROTOOLSEDITOR_API AGAS_ShotCameraActor : public AActor
+class GAS_PREPROTOOLS_API AGAS_ShotCameraActor : public AActor
 {
     GENERATED_BODY()
 

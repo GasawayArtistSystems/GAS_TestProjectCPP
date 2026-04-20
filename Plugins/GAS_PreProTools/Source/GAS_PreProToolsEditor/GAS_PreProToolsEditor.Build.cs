@@ -6,7 +6,8 @@ public class GAS_PreProToolsEditor : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        bUseUnity = false;        // 🔥 REQUIRED
+        bUseUnity = false;
+        PublicIncludePaths.Add(ModuleDirectory + "/Public");
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
@@ -20,6 +21,9 @@ public class GAS_PreProToolsEditor : ModuleRules
         "EditorSubsystem",
         "UnrealEd",
         "InputCore",
+        "LevelSequence",
+        "MovieScene",
+        "MovieSceneTracks",
         "CinematicCamera"
         });
 
@@ -36,7 +40,13 @@ public class GAS_PreProToolsEditor : ModuleRules
         "EditorSubsystem",
         "LevelEditor",
         "AssetRegistry",
-        "AssetTools"
+        "AssetTools",
+        "LevelSequence",
+        "LevelSequenceEditor",
+        "MovieScene",
+        "MovieSceneTracks",
+        "CinematicCamera",
+        "GAS_PreProTools"
         });
 
         PrivateIncludePaths.AddRange(new string[]

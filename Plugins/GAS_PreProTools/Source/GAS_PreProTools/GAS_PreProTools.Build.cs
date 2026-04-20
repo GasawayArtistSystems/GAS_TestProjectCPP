@@ -7,20 +7,30 @@ public class GAS_PreProTools : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        bUseUnity = false; // 🔥 ADD THIS
+        bUseUnity = false;
+
+        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));
+        PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "Private"));
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
-            "Core",
-            "CoreUObject",
-            "Engine",
-            "Json",
-            "JsonUtilities"
+        "Core",
+        "CoreUObject",
+        "Engine",
+        "Json",
+        "JsonUtilities",
+        "LevelSequence",
+        "MovieScene",
+        "MovieSceneTracks",
+        "CinematicCamera"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Projects"
+        "Projects",
+        "LevelSequence",
+        "MovieScene",
+        "CinematicCamera"
         });
     }
 }

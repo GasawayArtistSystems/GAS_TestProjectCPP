@@ -68,6 +68,14 @@ public:
     void ClearScript();
 
     FGASScript* GetCurrentScript();
+    void UpdateCameraFromShotIntent(const FGASShotIntent& Intent);
+
+    FGASScript& GetScriptMutable();
+
+    void ClearShotSelectionAfterDelete();
+
+    void OnShotIntentChanged();
+
     const FGASScript& GetScript() const
     {
         return CurrentScript;

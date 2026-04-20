@@ -4228,3 +4228,23 @@ void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)
 
 
 #endif
+
+void SGAS_ScriptTab::UpdateCameraFromShotIntent(const FGASShotIntent& Intent)
+{
+    // TEMP STUB – restore compile
+}
+
+FGASScript& SGAS_ScriptTab::GetScriptMutable()
+{
+    return CurrentScript;
+}
+
+void SGAS_ScriptTab::ClearShotSelectionAfterDelete()
+{
+    ActiveShotMarkerId.Empty();
+}
+
+void SGAS_ScriptTab::OnShotIntentChanged()
+{
+    OnShotListNeedsRefresh.Broadcast();
+}
