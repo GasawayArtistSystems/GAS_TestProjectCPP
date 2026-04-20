@@ -2,20 +2,50 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
-#include "ScriptModel.h"
+#include "Math/Color.h"
+
+#include "Brushes/SlateImageBrush.h"
+#include "Styling/SlateBrush.h"
+#include "Styling/SlateColor.h"
+
 #include "Widgets/SCompoundWidget.h"
+#include "Widgets/Input/SComboBox.h"
+
+#include "CineCameraActor.h"
+#include "CineCameraComponent.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+
 #include "GAS_FDXImporter.h"
+#include "GAS_ShotListTypes.h"
 #include "SGASScriptPanel.h"
+#include "ScriptModel.h"
 
-
-
-
-// Forward declarations
+// =====================================================
+// Forward Declarations
+// =====================================================
 class UGASPreProProject;
 class SGASScriptPanel;
-class SVerticalBox;
-class STextBlock;
+class SGAS_TestWindow;
 class SImage;
+class STextBlock;
+class SVerticalBox;
+class SWindow;
+class SScrollBox;
+
+struct FGASBlock;
+struct FGASImportNumberingOptions;
+struct FGASSetDescriptor;
+struct FGASShotIntent;
+
+// =====================================================
+// Local Helper Structs
+// =====================================================
+struct FGASCastMember
+{
+    FString Name;
+    bool bEnabled = true;
+};
 
 struct FShotEntry
 {
@@ -24,122 +54,386 @@ struct FShotEntry
     FString ShotType;
 };
 
-
+// =====================================================
+// Delegates
+// =====================================================
 DECLARE_DELEGATE_OneParam(FOnParagraphClicked, int32 /*ParagraphIndex*/);
 
-
+// =====================================================
+// SGAS_ScriptTab
+// =====================================================
 class SGAS_ScriptTab : public SCompoundWidget
 {
 public:
-
     SLATE_BEGIN_ARGS(SGAS_ScriptTab) {}
     SLATE_END_ARGS()
 
+    // --------------------------------------------------
+    // Lifecycle
+    // --------------------------------------------------
     void Construct(const FArguments& InArgs);
+    ~SGAS_ScriptTab();
+
+    // --------------------------------------------------
+    // Delegates
+    // --------------------------------------------------
+    DECLARE_DELEGATE_OneParam(FOnProjectLoaded, UGASPreProProject*);
+    FOnProjectLoaded OnProjectLoaded;
+
+    DECLARE_MULTICAST_DELEGATE(FOnShotListNeedsRefresh);
+    FOnShotListNeedsRefresh OnShotListNeedsRefresh;
+
+    DECLARE_DELEGATE(FOnShotModeChanged);
+    FOnShotModeChanged OnShotModeChanged;
+
+    // --------------------------------------------------
+    // Script / Project API
+    // --------------------------------------------------
 
     void OnScriptParagraphClicked(int32 ParagraphIndex);
 
     FReply OnImportScript();
     FReply OnSaveScript();
-
     FReply OnGeneratePageBreaks();
-
     FReply OnToggleAddMode();
 
-
     void ClearScript();
+    void EnsureScriptSaved();
 
-    // =========================================================
-    // Project Ownership Handoff
-    // =========================================================
-    DECLARE_DELEGATE_OneParam(FOnProjectLoaded, UGASPreProProject*);
-    FOnProjectLoaded OnProjectLoaded;
+    bool CreateNewProject(const FString& ProjectName, const FString& AspectRatio);
+    bool LoadProject(const FString& AssetPath);
+    void PromptCreateNewProject();
+    void PromptOpenProject();
 
     void MarkScriptDirty();
     void ClearScriptDirty();
     bool IsScriptDirty() const;
 
+    FGASScript* GetCurrentScript();
+    FGASScript& GetScriptMutable() { return CurrentScript; }
+
+    const FGASScript& GetScript() const
+    {
+        return CurrentScript;
+    }
+
+    // --------------------------------------------------
+    // Tool Window / UI State
+    // --------------------------------------------------
+    void SetMainToolWindow(TSharedPtr<SGAS_TestWindow> InWindow)
+    {
+        MainToolWindow = InWindow;
+    }
+
+    void SetShowShotList(bool bInShow)
+    {
+        bShowShotList = bInShow;
+    }
+
+    bool bShowShotList = false;
+    bool bIsSaving = false;
+
+
+
+    // --------------------------------------------------
+    // Scene Numbering
+    // --------------------------------------------------
+    void ApplySceneNumberingBaseStyle(EGASSceneNumberBaseStyle InBaseStyle);
+
+    TArray<TSharedPtr<FString>> SceneNumberingStyleOptions;
+    TSharedPtr<FString> SceneNumberingStyleSelected;
+    TSharedPtr<SComboBox<TSharedPtr<FString>>> SceneNumberingStyleCombo;
+
+    // --------------------------------------------------
+    // Shot Mode / Shot Editing
+    // --------------------------------------------------
+    FSlateColor GetShotButtonTint() const;
+    void EnterShotMarkingMode(const FString& SceneBlockId);
+
+    void UpdateShotDescription(const FGuid& ShotId, const FString& NewDescription);
+    void UpdateShotNotes(const FGuid& ShotId, const FString& NewNotes);
+    void UpdateShotNotesExpanded(const FGuid& ShotId, bool bExpanded);
+
+    void SetActiveBlockingShot(const FGuid& ShotId);
+    FGuid GetActiveBlockingShot() const;
+    void NotifyShotCameraBound(const FGuid& ShotId);
+    void RequestDeleteShotMarker(const FString& MarkerId);
+
+    void OnShotIntentChanged();
+
+    void ClearShotSelectionAfterDelete()
+    {
+        ActiveShotMarkerId.Empty();
+    }
+
+    // --------------------------------------------------
+    // Cast / Scene Filtering
+    // --------------------------------------------------
+    void GetEnabledCastNames(TArray<TSharedPtr<FString>>& OutNames) const;
+    bool GetSceneCastForBlockId(const FString& SceneBlockId, TArray<FString>& OutSceneCast) const;
+    void GetEnabledCastNames_SceneAware(TArray<TSharedPtr<FString>>& OutNames) const;
+
+    // --------------------------------------------------
+    // Blocking / Sets / Sequencer
+    // --------------------------------------------------
+    void ResumePendingBlocking();
+    void LoadSetForBlocking(const FName& SetId);
+
+    void OpenSetSelectionWindow(const FString& SceneId);
+    void AssignSetToPendingScene(FName SelectedSetId);
+    void SpawnSelectedSet(const FString& SetPath);
+    void SpawnSceneCast(FGASBlock* SceneBlock);
+    void StopBlocking();
+
+    bool CreateBlockingLevelForScene(
+        FGASBlock& SceneBlock,
+        const FGASSetDescriptor& SelectedSet
+    );
+
+    void FinalizeBlockingLevel(UWorld* World);
+
+    FGASBlock* GetSceneBlockFromCursor();
+    FGASBlock* GetSceneBlockById(const FString& BlockId);
+
+    FString GetBlockingLevelPath(const FString& SceneId) const;
+    FString GetSequencePath(const FString& SceneId) const;
+
+    bool IsBlockingLevelOpen(const FString& SceneId);
+    void OpenBlockingLevelIfNeeded(const FString& SceneId);
+    void OpenBlockingLevel(const FString& LevelPath);
+    void HandleMapOpened(const FString& Filename, bool bAsTemplate);
+
+    // --------------------------------------------------
+    // Preview / Camera
+    // --------------------------------------------------
+    const FSlateBrush* GetPreviewBrush() const
+    {
+        return PreviewBrush.IsValid() ? PreviewBrush.Get() : nullptr;
+    }
+
+    UTextureRenderTarget2D* GetCameraPreviewRenderTarget() const
+    {
+        return CameraPreviewRenderTarget;
+    }
+
+    void InitializeCameraPreview(ACineCameraActor* InSourceCamera);
+    void SyncPreviewToRealCamera();
+    void ReleaseCameraPreview();
+    void UpdateCameraFromShotIntent(FGASShotIntent& Intent);
+
+    // --------------------------------------------------
+    // Public Shot-State Flags
+    // --------------------------------------------------
+    bool bShotAddArmed = false;
+    bool bIsShotRangeDragging = false;
+    bool bAllowShotHoverPreview = false;
+    bool bIsResumingShotMode = false;
+    bool bPendingShotResumeAfterMapOpen = false;
+
+    int32 ShotRangeStartParagraph = INDEX_NONE;
+
+    FString ActiveCameraModeSceneId;
+    FString ActiveBlockingLevelPath;
+    FString PendingShotModeSceneId;
+    FString PendingShotModeLevelPath;
+    FString PendingResumeSceneId;
+
+    FDelegateHandle OnMapOpenedHandle;
 
 private:
 
-    // =========================================================
-    // User Interactions
-    // =========================================================
+    // --------------------------------------------------
+    // UI / TEMP STATE
+    // --------------------------------------------------
+    FText GetNewProjectAspectText() const;
+    void OnNewProjectAspectChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type SelectInfo);
+    TArray<TSharedPtr<FString>> NewProjectAspectOptions;
+    TSharedPtr<FString> NewProjectSelectedAspect;
 
-    // Toggles shot marking mode
-    FReply OnToggleShotMarking();
-
+    // --------------------------------------------------
+    // UI Commands / Interactions
+    // --------------------------------------------------
     FReply OnToggleEditMode();
-
     FReply OnToggleSceneNumbers();
-    // =========================================================
-    // Rebuild UI Panels
-    // =========================================================
+    FReply OnAddShotMarkerClicked();
+    FReply OnOpenCastPopup();
 
+    FReply OnClearScriptConfirm();
+    FReply OnClearScriptClicked();
+
+    // --------------------------------------------------
+    // Internal Script / Persistence Helpers
+    // --------------------------------------------------
     void RebuildShotList();
+    void BuildCastListFromScript();
+    void RebuildCastUI();
+    void RebuildCastList();
 
-    void LoadScriptFromFDX(const FString& FilePath);
-
-
+    void LoadScriptFromFDX(
+        const FString& FilePath,
+        const FGASImportNumberingOptions& ImportOptions
+    );
 
     FString GetAuthoritativeScriptJsonPath() const;
     void LoadScriptFromJsonIfExists();
     void SaveScriptToJson();
 
+    bool TickShotModeResume(float DeltaTime);
 
-    float CachedScriptPanelWidth = 1200.f; // fallback width
+    // --------------------------------------------------
+    // Blocking UI / Scene Actions
+    // --------------------------------------------------
+    void ScrollToScene(const FGASShotDefinitionListRow& Scene);
+    void ScrollToSceneBlock(const FString& BlockId);
 
-    // =========================================================
-    // Authoritative Script Model (JSON-backed)
-    // =========================================================
+    void OnStartBlockingScene(const FString& SceneId);
+    void OnDeleteBlockingScene(const FString& SceneId);
+    void OpenCastWindowForScene(const FString& SceneId);
+    void OnBlockingCastModified();
+    bool bPendingAutoOpenCastWindow = false;
+    bool bIsUpdatingCast = false;
+
+    void DeleteShotMarkerNow(const FString& MarkerId);
+
+    bool bPendingDeleteShotAfterMapOpen = false;
+    FString PendingDeleteShotMarkerId;
+    FString PendingDeleteShotLevelPath;
+
+    TSharedPtr<SWindow> PendingActionWindow;
+
+    void ShowPendingActionWindow(const FString& Message);
+    void UpdatePendingActionWindow(const FString& Message);
+    void ClosePendingActionWindow();
+
+
+#if WITH_EDITOR
+    void BindToExistingShotCameras();
+    void HandleShotCameraMoved(const FString& MarkerId, const FTransform& NewTransform);
+    void RehydrateShotCamerasForScene(const FString& SceneBlockId);
+
+    TSet<TWeakObjectPtr<class AGAS_ShotCameraActor>> BoundShotCameras;
+#endif
+
+    // --------------------------------------------------
+    // Preview Helpers
+    // --------------------------------------------------
+    void UpdateShotIntentPreview();
+    void ConfigurePreviewCameraFilmback(UCineCameraComponent* InCamera) const;
+    FVector2D GetPreviewWidgetSize(float InWidth) const;
+
+    // --------------------------------------------------
+    // Authoritative Model
+    // --------------------------------------------------
     FGASScript CurrentScript;
-    bool bHasScript = false;
 
-
-
-
-    FReply OnClearScriptConfirm();
-    FReply OnClearScriptClicked();
-
-
-private:
-
-
-
-    // =========================================================
-    // Script + Shot Data
-    // =========================================================
-    TArray<FShotEntry> ShotList;
-
-
-    bool bIsMarkingShot = false;
-    int32 PendingStartParagraph = INDEX_NONE;
-
-    bool bIsShotMarkingActive = false;
-    bool bIsEditMode = false;
-    bool bIsScriptDirty = false;
-    bool bIsAddMode = false;
-
-
-    bool bShowSceneNumbers = false;
-
-    // =========================================================
-    // Project / Document
-    // =========================================================
+    // --------------------------------------------------
+    // Project / Dirty State
+    // --------------------------------------------------
+    UPROPERTY()
     UGASPreProProject* ActiveProject = nullptr;
 
-    // =========================================================
-    // Slate UI References
-    // =========================================================
+    bool bIsScriptDirty = false;
+
+    // --------------------------------------------------
+    // Editor / Mode State
+    // --------------------------------------------------
+    bool bIsEditMode = false;
+    bool bIsAddMode = false;
+    bool bShowSceneNumbers = false;
+
+    FGuid ActiveBlockingShotId;
+    FString ActiveShotMarkerId;
+
+    // --------------------------------------------------
+    // Cast State
+    // --------------------------------------------------
+    TArray<FGASCastMember> CastList;
+    TSharedPtr<SVerticalBox> CastListContainer;
+
+    // --------------------------------------------------
+    // Blocking State
+    // --------------------------------------------------
+    FString PendingBlockingSceneId;
+    FGuid ActiveBlockingSceneId;
+    bool bBlockingActive = false;
+
+    TSharedPtr<SWindow> ActiveSetBrowserWindow;
+    TWeakPtr<SWindow> BlockingCastWindow;
+
+    // --------------------------------------------------
+    // Main UI References
+    // --------------------------------------------------
+    TWeakPtr<SGAS_TestWindow> MainToolWindow;
 
     TSharedPtr<SVerticalBox> ShotListContainer;
     TSharedPtr<STextBlock> ShotModeButtonLabel;
     TSharedPtr<SGASScriptPanel> ScriptPanel;
     TSharedPtr<SImage> ShotMarkingIcon;
     TSharedPtr<SImage> NumberingIcon;
+    TSharedPtr<SScrollBox> ScriptScrollBox;
 
+    // --------------------------------------------------
+    // Layout / Shot List UI
+    // --------------------------------------------------
+    float CachedScriptPanelWidth = 1200.f;
 
+    TArray<TSharedPtr<FGASShotDefinitionListRow>> ShotListItems;
+    TSet<FString> ExpandedScenes;
 
+    float ColExpand = 0.10f;
+    float ColPage = 0.08f;
+    float ColScene = 0.15f;
+    float ColHeading = 1.0f;
+    float ColLength = 0.20f;
+    float ColTime = 0.50f;
+    float ColSet = 0.50f;
+    float ColNotes = 1.0f;
 
+    float ColShot = 0.10f;
+    float ColType = 0.10f;
+    float ColDes = 0.60f;
+    float ColLens = 0.10f;
+    float ColCamera = 0.20f;
 
+    // --------------------------------------------------
+    // Shot Intent Preview State
+    // --------------------------------------------------
+    TSharedPtr<FString> SelectedShotIntentSubject;
+    TSharedPtr<FString> SelectedShotIntentType;
+
+    UWorld* PreviewWorld = nullptr;
+
+    UPROPERTY()
+    ACineCameraActor* ShotCamera = nullptr;
+
+    TWeakObjectPtr<ACineCameraActor> PreviewSourceCamera;
+
+    UPROPERTY(Transient)
+    USceneCaptureComponent2D* PreviewCaptureComponent = nullptr;
+
+    TSharedPtr<FSlateBrush> PreviewBrush;
+    TSharedPtr<FSlateBrush> CameraPreviewBrush;
+    TSharedPtr<SImage> ShotPreviewImage;
+
+    // --------------------------------------------------
+    // Camera Preview Render System
+    // --------------------------------------------------
+    static constexpr int32 PreviewRTWidth = 1280;
+    static constexpr int32 PreviewRTHeight = 720;
+    static constexpr float PreviewAspect = 16.0f / 9.0f;
+
+    UPROPERTY(Transient)
+    UTextureRenderTarget2D* CameraPreviewRenderTarget = nullptr;
+
+    UPROPERTY()
+    TObjectPtr<ACineCameraActor> PreviewCameraActor = nullptr;
+
+    UPROPERTY()
+    TObjectPtr<UCineCameraComponent> PreviewCameraComponent = nullptr;
+
+    UPROPERTY()
+    TObjectPtr<USceneCaptureComponent2D> PreviewSceneCapture = nullptr;
+
+    UPROPERTY()
+    UTextureRenderTarget2D* ShotPreviewRenderTarget = nullptr;
 };

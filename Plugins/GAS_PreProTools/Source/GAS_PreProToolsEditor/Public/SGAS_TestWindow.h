@@ -2,6 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "GAS_ShotListTypes.h"
+#include "SGAS_ScriptTab.h"
+#include "Delegates/Delegate.h"
+
+
 
 enum class EGASMainTab : uint8
 {
@@ -11,7 +16,11 @@ enum class EGASMainTab : uint8
     Edit
 };
 
+DECLARE_DELEGATE_OneParam(FOnSceneSelected, int32 /*SceneBlockIndex*/);
+
+
 class UGASPreProProject;
+struct FGASScript;
 
 
 class SGAS_TestWindow : public SCompoundWidget
@@ -21,6 +30,15 @@ public:
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
+
+    void SetScript(const FGASScript& InScript)
+    {
+        Script = &InScript;
+    }
+
+    FOnSceneSelected OnSceneSelected;
+    void RefreshShotList();
+
 
 private:
     void SetActiveTab(EGASMainTab NewTab);
@@ -32,11 +50,26 @@ private:
 
     EGASMainTab ActiveTab = EGASMainTab::Script;
 
+    TWeakPtr<SGAS_ScriptTab> WeakScriptTab;
+
+
     // Where the active tab's content is placed
     TSharedPtr<class SBox> ContentBox;
 
     FText GetScriptTabLabel() const;
 
     UGASPreProProject* ActiveProject = nullptr;
+
+    const FGASScript* Script = nullptr;
+
+    TArray<TSharedPtr<FGASShotDefinitionListRow>> ShotListItems;
+    TSharedRef<ITableRow> GenerateShotListRow(
+        TSharedPtr<FGASShotDefinitionListRow> InItem,
+        const TSharedRef<STableViewBase>& OwnerTable
+    );
+
+    TSharedPtr<SGAS_ScriptTab> ScriptTabWidget;
+
+    TSharedPtr<SListView<TSharedPtr<FGASShotDefinitionListRow>>> ShotListView;
 };
 

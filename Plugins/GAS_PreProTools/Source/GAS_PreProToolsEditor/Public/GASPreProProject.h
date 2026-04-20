@@ -3,7 +3,13 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "ScriptModel.h"
+#include "Data/GASShot.h"
+
+struct FGASDerivedShotRow;
+
 #include "GASPreProProject.generated.h"
+
+
 
 /*
 ===============================================================================
@@ -19,16 +25,16 @@ struct FGASScriptBlock
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid BlockID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Text;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASBlockType BlockType;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid SceneID;
 
     // Deterministic default for CDO
@@ -54,28 +60,35 @@ struct FGASScene
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
     FGuid SceneID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString SceneLabel;     // e.g. "010", "20", "EXT1"
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString SceneLabel;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString HeadingText;    // Raw scene heading text
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString HeadingText;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGuid> BlockIDs; // Blocks belonging to this scene
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    TArray<FGuid> BlockIDs;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    TArray<FGuid> ShotIDs;  // Shots that START in this scene
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    TArray<FGuid> ShotIDs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString BlockingLevelPath;
 
     FGASScene()
         : SceneID(FGuid())
         , SceneLabel(TEXT(""))
         , HeadingText(TEXT(""))
+        , BlockingLevelPath(TEXT(""))
     {
     }
 };
+
+
+
 
 /*
 ===============================================================================
@@ -86,50 +99,25 @@ struct FGASScene
 ===============================================================================
 */
 
+
 USTRUCT(BlueprintType)
-struct FGASShot
+struct FGASShotDefinitionMarker
 {
     GENERATED_BODY()
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid ShotID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ShotLabel;  // "10", "A", "20B"
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ShotType;   // MS / CU / Insert / etc.
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString Notes;
-
-    FGASShot()
-        : ShotID(FGuid())
-        , ShotLabel(TEXT(""))
-        , ShotType(TEXT(""))
-        , Notes(TEXT(""))
-    {
-    }
-};
-
-USTRUCT(BlueprintType)
-struct FGASShotMarker
-{
-    GENERATED_BODY()
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGuid ShotID;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid StartBlockID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGuid EndBlockID;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Notes;
 
-    FGASShotMarker()
+    FGASShotDefinitionMarker()
         : ShotID(FGuid())
         , StartBlockID(FGuid())
         , EndBlockID(FGuid())
@@ -156,30 +144,43 @@ class GAS_PREPROTOOLSEDITOR_API UGASPreProProject : public UDataAsset
 public:
 
     /*-----------------------------------------
+        PROJECT IDENTITY
+    ------------------------------------------*/
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Project")
+    FString ProjectName;
+
+    /*-----------------------------------------
         SCRIPT CONTENT
     ------------------------------------------*/
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
-    TArray<FGASBlock> ScriptBlocks;
-
+    TArray<FGASScriptBlock> ScriptBlocks;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
     TArray<FGASScene> Scenes;
 
     /*-----------------------------------------
+        CAMERA / PREVIEW SETTINGS
+    ------------------------------------------*/
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    FString DefaultAspectRatio = TEXT("16:9");
+
+    /*-----------------------------------------
         SHOTS + MARKERS
     ------------------------------------------*/
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shots")
-    TArray<FGASShot> Shots;
+    UPROPERTY()
+    TArray<FGASShotDefinition> ShotDefinitions;
+
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shots")
-    TArray<FGASShotMarker> ShotMarkers;
+    TArray<FGASShotDefinitionMarker> ShotMarkers;
 
     /*-----------------------------------------
         MUTATION API
         (These will mark the project dirty)
     ------------------------------------------*/
     FGuid AddScene(const FString& Label, const FString& Heading);
-    FGuid AddShot(const FString& Label);
+    FGuid AddShot();
 
     void AddShotMarker(
         const FGuid& ShotID,
@@ -194,6 +195,11 @@ public:
     void MarkDirty();
     void ClearDirty();
     bool IsDirty() const;
+
+    void BuildDerivedShotList(TArray<FGASDerivedShotRow>& OutShots) const;
+
+
+    virtual void PostLoad() override;
 
 private:
 

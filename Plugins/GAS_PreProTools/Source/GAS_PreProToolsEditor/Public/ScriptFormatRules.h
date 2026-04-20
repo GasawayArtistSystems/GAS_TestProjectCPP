@@ -7,14 +7,22 @@ namespace ScriptFormat
     // ------------------------------------------------------------------------
     // Line + Page Metrics
     // ------------------------------------------------------------------------
-    static constexpr float LineHeight = 17.5f;
+    static constexpr float LineHeight = 16.f;
     static constexpr float PageWidth = 830.f;
-    static constexpr float PageHeight = 792.f;
+    static constexpr float PageHeight = 920.f;
+
 
     static constexpr float MarginTop = 72.f;
     static constexpr float MarginBottom = 72.f;
 
     static constexpr float LinesPerPageFudge = 1.0f;
+
+    static constexpr float UsablePageHeight =
+        PageHeight - MarginTop - MarginBottom;
+
+    static constexpr float EighthHeight =
+        UsablePageHeight / 8.f;
+
 
     // ------------------------------------------------------------------------
     // Absolute Column Layout (Final Draft–style)
@@ -29,6 +37,11 @@ namespace ScriptFormat
     static constexpr float CharacterCol = 210.f;
     static constexpr float TransitionRightPadding = 42.f;
 
+    // Dialogue width bounds (Final Draft)
+    static constexpr float DialogueRight = DialogueCol + 350.f;
+    static constexpr float ParentheticalRight = ParentheticalCol + 200.f;
+
+
     // Dual dialogue columns (Final Draft)
     static constexpr float DualCharLeftCol = DialogueCol + 30.f;
     static constexpr float DualCharRightCol = DialogueCol + 320.f;
@@ -37,7 +50,7 @@ namespace ScriptFormat
     // Extra indent for left-side dual dialogue text (Final Draft nuance)
     static constexpr float DualDialogueTextLeftOffset = 0.f;
 
-    static constexpr float DualDialogueTextRightCol = DialogueCol + 220.f;
+    static constexpr float DualDialogueTextRightCol = DialogueCol + 230.f;
 
 
 
@@ -74,22 +87,7 @@ namespace ScriptFormat
     }
 
 
-    inline float GetAvailableWidth(EGASBlockType T)
-    {
-        // Right margin fixed at 1"
-        constexpr float PageRight = PageWidth - 72.f;
 
-        float Left = GetLeftIndent(T);
-        float Right = PageRight;
-
-        // Dialogue & parentheticals have tighter width
-        if (T == EGASBlockType::Dialogue || T == EGASBlockType::Parenthetical)
-        {
-            Right -= 36.f; // tighten slightly
-        }
-
-        return Right - Left;
-    }
 
 
     // ------------------------------------------------------------------------
@@ -114,6 +112,29 @@ namespace ScriptFormat
         return 0.f;
     }
 
+
+    inline float GetAvailableWidth(EGASBlockType T)
+    {
+        switch (T)
+        {
+        case EGASBlockType::Dialogue:
+            return 350.f;
+
+        case EGASBlockType::Parenthetical:
+            return 200.f;
+
+        default:
+        {
+            const float PrintableWidth =
+                PageWidth
+                - PageLeft
+                - MarginRight;
+
+            return PrintableWidth - GetLeftIndent(T);
+        }
+
+        }
+    }
 
 
     // ------------------------------------------------------------------------
@@ -191,7 +212,7 @@ namespace ScriptFormat
         // Action → Action (FD often ~0.5)
         if (Prev == EGASBlockType::Action &&
             Curr == EGASBlockType::Action)
-            return 0.5f;
+            return 1.0f;
 
         // Action → Character (intro a speaker)
         if (Prev == EGASBlockType::Action &&

@@ -8,29 +8,51 @@ public class GAS_PreProToolsEditor : ModuleRules
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
-            "Core",
-            "CoreUObject",
-            "Engine",
-            "GAS_PreProTools",
-            "Slate",
-            "SlateCore",
-            "EditorSubsystem",
-            "UnrealEd",
-            "InputCore"
+        "Core",
+        "CoreUObject",
+        "Engine",
+        "GAS_PreProTools",
+        "Slate",
+        "SlateCore",
+        "InputCore",
+        "GAS_TestProjectCPP",
+        "CinematicCamera"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Projects",
-            "ApplicationCore",
-            "DesktopPlatform",
-            "EditorFramework",
-            "ToolMenus",
-            "Json",
-            "JsonUtilities"
+        "Projects",
+        "ApplicationCore",
+        "DesktopPlatform",
+        "EditorFramework",
+        "ToolMenus",
+        "Json",
+        "JsonUtilities",
+
+        // Editor systems
+        "UnrealEd",
+        "EditorSubsystem",
+        "LevelEditor",
+        "AssetRegistry",
+        "AssetTools",
+
+        // Sequencer
+        "LevelSequence",
+        "MovieScene",
+        "MovieSceneTracks",
+        "Sequencer",
+        "LevelSequenceEditor"
         });
 
-        PublicIncludePaths.Add(ModuleDirectory + "/Public");
-        PrivateIncludePaths.Add(ModuleDirectory + "/Private");
+        PublicIncludePaths.AddRange(new string[]
+        {
+        ModuleDirectory + "/Public"
+        });
+
+        PrivateIncludePaths.AddRange(new string[]
+        {
+        ModuleDirectory + "/Private",
+        ModuleDirectory + "/Private/ShotList"
+        });
     }
 }

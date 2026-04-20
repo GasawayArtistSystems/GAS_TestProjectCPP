@@ -1,4 +1,4 @@
-using UnrealBuildTool;
+﻿using UnrealBuildTool;
 using System.IO;
 
 public class GAS_PreProTools : ModuleRules
@@ -13,7 +13,15 @@ public class GAS_PreProTools : ModuleRules
             "CoreUObject",
             "Engine",
             "Json",
-            "JsonUtilities"
+            "JsonUtilities",
+
+            // Cameras
+            "CinematicCamera",
+
+            // Sequencer / Level Sequence
+            "LevelSequence",
+            "MovieScene",
+            "MovieSceneTracks"
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
@@ -22,10 +30,20 @@ public class GAS_PreProTools : ModuleRules
             "Slate",
             "SlateCore",
             "ApplicationCore",
-            "Json",
-            "JsonUtilities"
+            "Engine",
+
+            // Sequencer runtime modules (linking)
+            "LevelSequence",
+            "MovieScene",
+            "MovieSceneTracks"
         });
 
-        PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));
+        PublicIncludePaths.AddRange(
+            new string[]
+            {
+                Path.Combine(ModuleDirectory, "Public"),
+                Path.Combine(ModuleDirectory, "Public/Utils")
+            }
+        );
     }
 }
