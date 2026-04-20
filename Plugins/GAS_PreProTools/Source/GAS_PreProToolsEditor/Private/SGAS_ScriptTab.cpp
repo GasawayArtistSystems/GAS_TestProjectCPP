@@ -142,22 +142,6 @@ void SGAS_ScriptTab::OnNewProjectAspectChanged(TSharedPtr<FString> NewValue, ESe
 }
 
 
-static float GetShotHeightOffset(EGASShotType ShotType)
-{
-    switch (ShotType)
-    {
-    case EGASShotType::ECU: return 10.f;
-    case EGASShotType::CU:  return 20.f;
-    case EGASShotType::MCU: return 30.f;
-    case EGASShotType::MS:  return 50.f;
-    case EGASShotType::MLS: return 70.f;
-    case EGASShotType::WS:  return 100.f;
-    case EGASShotType::EWS: return 150.f;
-
-    default: return 50.f;
-    }
-}
-
 
 
 // =======================================================

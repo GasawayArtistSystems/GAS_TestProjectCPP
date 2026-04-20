@@ -200,71 +200,7 @@ void SGASScriptPanel::ModifyShotMarkerMetadata(
 }
 
 
-class SGASShotCastList : public SCompoundWidget
-{
-public:
-    SLATE_BEGIN_ARGS(SGASShotCastList) {}
-        SLATE_ARGUMENT(FGASScript*, Script)
-    SLATE_END_ARGS()
 
-    void Construct(const FArguments& InArgs)
-    {
-        Script = InArgs._Script;
-
-        if (Script)
-        {
-            Script->PostScriptMutation(); // 🔹 FORCE SYNC ON OPEN
-        }
-
-        ChildSlot
-            [
-                SNew(SBorder)
-                    .Padding(6.f)
-                    .BorderImage(FCoreStyle::Get().GetBrush("ToolPanel.GroupBorder"))
-                    [
-                        SAssignNew(ListBox, SVerticalBox)
-                    ]
-            ];
-
-        Rebuild();
-    }
-
-    void Refresh()
-    {
-        Rebuild();
-    }
-
-    void Rebuild()
-    {
-        UE_LOG(LogGASPrePro, Error,
-            TEXT("CAST REBUILD | Script=%p Cast=%d"),
-            Script,
-            Script ? Script->Cast.Num() : -1
-        );
-
-        if (!Script || !ListBox.IsValid())
-            return;
-
-        ListBox->ClearChildren();
-
-        for (const FGASCharacterDefinition& Character : Script->Cast)
-        {
-            ListBox->AddSlot()
-                .AutoHeight()
-                .Padding(2.f)
-                [
-                    SNew(STextBlock)
-                        .Text(FText::FromString(Character.CharacterName))
-                ];
-        }
-    }
-
-
-
-private:
-    FGASScript* Script = nullptr;
-    TSharedPtr<SVerticalBox> ListBox;
-};
 
 struct FGASShotIntentWorkingCopy
 {

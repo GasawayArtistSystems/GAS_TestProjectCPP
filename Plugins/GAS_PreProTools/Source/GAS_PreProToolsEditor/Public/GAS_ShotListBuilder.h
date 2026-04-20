@@ -23,6 +23,8 @@ bool BuildShotListFromScript(
 
 float GetShotDistance(EGASShotType ShotType);
 
+float GetShotHeightOffset(EGASShotType ShotType);
+
 // ============================================================
 // FUTURE Shot List Builder (Scene + Shots)
 // (NOT wired yet)
