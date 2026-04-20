@@ -5,6 +5,7 @@
 #include "GAS_ShotIntentTypes.h"
 #include "Misc/Optional.h"
 #include "Misc/Guid.h"
+#include "Misc/PackageName.h"
 
 
 #include "ScriptModel.generated.h"
@@ -91,7 +92,7 @@ FORCEINLINE FLinearColor GAS_SpatialStateToColor(EGASShotSpatialState InState)
 // SCRIPT BLOCK (REPLACES FScriptParagraph)
 // ------------------------------------------------------------
 USTRUCT(BlueprintType)
-struct FGASBlock
+struct GAS_PREPROTOOLS_API FGASBlock
 {
     GENERATED_BODY()
 
@@ -147,6 +148,14 @@ struct FGASBlock
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     bool bIsExplicitDualDialogue = false;
+
+    // -----------------------------------------------------
+    // Scene Master Sequence (Rehearsal Timeline)
+    // -----------------------------------------------------
+    UPROPERTY()
+    FString MasterSequencePath;
+
+
 
     FGASBlock() {}
 };
@@ -281,6 +290,8 @@ struct FGASMarker
         PromoteToCameraPlaced();
     }
 
+
+    FString GetShotLabel(EGASShotNumberingPolicy Policy) const;
 };
 
 
@@ -417,6 +428,8 @@ struct FGASShotCastMember
     bool bEnabled = true;
 };
 
+
+
 // ------------------------------------------------------------
 // Script-Level Character Definition
 // ------------------------------------------------------------
@@ -433,6 +446,11 @@ struct FGASCharacterDefinition
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
     bool bEnabled;
+
+    FString GetDefaultMeshName() const
+    {
+        return FPackageName::GetShortName(DefaultMeshPath);
+    }
 
     FGASCharacterDefinition()
         : CharacterName(TEXT(""))
@@ -506,6 +524,8 @@ struct GAS_PREPROTOOLS_API FGASScript
 
     void EnsureScriptCastDefinitionsExist();
     void RebuildSceneCharacterLists();
+
+    FGASCharacterDefinition* FindCharacterDefinition(const FString& CharacterName);
 
 
     // ------------------------------------------------------------

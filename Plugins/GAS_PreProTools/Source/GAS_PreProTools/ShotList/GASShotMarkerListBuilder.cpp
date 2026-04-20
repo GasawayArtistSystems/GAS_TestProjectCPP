@@ -54,13 +54,23 @@ TArray<FGASShotListItem> FGASShotMarkerListBuilder::Build(const FGASScript& Scri
             Item.SceneLabel = TEXT("");
         }
 
-        // Shot label (authoritative helper)
+        int32 SceneIndex = INDEX_NONE;
+
+        for (int32 i = 0; i < Script.Blocks.Num(); ++i)
+        {
+            if (Script.Blocks[i].Id == Marker.BlockId)
+            {
+                SceneIndex = i;
+                break;
+            }
+        }
+
         Item.ShotLabel =
             ResolveShotDisplayLabel(
                 Script,
-                /*SceneBlockIndex=*/INDEX_NONE,
+                SceneIndex,
                 Marker.ShotIndex
-            );
+            );  
 
         // TEMP: stash numeric shot order in SortIndex for now (we’ll rewrite after sort)
         Item.SortIndex = Marker.ShotIndex;

@@ -88,6 +88,8 @@ struct FGASScene
 };
 
 
+
+
 /*
 ===============================================================================
  SHOTS + MARKERS
@@ -154,10 +156,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
     TArray<FGASScriptBlock> ScriptBlocks;
 
-
-
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
     TArray<FGASScene> Scenes;
+
+    /*-----------------------------------------
+        CAMERA / PREVIEW SETTINGS
+    ------------------------------------------*/
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+    FString DefaultAspectRatio = TEXT("16:9");
 
     /*-----------------------------------------
         SHOTS + MARKERS

@@ -2,38 +2,50 @@
 
 #include "CoreMinimal.h"
 #include "Delegates/Delegate.h"
-#include "ScriptModel.h"
-#include "Widgets/SCompoundWidget.h"
-#include "Widgets/Input/SComboBox.h"
-#include "Styling/SlateColor.h"
 #include "Math/Color.h"
 
+#include "Brushes/SlateImageBrush.h"
+#include "Styling/SlateBrush.h"
+#include "Styling/SlateColor.h"
+
+#include "Widgets/SCompoundWidget.h"
+#include "Widgets/Input/SComboBox.h"
+
+#include "CineCameraActor.h"
+#include "CineCameraComponent.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+
 #include "GAS_FDXImporter.h"
-#include "SGASScriptPanel.h"
 #include "GAS_ShotListTypes.h"
-
-
-// Forward declarations
-class UGASPreProProject;
-class SGASScriptPanel;
-class SVerticalBox;
-class STextBlock;
-class SImage;
-class SGAS_TestWindow;
-
-struct FGASBlock;
-struct FGASSetDescriptor;
-struct FGASImportNumberingOptions;
+#include "SGASScriptPanel.h"
+#include "ScriptModel.h"
 
 // =====================================================
-// Cast Management (Editor-only)
+// Forward Declarations
+// =====================================================
+class UGASPreProProject;
+class SGASScriptPanel;
+class SGAS_TestWindow;
+class SImage;
+class STextBlock;
+class SVerticalBox;
+class SWindow;
+class SScrollBox;
+
+struct FGASBlock;
+struct FGASImportNumberingOptions;
+struct FGASSetDescriptor;
+struct FGASShotIntent;
+
+// =====================================================
+// Local Helper Structs
 // =====================================================
 struct FGASCastMember
 {
     FString Name;
     bool bEnabled = true;
 };
-
 
 struct FShotEntry
 {
@@ -42,201 +54,257 @@ struct FShotEntry
     FString ShotType;
 };
 
-
+// =====================================================
+// Delegates
+// =====================================================
 DECLARE_DELEGATE_OneParam(FOnParagraphClicked, int32 /*ParagraphIndex*/);
 
-
-
-
+// =====================================================
+// SGAS_ScriptTab
+// =====================================================
 class SGAS_ScriptTab : public SCompoundWidget
 {
 public:
-
     SLATE_BEGIN_ARGS(SGAS_ScriptTab) {}
     SLATE_END_ARGS()
 
+    // --------------------------------------------------
+    // Lifecycle
+    // --------------------------------------------------
     void Construct(const FArguments& InArgs);
+    ~SGAS_ScriptTab();
+
+    // --------------------------------------------------
+    // Delegates
+    // --------------------------------------------------
+    DECLARE_DELEGATE_OneParam(FOnProjectLoaded, UGASPreProProject*);
+    FOnProjectLoaded OnProjectLoaded;
+
+    DECLARE_MULTICAST_DELEGATE(FOnShotListNeedsRefresh);
+    FOnShotListNeedsRefresh OnShotListNeedsRefresh;
+
+    DECLARE_DELEGATE(FOnShotModeChanged);
+    FOnShotModeChanged OnShotModeChanged;
+
+    // --------------------------------------------------
+    // Script / Project API
+    // --------------------------------------------------
 
     void OnScriptParagraphClicked(int32 ParagraphIndex);
 
     FReply OnImportScript();
     FReply OnSaveScript();
-
     FReply OnGeneratePageBreaks();
     FReply OnToggleAddMode();
 
     void ClearScript();
+    void EnsureScriptSaved();
+
+    bool CreateNewProject(const FString& ProjectName, const FString& AspectRatio);
+    bool LoadProject(const FString& AssetPath);
+    void PromptCreateNewProject();
+    void PromptOpenProject();
+
+    void MarkScriptDirty();
+    void ClearScriptDirty();
+    bool IsScriptDirty() const;
 
     FGASScript* GetCurrentScript();
+    FGASScript& GetScriptMutable() { return CurrentScript; }
+
     const FGASScript& GetScript() const
     {
         return CurrentScript;
     }
 
-    // =========================================================
-    // Project Ownership Handoff
-    // =========================================================
-    DECLARE_DELEGATE_OneParam(FOnProjectLoaded, UGASPreProProject*);
-    FOnProjectLoaded OnProjectLoaded;
-
-    void MarkScriptDirty();
-    void ClearScriptDirty();
-    bool IsScriptDirty() const;
-    bool bShowShotList = false;
-
-
+    // --------------------------------------------------
+    // Tool Window / UI State
+    // --------------------------------------------------
     void SetMainToolWindow(TSharedPtr<SGAS_TestWindow> InWindow)
     {
         MainToolWindow = InWindow;
     }
 
-    // If script is dirty, silently auto-save JSON (no prompts, no popups).
-    // Safe to call repeatedly.
-    void EnsureScriptSaved();
-
-
     void SetShowShotList(bool bInShow)
     {
         bShowShotList = bInShow;
-
     }
 
+    bool bShowShotList = false;
+    bool bIsSaving = false;
+
+
+
     // --------------------------------------------------
-    // Scene Numbering UI
+    // Scene Numbering
     // --------------------------------------------------
+    void ApplySceneNumberingBaseStyle(EGASSceneNumberBaseStyle InBaseStyle);
+
     TArray<TSharedPtr<FString>> SceneNumberingStyleOptions;
     TSharedPtr<FString> SceneNumberingStyleSelected;
     TSharedPtr<SComboBox<TSharedPtr<FString>>> SceneNumberingStyleCombo;
 
-    // Apply scene numbering policy and rebuild views
-    void ApplySceneNumberingBaseStyle(EGASSceneNumberBaseStyle InBaseStyle);
-
-
-    // ------------------------------------------------------------
-    // Shot Marker (Phase 1)
-    // ------------------------------------------------------------
-    bool bShotSelectArmed = false;
+    // --------------------------------------------------
+    // Shot Mode / Shot Editing
+    // --------------------------------------------------
     FSlateColor GetShotButtonTint() const;
-
-    
-    void AddShotMarkerForScene(const FString& SceneBlockId);
-
-
-
-    void GetEnabledCastNames(TArray<TSharedPtr<FString>>& OutNames) const;
+    void EnterShotMarkingMode(const FString& SceneBlockId);
 
     void UpdateShotDescription(const FGuid& ShotId, const FString& NewDescription);
-    void UpdateShotNotes(
-        const FGuid& ShotId,
-        const FString& NewNotes
-    );
-    void UpdateShotNotesExpanded(
-        const FGuid& ShotId,
-        bool bExpanded
-    );
+    void UpdateShotNotes(const FGuid& ShotId, const FString& NewNotes);
+    void UpdateShotNotesExpanded(const FGuid& ShotId, bool bExpanded);
 
-    DECLARE_MULTICAST_DELEGATE(FOnShotListNeedsRefresh);
-
-    FOnShotListNeedsRefresh OnShotListNeedsRefresh;
-
-    void ResumePendingBlocking();
-    void LoadSetForBlocking(const FName& SetId);
     void SetActiveBlockingShot(const FGuid& ShotId);
     FGuid GetActiveBlockingShot() const;
+    void NotifyShotCameraBound(const FGuid& ShotId);
+    void RequestDeleteShotMarker(const FString& MarkerId);
 
-    // Currently loaded blocking level (long package name)
-    FString ActiveBlockingLevelPath;
+    void OnShotIntentChanged();
+
+    void ClearShotSelectionAfterDelete()
+    {
+        ActiveShotMarkerId.Empty();
+    }
+
+    // --------------------------------------------------
+    // Cast / Scene Filtering
+    // --------------------------------------------------
+    void GetEnabledCastNames(TArray<TSharedPtr<FString>>& OutNames) const;
+    bool GetSceneCastForBlockId(const FString& SceneBlockId, TArray<FString>& OutSceneCast) const;
+    void GetEnabledCastNames_SceneAware(TArray<TSharedPtr<FString>>& OutNames) const;
+
+    // --------------------------------------------------
+    // Blocking / Sets / Sequencer
+    // --------------------------------------------------
+    void ResumePendingBlocking();
+    void LoadSetForBlocking(const FName& SetId);
 
     void OpenSetSelectionWindow(const FString& SceneId);
     void AssignSetToPendingScene(FName SelectedSetId);
     void SpawnSelectedSet(const FString& SetPath);
     void SpawnSceneCast(FGASBlock* SceneBlock);
-
-    void NotifyShotCameraBound(const FGuid& ShotId);
+    void StopBlocking();
 
     bool CreateBlockingLevelForScene(
         FGASBlock& SceneBlock,
         const FGASSetDescriptor& SelectedSet
     );
 
-    // ------------------------------------------------------------
-    // Scene-aware character spawn filtering (Blocking)
-    // ------------------------------------------------------------
-    bool GetSceneCastForBlockId(const FString& SceneBlockId, TArray<FString>& OutSceneCast) const;
-    void GetEnabledCastNames_SceneAware(TArray<TSharedPtr<FString>>& OutNames) const;
+    void FinalizeBlockingLevel(UWorld* World);
 
-    bool CreateNewProject(const FString& ProjectName);
-    bool LoadProject(const FString& AssetPath);
-    void PromptCreateNewProject();
-    void PromptOpenProject();
+    FGASBlock* GetSceneBlockFromCursor();
+    FGASBlock* GetSceneBlockById(const FString& BlockId);
+
+    FString GetBlockingLevelPath(const FString& SceneId) const;
+    FString GetSequencePath(const FString& SceneId) const;
+
+    bool IsBlockingLevelOpen(const FString& SceneId);
+    void OpenBlockingLevelIfNeeded(const FString& SceneId);
+    void OpenBlockingLevel(const FString& LevelPath);
+    void HandleMapOpened(const FString& Filename, bool bAsTemplate);
+
+    // --------------------------------------------------
+    // Preview / Camera
+    // --------------------------------------------------
+    const FSlateBrush* GetPreviewBrush() const
+    {
+        return PreviewBrush.IsValid() ? PreviewBrush.Get() : nullptr;
+    }
+
+    UTextureRenderTarget2D* GetCameraPreviewRenderTarget() const
+    {
+        return CameraPreviewRenderTarget;
+    }
+
+    void InitializeCameraPreview(ACineCameraActor* InSourceCamera);
+    void SyncPreviewToRealCamera();
+    void ReleaseCameraPreview();
+    void UpdateCameraFromShotIntent(FGASShotIntent& Intent);
+
+    // --------------------------------------------------
+    // Public Shot-State Flags
+    // --------------------------------------------------
+    bool bShotAddArmed = false;
+    bool bIsShotRangeDragging = false;
+    bool bAllowShotHoverPreview = false;
+    bool bIsResumingShotMode = false;
+    bool bPendingShotResumeAfterMapOpen = false;
+
+    int32 ShotRangeStartParagraph = INDEX_NONE;
+
+    FString ActiveCameraModeSceneId;
+    FString ActiveBlockingLevelPath;
+    FString PendingShotModeSceneId;
+    FString PendingShotModeLevelPath;
+    FString PendingResumeSceneId;
+
+    FDelegateHandle OnMapOpenedHandle;
 
 private:
 
     // --------------------------------------------------
-    // Cast (derived from script, user-editable later)
+    // UI / TEMP STATE
     // --------------------------------------------------
-    TArray<FGASCastMember> CastList;
-    void BuildCastListFromScript();
-    TSharedPtr<SVerticalBox> CastListContainer;
-    void RebuildCastUI();
-    FReply OnOpenCastPopup();
-    void RebuildCastList();
+    FText GetNewProjectAspectText() const;
+    void OnNewProjectAspectChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type SelectInfo);
+    TArray<TSharedPtr<FString>> NewProjectAspectOptions;
+    TSharedPtr<FString> NewProjectSelectedAspect;
 
-
-    // =========================================================
-    // User Interactions
-    // =========================================================
-
-    FReply OnToggleShotMarking();
+    // --------------------------------------------------
+    // UI Commands / Interactions
+    // --------------------------------------------------
     FReply OnToggleEditMode();
     FReply OnToggleSceneNumbers();
     FReply OnAddShotMarkerClicked();
+    FReply OnOpenCastPopup();
 
-    // =========================================================
-    // Rebuild UI Panels
-    // =========================================================
+    FReply OnClearScriptConfirm();
+    FReply OnClearScriptClicked();
 
+    // --------------------------------------------------
+    // Internal Script / Persistence Helpers
+    // --------------------------------------------------
     void RebuildShotList();
+    void BuildCastListFromScript();
+    void RebuildCastUI();
+    void RebuildCastList();
+
     void LoadScriptFromFDX(
         const FString& FilePath,
         const FGASImportNumberingOptions& ImportOptions
     );
 
-
-
     FString GetAuthoritativeScriptJsonPath() const;
     void LoadScriptFromJsonIfExists();
     void SaveScriptToJson();
 
-    float CachedScriptPanelWidth = 1200.f;
+    bool TickShotModeResume(float DeltaTime);
 
-    // =========================================================
-    // Authoritative Script Model (JSON-backed)
-    // =========================================================
-    FGASScript CurrentScript;
-    bool bHasScript = false;
+    // --------------------------------------------------
+    // Blocking UI / Scene Actions
+    // --------------------------------------------------
+    void ScrollToScene(const FGASShotDefinitionListRow& Scene);
+    void ScrollToSceneBlock(const FString& BlockId);
 
-    FReply OnClearScriptConfirm();
-    FReply OnClearScriptClicked();
+    void OnStartBlockingScene(const FString& SceneId);
+    void OnDeleteBlockingScene(const FString& SceneId);
+    void OpenCastWindowForScene(const FString& SceneId);
+    void OnBlockingCastModified();
+    bool bPendingAutoOpenCastWindow = false;
+    bool bIsUpdatingCast = false;
 
-    TWeakPtr<SGAS_TestWindow> MainToolWindow;
+    void DeleteShotMarkerNow(const FString& MarkerId);
 
-    // =========================================================
-    // Script + Shot Data
-    // =========================================================
-    TArray<FShotEntry> ShotList;
+    bool bPendingDeleteShotAfterMapOpen = false;
+    FString PendingDeleteShotMarkerId;
+    FString PendingDeleteShotLevelPath;
 
-    bool bIsShotMarkingActive = false;
-    int32 PendingStartParagraph = INDEX_NONE;
-    bool bIsEditMode = false;
+    TSharedPtr<SWindow> PendingActionWindow;
 
-    // ★ EXISTING — this is the authoritative dirty flag
-    bool bIsScriptDirty = false;
+    void ShowPendingActionWindow(const FString& Message);
+    void UpdatePendingActionWindow(const FString& Message);
+    void ClosePendingActionWindow();
 
-    bool bIsAddMode = false;
-    bool bShowSceneNumbers = false;
-
-    FGuid ActiveBlockingShotId;
 
 #if WITH_EDITOR
     void BindToExistingShotCameras();
@@ -246,34 +314,70 @@ private:
     TSet<TWeakObjectPtr<class AGAS_ShotCameraActor>> BoundShotCameras;
 #endif
 
-    // =========================================================
-    // Project / Document
-    // =========================================================
+    // --------------------------------------------------
+    // Preview Helpers
+    // --------------------------------------------------
+    void UpdateShotIntentPreview();
+    void ConfigurePreviewCameraFilmback(UCineCameraComponent* InCamera) const;
+    FVector2D GetPreviewWidgetSize(float InWidth) const;
+
+    // --------------------------------------------------
+    // Authoritative Model
+    // --------------------------------------------------
+    FGASScript CurrentScript;
+
+    // --------------------------------------------------
+    // Project / Dirty State
+    // --------------------------------------------------
     UPROPERTY()
     UGASPreProProject* ActiveProject = nullptr;
 
-    // =========================================================
-    // Slate UI References
-    // =========================================================
+    bool bIsScriptDirty = false;
+
+    // --------------------------------------------------
+    // Editor / Mode State
+    // --------------------------------------------------
+    bool bIsEditMode = false;
+    bool bIsAddMode = false;
+    bool bShowSceneNumbers = false;
+
+    FGuid ActiveBlockingShotId;
+    FString ActiveShotMarkerId;
+
+    // --------------------------------------------------
+    // Cast State
+    // --------------------------------------------------
+    TArray<FGASCastMember> CastList;
+    TSharedPtr<SVerticalBox> CastListContainer;
+
+    // --------------------------------------------------
+    // Blocking State
+    // --------------------------------------------------
+    FString PendingBlockingSceneId;
+    FGuid ActiveBlockingSceneId;
+    bool bBlockingActive = false;
+
+    TSharedPtr<SWindow> ActiveSetBrowserWindow;
+    TWeakPtr<SWindow> BlockingCastWindow;
+
+    // --------------------------------------------------
+    // Main UI References
+    // --------------------------------------------------
+    TWeakPtr<SGAS_TestWindow> MainToolWindow;
+
     TSharedPtr<SVerticalBox> ShotListContainer;
     TSharedPtr<STextBlock> ShotModeButtonLabel;
     TSharedPtr<SGASScriptPanel> ScriptPanel;
     TSharedPtr<SImage> ShotMarkingIcon;
     TSharedPtr<SImage> NumberingIcon;
-
-
-    // -----------------------------------------
-    // Shot List (Scene rows from script JSON)
-    // -----------------------------------------
-    TArray<TSharedPtr<FGASShotDefinitionListRow>> ShotListItems;
-    void ScrollToScene(const FGASShotDefinitionListRow& Scene);
     TSharedPtr<SScrollBox> ScriptScrollBox;
 
-    void ScrollToSceneBlock(const FString& BlockId);
+    // --------------------------------------------------
+    // Layout / Shot List UI
+    // --------------------------------------------------
+    float CachedScriptPanelWidth = 1200.f;
 
-    // -------------------------------------------------
-    // Shot List UI state
-    // -------------------------------------------------
+    TArray<TSharedPtr<FGASShotDefinitionListRow>> ShotListItems;
     TSet<FString> ExpandedScenes;
 
     float ColExpand = 0.10f;
@@ -287,33 +391,49 @@ private:
 
     float ColShot = 0.10f;
     float ColType = 0.10f;
-
     float ColDes = 0.60f;
     float ColLens = 0.10f;
     float ColCamera = 0.20f;
 
-    void OnStartBlockingScene(const FString& SceneId);
-    void OnDeleteBlockingScene(const FString& SceneId);
-    void OpenCastWindowForScene(FString SceneId);
-    void OnBlockingCastModified();
+    // --------------------------------------------------
+    // Shot Intent Preview State
+    // --------------------------------------------------
+    TSharedPtr<FString> SelectedShotIntentSubject;
+    TSharedPtr<FString> SelectedShotIntentType;
 
+    UWorld* PreviewWorld = nullptr;
 
+    UPROPERTY()
+    ACineCameraActor* ShotCamera = nullptr;
 
+    TWeakObjectPtr<ACineCameraActor> PreviewSourceCamera;
+
+    UPROPERTY(Transient)
+    USceneCaptureComponent2D* PreviewCaptureComponent = nullptr;
+
+    TSharedPtr<FSlateBrush> PreviewBrush;
+    TSharedPtr<FSlateBrush> CameraPreviewBrush;
+    TSharedPtr<SImage> ShotPreviewImage;
 
     // --------------------------------------------------
-    // Shot selection
+    // Camera Preview Render System
     // --------------------------------------------------
-    FString ActiveShotMarkerId;
+    static constexpr int32 PreviewRTWidth = 1280;
+    static constexpr int32 PreviewRTHeight = 720;
+    static constexpr float PreviewAspect = 16.0f / 9.0f;
 
-    // --------------------------------------------------
-     // BLOCKING
-     // --------------------------------------------------
-    FString PendingBlockingSceneId;
-    TSharedPtr<SWindow> ActiveSetBrowserWindow;
-    TWeakPtr<SWindow> BlockingCastWindow;
+    UPROPERTY(Transient)
+    UTextureRenderTarget2D* CameraPreviewRenderTarget = nullptr;
 
-    // Blocking State
-    FGuid ActiveBlockingSceneId;
-    bool bBlockingActive = false;
+    UPROPERTY()
+    TObjectPtr<ACineCameraActor> PreviewCameraActor = nullptr;
 
+    UPROPERTY()
+    TObjectPtr<UCineCameraComponent> PreviewCameraComponent = nullptr;
+
+    UPROPERTY()
+    TObjectPtr<USceneCaptureComponent2D> PreviewSceneCapture = nullptr;
+
+    UPROPERTY()
+    UTextureRenderTarget2D* ShotPreviewRenderTarget = nullptr;
 };

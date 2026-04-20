@@ -9,10 +9,11 @@
 #include "GASScriptAsset.h"
 
 #include "Input/Reply.h"
-
+#include "Engine/TextureRenderTarget2D.h"
 
 #include "ScriptModel.h"
 #include "ScriptLayoutEngine.h"
+#include "SGAS_ScriptTab.h"
 
 
 // Paragraph click delegate
@@ -23,6 +24,13 @@ DECLARE_DELEGATE_OneParam(FOnRequestExternalScroll, float);
 
 
 class UGASShotListSelectionState;
+class UGASScript;
+
+class UTextureRenderTarget2D;
+class ACineCameraActor;
+class USceneCaptureComponent2D;
+
+class SGAS_ScriptTab;
 
 
 // =====================================================
@@ -53,6 +61,8 @@ public:
     // =========================================================
     SLATE_BEGIN_ARGS(SGASScriptPanel) {}
         SLATE_EVENT(FOnParagraphClicked, OnParagraphClicked)
+        SLATE_ARGUMENT(TSharedPtr<SGAS_ScriptTab>, ScriptTab)
+        SLATE_ARGUMENT(TWeakPtr<SGAS_ScriptTab>, OwnerScriptTab)
     SLATE_END_ARGS()
 
 
@@ -108,10 +118,6 @@ public:
     void ScrollToParagraph(int32 ParagraphIndex);
     void ScrollToBlockId(const FString& BlockId);
 
-    // Returns BlockId for the currently selected paragraph (Edit Mode selection).
-    // Empty if nothing is selected.
-    FString GetSelectedBlockId() const;
-
     // =========================================================
     // Shot Selection
     // =========================================================
@@ -120,14 +126,30 @@ public:
     void SetAddShotArmed(bool bArmed);
     void SetShotAddArmed(bool bInArmed);
 
+    void ClearPanelShotSelection()
+    {
+        HoveredShotMarkerId.Empty();
+        SelectedShotMarkerId.Empty();
+    }
+
     DECLARE_DELEGATE_OneParam(FOnShotActivated, const FGuid&);
 
     FOnShotActivated OnShotActivated;
 
+    void OnEnterShotMarkingMode(const FString& SceneId);
+
+    void SetScriptTab(TWeakPtr<SGAS_ScriptTab> InTab)
+    {
+        ScriptTab = InTab;
+    }
+
+    void SetOwnerScriptTab(TWeakPtr<SGAS_ScriptTab> InOwnerScriptTab)
+    {
+        OwnerScriptTab = InOwnerScriptTab;
+    }
+
+
     // Shot range selection (drag)
-    bool bIsShotRangeDragging = false;
-    int32 ShotRangeStartParagraph = INDEX_NONE;
-    int32 ShotRangeCurrentParagraph = INDEX_NONE;
     void SetEnabledCastNames(const TArray<TSharedPtr<FString>>& InNames);
     bool bPageBreakDidDrag = false;
 
@@ -153,8 +175,16 @@ public:
 
     FGASScript* GetSourceScript() const { return SourceScript; }
 
-    void OpenShotIntentPopup(const FString& MarkerId, bool bIsNewShot = false);
+    FString GetSelectedBlockId() const;
 
+    TWeakPtr<SGAS_ScriptTab> ScriptTab;
+
+    void UpdateShotPreviewCamera(const FString& CharacterId, EGASShotType ShotType, ACineCameraActor* TargetCamera);
+    TWeakObjectPtr<ACineCameraActor> ActiveShotPreviewCamera;
+
+    void OpenShotIntentPopup(const FString& MarkerId, const FString& SceneId, bool bHasBlocking);
+
+    FGASBlock* GetSceneBlockById(const FString& SceneId);
 
 private:
 
@@ -214,16 +244,12 @@ private:
 
     virtual bool SupportsKeyboardFocus() const override { return true; }
 
-
     // ------------------------------------------------------------
     // Shot Add (Rubberband Commit)
     // ------------------------------------------------------------
-    bool bShotAddArmed = false;
 
     float ShotRangeStartX = 0.f;
     float ShotRangeStartY = -1.f;
-
-
 
     int32 HoveredShotParagraphIndex = INDEX_NONE;
 
@@ -237,18 +263,14 @@ private:
     bool bIgnoreNextExternalScrollOnSetScript = false;
 
 
-
     int32 CachedDraggingShotIndex = INDEX_NONE;
     void EndAllDrags();
     bool bDragMoved = false;
         
-
     FString HitTestShot(const FVector2D& LocalPos) const;
     FString HitTestShotTail(const FVector2D& LocalPos) const;
 
-
     int32 FindOwningSceneParagraphIndex(int32 StartParagraphIndex) const;
-
 
     int32 PendingShotParagraphIndex = INDEX_NONE;
 
@@ -297,9 +319,6 @@ private:
     TSharedPtr<SWidget> ShotTooltipWidget;
     TSharedPtr<SWindow> ShotHoverTooltipWindow;
     FString ShotHoverTooltipShotId;
-
-
-
 
     // =========================================================
     // Edit Pipeline
@@ -424,12 +443,37 @@ private:
         const FGeometry& MyGeometry,
         const FPointerEvent& MouseEvent
     );
-
+        
     bool CanChangeBlockType(int32 ParagraphIndex, EGASBlockType NewType) const;
 
     void ApplyBlockTypeChange(int32 ParagraphIndex, EGASBlockType NewType);
 
 
     int32 ResolveParagraphForShot(float LocalY) const;
+
+    // --------------------------------------------------
+    // SHOT PREVIEW
+    // --------------------------------------------------
+
+    UTextureRenderTarget2D* ShotPreviewRenderTarget = nullptr;
+
+    ACineCameraActor* ShotPreviewCamera = nullptr;
+    USceneCaptureComponent2D* ShotPreviewCapture = nullptr;
+
+    TSharedPtr<SImage> ShotPreviewImage;
+
+    TWeakPtr<class SGAS_ScriptTab> OwnerScriptTab;
+
+    // --------------------------------------------------
+    // Shot Drag State (UI ONLY)
+    // --------------------------------------------------
+
+    bool bIsShotRangeDragging = false;
+    bool bAllowShotHoverPreview = true;
+
+    int32 ShotRangeStartParagraph = INDEX_NONE;
+    int32 ShotRangeCurrentParagraph = INDEX_NONE;
+
+
 
 };

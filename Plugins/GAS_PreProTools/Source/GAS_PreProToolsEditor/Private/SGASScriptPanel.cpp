@@ -3,8 +3,6 @@
 // This is intentional for now and will be cleaned up when the Shot List
 // feature formalizes rendered shot data from markers.
 
-
-
 #include "SGASScriptPanel.h"
 #include "SGAS_ScriptTab.h"
 #include "ScriptFormatRules.h"
@@ -20,19 +18,34 @@
 #include "GAS_ShotIntentTypes.h"
 #include "ScriptLayoutEngine.h"
 #include "GASPreProLog.h"
+#include "GAS_StandInActor.h"
+#include "SGAS_ShotIntentWindow.h"
 
 #include "Rendering/DrawElements.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/SToolTip.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/Input/SComboBox.h"
 
 #include "SlateBasics.h"
 #include "SlateExtras.h"
 #include "Containers/Ticker.h"
 #include "Misc/Optional.h"
 
-
+#include "CineCameraActor.h"
+#include "Components/SceneCaptureComponent2D.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "EngineUtils.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Editor.h"
+#include "CineCameraComponent.h"
 
 // =============================================================
 //  Constants
@@ -53,6 +66,8 @@ bool bIsResizingShotTail = false;
 FString ResizingShotMarkerId;
 float ShotTailGhostY = -1.f;
 static float ShotTailResizeStartY = -1.f;
+
+static ACineCameraActor* GLastCreatedCamera = nullptr;
 
 static TArray<TSharedPtr<EGASShotType>> ShotTypeOptions = {
     MakeShared<EGASShotType>(EGASShotType::ECU),
@@ -263,262 +278,54 @@ struct FGASShotIntentWorkingCopy
 
 // =============================================================
 // Shot Intent Preview Widget (Lightweight, Procedural)
+// Local to SGASScriptPanel (not reusable yet)
 // =============================================================
 class SGASShotPreview : public SCompoundWidget
 {
 public:
+
     SLATE_BEGIN_ARGS(SGASShotPreview) {}
-        SLATE_ARGUMENT(FGASShotIntent*, ShotIntent)
+        SLATE_ARGUMENT(UTextureRenderTarget2D*, RenderTarget)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs)
     {
-        ShotIntent = InArgs._ShotIntent;
+        RenderTarget = InArgs._RenderTarget;
+
+        const float AspectRatio = 2.39f;
+        const float Width = 400.f;
+        const float Height = Width / AspectRatio;
 
         ChildSlot
             [
                 SNew(SBorder)
-                    .Padding(12.f)
-                    .BorderImage(FCoreStyle::Get().GetBrush("ToolPanel.GroupBorder"))
+                    .Padding(4)
                     [
-                        SNew(SOverlay)
+                        SNew(SBox)
+                            .WidthOverride(Width)
+                            .HeightOverride(Height)
+                            [
+                                SNew(SImage)
+                                    .Image(this, &SGASShotPreview::GetPreviewBrush)
+                            ]
                     ]
             ];
     }
 
-    virtual bool ComputeVolatility() const override
-    {
-        return true;
-    }
-
-
-
-    virtual int32 OnPaint(
-        const FPaintArgs& Args,
-        const FGeometry& AllottedGeometry,
-        const FSlateRect& MyCullingRect,
-        FSlateWindowElementList& OutDrawElements,
-        int32 LayerId,
-        const FWidgetStyle& InWidgetStyle,
-        bool bParentEnabled
-    ) const override
-    {
-        bParentEnabled; // force Slate to treat as volatile draw
-
-
-        if (!ShotIntent)
-            return LayerId;
-
-        const FVector2D Size = AllottedGeometry.GetLocalSize();
-        const FVector2D Center = Size * 0.5f;
-
-        FVector2D SubjectOffset = FVector2D::ZeroVector;
-        float SubjectScale = 1.0f;
-
-
-        const float BaseSubjectScale =
-            ShotIntent->ShotType == EGASShotType::ECU ? 0.65f :
-            ShotIntent->ShotType == EGASShotType::CU ? 0.55f :
-            ShotIntent->ShotType == EGASShotType::MS ? 0.40f :
-            0.25f;
-
-        // -------------------------------------------------
-        // Lens → FOV scaling (wider = smaller subject)
-        // -------------------------------------------------
-        const float FOV = LensToFOV(ShotIntent->Lens);
-        const float ReferenceFOV = 47.f; // 50mm
-        SubjectScale *= ReferenceFOV / FOV;
-
-        const float Time = (float)FSlateApplication::Get().GetCurrentTime();
-
-        // -------------------------------------------------
-        // Subject silhouette by Shot Type
-        // -------------------------------------------------
-        const FLinearColor SilhouetteColor(0.82f, 0.82f, 0.82f, 1.f);
-
-        // Base body proportions
-        const float HeadRadius = Size.X * 0.065f * SubjectScale;
-        const float TorsoWidth = Size.X * 0.18f * SubjectScale;
-        const float TorsoHeight = Size.Y * 0.28f * SubjectScale;
-        const float LegHeight = Size.Y * 0.22f * SubjectScale;
-
-        FVector2D HeadCenter = Center + SubjectOffset;
-
-
-        FVector2D TorsoSize = FVector2D(TorsoWidth, TorsoHeight);
-        FVector2D TorsoPos = FVector2D(
-            HeadCenter.X - TorsoSize.X * 0.5f,
-            HeadCenter.Y - TorsoSize.Y * 0.5f
-        );
-
-
-        // -------------------------------------------------
-        // Camera Behavior animation (illustrative only)
-        // -------------------------------------------------
-        switch (ShotIntent->CameraBehavior)
-        {
-        case EGASCameraBehavior::Pan:
-            SubjectOffset.X += FMath::Sin(Time * 1.2f) * 20.f;
-            break;
-
-        case EGASCameraBehavior::Tilt:
-            SubjectOffset.Y += FMath::Sin(Time * 1.2f) * 20.f;
-            break;
-
-        case EGASCameraBehavior::Push:
-            SubjectScale *= 1.f + FMath::Sin(Time) * 0.035f;
-            break;
-
-        case EGASCameraBehavior::Pull:
-            SubjectScale *= 1.f - FMath::Sin(Time) * 0.035f;
-            break;
-
-
-        case EGASCameraBehavior::Handheld:
-            SubjectOffset.X += FMath::PerlinNoise1D(Time * 3.f) * 8.f;
-            SubjectOffset.Y += FMath::PerlinNoise1D(Time * 3.7f) * 8.f;
-            break;
-
-        default:
-            break;
-        }
-
-        if (ShotIntent->Framing == EGASFramingBias::Left)  SubjectOffset.X -= 20.f;
-        if (ShotIntent->Framing == EGASFramingBias::Right) SubjectOffset.X += 20.f;
-        if (ShotIntent->Framing == EGASFramingBias::High)  SubjectOffset.Y -= 20.f;
-        if (ShotIntent->Framing == EGASFramingBias::Low)   SubjectOffset.Y += 20.f;
-
-        // -----------------------------
-        // ECU / CU — HEAD ONLY
-        // -----------------------------
-        if (ShotIntent->ShotType == EGASShotType::ECU ||
-            ShotIntent->ShotType == EGASShotType::CU)
-        {
-            FSlateDrawElement::MakeBox(
-                OutDrawElements,
-                LayerId++,
-                AllottedGeometry.ToPaintGeometry(
-                    HeadCenter - FVector2D(HeadRadius, HeadRadius),
-                    FVector2D(HeadRadius * 2.f, HeadRadius * 2.f)
-                ),
-                FCoreStyle::Get().GetBrush("WhiteBrush"),
-                ESlateDrawEffect::None,
-                SilhouetteColor
-            );
-        }
-
-        // -----------------------------
-        // MCU / MS — HEAD + TORSO
-        // -----------------------------
-        else if (ShotIntent->ShotType == EGASShotType::MCU ||
-            ShotIntent->ShotType == EGASShotType::MS)
-        {
-            // Head
-            FSlateDrawElement::MakeBox(
-                OutDrawElements,
-                LayerId++,
-                AllottedGeometry.ToPaintGeometry(
-                    HeadCenter - FVector2D(HeadRadius, HeadRadius + TorsoHeight * 0.6f),
-                    FVector2D(HeadRadius * 2.f, HeadRadius * 2.f)
-                ),
-                FCoreStyle::Get().GetBrush("WhiteBrush"),
-                ESlateDrawEffect::None,
-                SilhouetteColor
-            );
-
-            // Torso
-            FSlateDrawElement::MakeBox(
-                OutDrawElements,
-                LayerId++,
-                AllottedGeometry.ToPaintGeometry(
-                    TorsoPos,
-                    TorsoSize
-                ),
-                FCoreStyle::Get().GetBrush("WhiteBrush"),
-                ESlateDrawEffect::None,
-                SilhouetteColor
-            );
-        }
-
-        // -----------------------------
-        // MLS / WS / EWS — FULL BODY
-        // -----------------------------
-        else
-        {
-            // Head
-            FSlateDrawElement::MakeBox(
-                OutDrawElements,
-                LayerId++,
-                AllottedGeometry.ToPaintGeometry(
-                    FVector2D(HeadCenter.X - HeadRadius, Center.Y - TorsoHeight * 0.7f),
-                    FVector2D(HeadRadius * 2.f, HeadRadius * 2.f)
-                ),
-                FCoreStyle::Get().GetBrush("WhiteBrush"),
-                ESlateDrawEffect::None,
-                SilhouetteColor
-            );
-
-            // Torso
-            FSlateDrawElement::MakeBox(
-                OutDrawElements,
-                LayerId++,
-                AllottedGeometry.ToPaintGeometry(
-                    TorsoPos,
-                    TorsoSize
-                ),
-                FCoreStyle::Get().GetBrush("WhiteBrush"),
-                ESlateDrawEffect::None,
-                SilhouetteColor
-            );
-
-            // Legs
-            FSlateDrawElement::MakeBox(
-                OutDrawElements,
-                LayerId++,
-                AllottedGeometry.ToPaintGeometry(
-                    FVector2D(
-                        HeadCenter.X - TorsoWidth * 0.25f,
-                        TorsoPos.Y + TorsoHeight
-                    ),
-                    FVector2D(
-                        TorsoWidth * 0.5f,
-                        LegHeight
-                    )
-                ),
-                FCoreStyle::Get().GetBrush("WhiteBrush"),
-                ESlateDrawEffect::None,
-                SilhouetteColor
-            );
-        }
-
-
-
-
-
-        // -------------------------------------------------
-        // Draw frame
-        // -------------------------------------------------
-        FSlateDrawElement::MakeBox(
-            OutDrawElements,
-            LayerId++,
-            AllottedGeometry.ToPaintGeometry(),
-            FCoreStyle::Get().GetBrush("WhiteBrush"),
-            ESlateDrawEffect::None,
-            FLinearColor(0.f, 0.f, 0.f, 0.85f)
-        );
-
-
-        // force continuous repaint for animation
-        const_cast<SGASShotPreview*>(this)->Invalidate(EInvalidateWidget::Paint);
-
-        return LayerId;
-    }
-
 private:
-    FGASShotIntent* ShotIntent = nullptr;
+    mutable FSlateBrush PreviewBrush;
 
-    mutable bool bDirty = true;
+    const FSlateBrush* GetPreviewBrush() const
+    {
+        if (!RenderTarget || !RenderTarget->IsValidLowLevel())
+            return nullptr;
 
+        PreviewBrush.SetResourceObject(RenderTarget);
+        PreviewBrush.ImageSize = FVector2D(640.f, 360.f);
+
+        return &PreviewBrush;
+    }
+    UTextureRenderTarget2D* RenderTarget = nullptr;
 };
 
 
@@ -528,6 +335,9 @@ private:
 void SGASScriptPanel::Construct(const FArguments& InArgs)
 {
     OnParagraphClicked = InArgs._OnParagraphClicked;
+
+    ScriptTab = InArgs._ScriptTab;
+    OwnerScriptTab = InArgs._OwnerScriptTab;
 
     SetCanTick(true);
 
@@ -651,14 +461,24 @@ void SGASScriptPanel::RebuildLayout()
         if (M.MarkerType != EGASMarkerType::ShotMarker)
             continue;
 
-        if (!RenderedParagraphs.IsValidIndex(M.ParagraphIndex))
+        int32 ValidParaIndex = INDEX_NONE;
+
+        for (int32 i = 0; i < RenderedParagraphs.Num(); ++i)
+        {
+            if (RenderedParagraphs[i].BlockId == M.BlockId)
+            {
+                ValidParaIndex = i;
+                break;
+            }
+        }
+
+        if (ValidParaIndex == INDEX_NONE)
             continue;
+
+        const FRenderedParagraph& P = RenderedParagraphs[ValidParaIndex];
 
         if (M.ShotLineEndY < 0.f)
             continue;
-
-        const FRenderedParagraph& P =
-            RenderedParagraphs[M.ParagraphIndex];
 
         const float ParagraphEndY =
             P.TopY + P.Height;
@@ -925,7 +745,7 @@ void SGASScriptPanel::OpenEditActionDialog(
     TSharedRef<SWindow> EditWindow =
         SNew(SWindow)
         .Title(WindowTitle)
-        .ClientSize(FVector2D(600.f, 300.f))
+        .ClientSize(FVector2D(550.f, 600.f))
         .SupportsMinimize(false)
         .SupportsMaximize(false);
 
@@ -1525,14 +1345,17 @@ void SGASScriptPanel::ResetEditorModes()
     bAddMode = false;
 
     // Shot add / selection modes
-    bShotAddArmed = false;
+    if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+    {
+        Tab->bShotAddArmed = false;
+    }
+
     bIsShotRangeDragging = false;
     bIsShotSelectMode = false;
     bIsDraggingShot = false;
 
     // Shot UI state
-    HoveredShotMarkerId.Empty();
-    SelectedShotMarkerId.Empty();
+    ClearPanelShotSelection();
     HoveredShotParagraphIndex = INDEX_NONE;
 
     // Pending add/edit rollback safety
@@ -1909,15 +1732,7 @@ void SGASScriptPanel::ScrollToBlockId(const FString& BlockId)
     }
 }
 
-FString SGASScriptPanel::GetSelectedBlockId() const
-{
-    if (!RenderedParagraphs.IsValidIndex(SelectedParagraphIndex))
-    {
-        return FString();
-    }
 
-    return RenderedParagraphs[SelectedParagraphIndex].BlockId;
-}
 
 int32 SGASScriptPanel::HitTestParagraph(float ScriptY) const
 {
@@ -1960,6 +1775,47 @@ int32 SGASScriptPanel::ResolveParagraphForShot(float ScriptY) const
     }
 
     return INDEX_NONE;
+}
+
+FString FGASMarker::GetShotLabel(EGASShotNumberingPolicy Policy) const
+{
+    int32 Index = SceneShotIndex;
+
+    switch (Policy)
+    {
+    case EGASShotNumberingPolicy::Numeric_1s:
+        return FString::FromInt(Index + 1);
+
+    case EGASShotNumberingPolicy::Numeric_10s:
+        return FString::FromInt((Index + 1) * 10);
+
+    case EGASShotNumberingPolicy::Alphabetic:
+    {
+        int32 LetterIndex = Index % 26;
+        TCHAR Letter = 'A' + LetterIndex;
+        return FString::Chr(Letter);
+    }
+
+    default:
+        return FString::FromInt(Index + 1);
+    }
+}
+
+static AGAS_StandInActor* FindStandInByCharacter(UWorld* World, const FString& CharacterId)
+{
+    if (!World || CharacterId.IsEmpty())
+        return nullptr;
+
+    for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
+    {
+        AGAS_StandInActor* Actor = *It;
+        if (Actor && Actor->GAS_CharacterId.Equals(CharacterId, ESearchCase::IgnoreCase))
+        {
+            return Actor;
+        }
+    }
+
+    return nullptr;
 }
 
 void SGASScriptPanel::CommitShotAtParagraph(
@@ -2037,8 +1893,11 @@ void SGASScriptPanel::CommitShotAtParagraph(
 
     FGASMarker NewMarker;
     NewMarker.Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+    const FString NewMarkerId = NewMarker.Id;
     NewMarker.MarkerType = EGASMarkerType::ShotMarker;
     NewMarker.BlockId = SceneBlockId;
+    NewMarker.SceneShotIndex = InsertIndex;
+    UE_LOG(LogTemp, Warning, TEXT("NEW MARKER SceneShotIndex: %d"), NewMarker.SceneShotIndex);
     NewMarker.ShotOrigin = EGASShotOrigin::User;
 
     // --------------------------------------------------
@@ -2066,15 +1925,14 @@ void SGASScriptPanel::CommitShotAtParagraph(
         NewMarker.ShotIndex = MaxExistingShotNumber + 1;
         break;
 
+    case EGASShotNumberingPolicy::Alphabetic:
+        NewMarker.ShotIndex = MaxExistingShotNumber + 1;
+        break;
+
     default:
         NewMarker.ShotIndex = MaxExistingShotNumber + 1;
         break;
     }
-
-
-
-
-
 
     // Position (SCRIPT SPACE ONLY)
     NewMarker.ScreenX = CommitX - (ShotPillWidth * 0.5f);
@@ -2082,10 +1940,6 @@ void SGASScriptPanel::CommitShotAtParagraph(
     NewMarker.ScreenY = ShotStartScriptY;
     NewMarker.ShotLineStartY = ShotStartScriptY + ShotPillHeight;
     NewMarker.ShotLineEndY = ShotEndScriptY;
-
-
-
-
 
     int32 ParaIndex = HitTestParagraph(ShotStartScriptY);
 
@@ -2144,7 +1998,7 @@ void SGASScriptPanel::CommitShotAtParagraph(
     SourceScript->Markers.Add(NewMarker);
 
     // ------------------------------------------------------------
-    // Auto-create Shot Intent (default) BEFORE popup
+    // Auto-create Shot Intent
     // ------------------------------------------------------------
     FGASShotIntent NewIntent;
     NewIntent.MarkerId = NewMarker.Id;
@@ -2152,9 +2006,199 @@ void SGASScriptPanel::CommitShotAtParagraph(
     NewIntent.Lens = EGASLensIntent::L50;
     NewIntent.CameraBehavior = EGASCameraBehavior::Static;
     NewIntent.Framing = EGASFramingBias::Center;
-    NewIntent.SubjectId = TEXT("");
+    NewIntent.SubjectId = TEXT("BOY");
 
     SourceScript->ShotIntents.Add(NewMarker.Id, NewIntent);
+
+    FGASShotIntent* CreatedIntent =
+        SourceScript->ShotIntents.Find(NewMarker.Id);
+
+    if (CreatedIntent)
+    {
+        CreatedIntent->CameraName = TEXT("TEMP");
+    }
+
+    if (CreatedIntent)
+    {
+        UWorld* World = nullptr;
+
+#if WITH_EDITOR
+        if (GEditor)
+        {
+            World = GEditor->GetEditorWorldContext().World();
+        }
+#endif
+
+        if (World && World->WorldType == EWorldType::Editor)
+        {
+            FActorSpawnParameters Params;
+            Params.Name = MakeUniqueObjectName(
+                World,
+                ACineCameraActor::StaticClass(),
+                FName(*FString::Printf(TEXT("ShotCam_%s"), *NewMarker.Id))
+            );
+            Params.SpawnCollisionHandlingOverride =
+                ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+            ACineCameraActor* Cam =
+                World->SpawnActor<ACineCameraActor>(
+                    ACineCameraActor::StaticClass(),
+                    FTransform::Identity,
+                    Params
+                );
+
+            GLastCreatedCamera = Cam;
+
+            if (Cam)
+            {
+                if (!IsValid(Cam))
+                {
+                    UE_LOG(LogGASPrePro, Error, TEXT("Shot camera invalid right after spawn"));
+                    return;
+                }
+
+                GLastCreatedCamera = Cam;
+                CreatedIntent->CameraActor = Cam;
+
+
+                CreatedIntent->CameraName = Cam->GetName();
+
+                // -------------------------------------------------
+                // Camera Framing (ShotIntent Driven)
+                // -------------------------------------------------
+
+                // Resolve Subject
+                AGAS_StandInActor* TargetActor = nullptr;
+
+                if (!CreatedIntent->SubjectId.IsEmpty())
+                {
+                    TargetActor = FindStandInByCharacter(World, CreatedIntent->SubjectId);
+                }
+
+                // -------------------------------------------------
+                // DEBUG: Actor orientation
+                // -------------------------------------------------
+
+                if (TargetActor)
+                {
+                    UWorld* DebugWorld = TargetActor->GetWorld();
+                    const FVector Loc = TargetActor->GetActorLocation();
+                }
+
+                USkeletalMeshComponent* MeshComp = TargetActor
+                    ? TargetActor->FindComponentByClass<USkeletalMeshComponent>()
+                    : nullptr;
+
+                // Target location (mesh if available)
+                FVector TargetLocation = FVector::ZeroVector;
+
+                if (MeshComp)
+                {
+                    TargetLocation = MeshComp->GetComponentLocation();
+                    TargetLocation.Z += 140.f; // eye level
+                }
+                else if (TargetActor)
+                {
+                    TargetLocation = TargetActor->GetActorLocation();
+                }
+                else
+                {
+                    TargetLocation = FVector(0.f, 0.f, 100.f);
+                }
+
+                // -------------------------------------------------
+                // Camera Solve (mesh forward)
+                // -------------------------------------------------
+                // -------------------------------------------------
+                // Camera Solve (ABSOLUTE WORLD TEST)
+                // -------------------------------------------------
+
+                const float Distance = 400.f;
+
+                // -------------------------------------------------
+                // Camera Solve (actor-facing forward)
+                // -------------------------------------------------
+
+                FVector Forward = TargetActor
+                    ? TargetActor->GetActorForwardVector()
+                    : FVector::ForwardVector;
+
+                FVector CameraLocation =
+                    TargetLocation + (Forward * Distance);
+
+                // DEBUG
+                DrawDebugSphere(
+                    World,
+                    CameraLocation,
+                    25.f,
+                    12,
+                    FColor::Yellow,
+                    false,
+                    10.f
+                );
+
+                // DEBUG
+                DrawDebugSphere(
+                    World,
+                    CameraLocation,
+                    25.f,
+                    12,
+                    FColor::Red,
+                    false,
+                    10.f
+                );
+
+                DrawDebugSphere(
+                    World,
+                    CameraLocation,
+                    25.f,
+                    12,
+                    FColor::Red,
+                    false,
+                    10.f
+                );
+
+                UE_LOG(LogTemp, Warning, TEXT("Camera: %s"), *CameraLocation.ToString());
+                UE_LOG(LogTemp, Warning, TEXT("Target: %s"), *TargetLocation.ToString());
+
+                // Look at actor
+                FVector Direction = (TargetLocation - CameraLocation).GetSafeNormal();
+                FRotator LookAtRotation = Direction.Rotation();
+
+                // -------------------------------------------------
+                // Apply
+                // -------------------------------------------------
+                Cam->SetActorLocation(CameraLocation);
+                Cam->SetActorRotation(LookAtRotation);
+
+                if (OwnerScriptTab.IsValid())
+                {
+                    TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
+                    UE_LOG(LogTemp, Warning, TEXT("FINAL CAM LOC BEFORE PREVIEW: %s"),
+                        *Cam->GetActorLocation().ToString());
+                    // TEMP CRASH ISOLATION
+                    // Tab->InitializeCameraPreview(Cam);
+                }
+
+#if WITH_EDITOR
+                FString ShotLabel = FString::Printf(
+                    TEXT("ShotCam_%s"),
+                    *NewMarker.GetShotLabel(SourceScript->ShotNumberingPolicy)
+                );
+
+                Cam->SetActorLabel(ShotLabel, true);
+#endif
+
+                UE_LOG(LogGASPrePro, Warning, TEXT("Shot Camera Assigned: %s"), *Cam->GetName());
+
+                if (OwnerScriptTab.IsValid())
+                {
+                    // TEMP CRASH ISOLATION
+                    // OwnerScriptTab.Pin()->InitializeCameraPreview(Cam);
+                }
+            }
+        }
+    }
 
     // ------------------------------------------------------------
     // Notify + redraw
@@ -2173,13 +2217,14 @@ void SGASScriptPanel::CommitShotAtParagraph(
     FTSTicker::GetCoreTicker().AddTicker(
         FTickerDelegate::CreateLambda(
             [WeakThis = TWeakPtr<SGASScriptPanel>(SharedThis(this)),
-            MarkerId = NewMarker.Id](float)
+            NewMarkerId,
+            SceneBlockId](float)
             {
                 if (WeakThis.IsValid())
                 {
-                    WeakThis.Pin()->OpenShotIntentPopup(MarkerId, true);
+                    WeakThis.Pin()->OpenShotIntentPopup(NewMarkerId, SceneBlockId, true);
                 }
-                return false; // one-shot
+                return false;
             }
         )
     );
@@ -2250,7 +2295,6 @@ FText SGASScriptPanel::GetHoveredShotTooltipText() const
         FString::Join(Parts, TEXT(" · "))
     );
 }
-
 
 
 bool SGASScriptPanel::GetShotPillLocalPos(
@@ -2653,7 +2697,7 @@ int32 SGASScriptPanel::OnPaint(
                     // Shot label — computed dynamically (NO cached ShotId)
                     // ------------------------------------------------------------
                     const FString ShotLabel =
-                        FString::FromInt(Shot->ShotIndex);
+                        Shot->GetShotLabel(SourceScript->ShotNumberingPolicy);
 
 
 
@@ -2891,7 +2935,10 @@ int32 SGASScriptPanel::OnPaint(
     // ------------------------------------------------------------
     // Shot Add Cursor Icon + LIVE PREVIEW LINE DONE
     // ------------------------------------------------------------
-    if (bShotAddArmed)
+    TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
+    const bool bShotModeActive = Tab.IsValid() && Tab->bShotAddArmed;
+
+    if (bShotModeActive && ShotGhostY >= 0.f)
     {
         const float IconY = ShotGhostY - ScrollOffsetY;
 
@@ -2916,7 +2963,7 @@ int32 SGASScriptPanel::OnPaint(
         // --------------------------------------------------------
         // Live shot line preview (while LMB held) DONE
         // --------------------------------------------------------
-        if (bIsShotRangeDragging)
+        if (bIsShotRangeDragging && ShotGhostY >= 0.f)
         {
             const float LineX = ShotRangeStartX;
 
@@ -2960,8 +3007,6 @@ int32 SGASScriptPanel::OnPaint(
 
     }
 #endif
-
-
 
     return LayerId + 10;
 }
@@ -3010,6 +3055,11 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     const FPointerEvent& MouseEvent
 )
 {
+    UE_LOG(LogGASPrePro, Warning, TEXT("[ShotInput][Down] FIRED"));
+
+    TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
+    const bool bShotModeActive = Tab.IsValid() && Tab->bShotAddArmed;
+
     const FVector2D LocalPos =
         MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 
@@ -3086,27 +3136,23 @@ FReply SGASScriptPanel::OnMouseButtonDown(
                                         .Text(FText::FromString(TEXT("Delete")))
                                         .OnClicked_Lambda([this, ConfirmWindow, HitShotId, SceneBlockId, DeletedShotIndex]()
                                             {
-                                                // UNDO SNAPSHOT — before mutation
-                                                SourceScript->CaptureUndoSnapshot();
+                                                if (SourceScript)
+                                                {
+                                                    SourceScript->CaptureUndoSnapshot();
+                                                }
 
-                                                // ------------------------------------------------------------
-                                                // Remove Shot Marker
-                                                // ------------------------------------------------------------
-                                                SourceScript->Markers.RemoveAll(
-                                                    [&](const FGASMarker& M)
-                                                    {
-                                                        return M.Id == HitShotId;
-                                                    }
-                                                );
+                                                if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+                                                {
+                                                    Tab->RequestDeleteShotMarker(HitShotId);
+                                                }
 
-                                                // ------------------------------------------------------------
-                                                // Remove Shot Intent (paired by MarkerId)
-                                                // ------------------------------------------------------------
-                                                SourceScript->ShotIntents.Remove(HitShotId);
-                                                SelectedShotMarkerId.Empty();
-                                                HoveredShotMarkerId.Empty();
+                                                ClearPanelShotSelection();
 
-                                                OnScriptMutated.ExecuteIfBound();
+                                                if (OnScriptMutated.IsBound())
+                                                {
+                                                    OnScriptMutated.Execute();
+                                                }
+
                                                 bNeedsRedraw = true;
 
                                                 ConfirmWindow->RequestDestroyWindow();
@@ -3153,7 +3199,8 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     // ------------------------------------------------------------
     // Guard: do not start a new interaction while dragging
     // ------------------------------------------------------------
-    if (bIsDraggingShot || bIsResizingShotTail || bIsDraggingPageBreak || bIsShotRangeDragging)
+    if (bIsDraggingShot || bIsResizingShotTail || bIsDraggingPageBreak ||
+        bIsShotRangeDragging)
     {
         return FReply::Handled();
     }
@@ -3276,52 +3323,53 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     }
 
 
-    // ------------------------------------------------------------
-    // Shot Range Drag START
-    // ------------------------------------------------------------
-    if (bShotAddArmed &&
-        MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-    {
-        const float ScriptY = LocalPos.Y + ScrollOffsetY;
-
-        const int32 ParaIndex = ResolveParagraphForShot(ScriptY);
-
-
-        if (ParaIndex != INDEX_NONE)
-        {
-
-            // -------------------------------------------------
-            // Block new shot markers while Shot Intent popup is open
-            // -------------------------------------------------
-            if (bShotIntentPopupOpen)
-            {
-                return FReply::Handled();
-            }
-
-            bIsShotRangeDragging = true;
-
-            ShotRangeStartParagraph = ParaIndex;
-            ShotRangeStartX = LocalPos.X;
-
-            ShotRangeStartLocalY = LocalPos.Y;   // LOCAL (commit)
-            ShotRangeStartY = ScriptY;      // SCRIPT (ghost baseline)
-
-            ShotGhostY = ShotRangeStartLocalY;       // ← MATCH SPACE ON FRAME 0
-
-            ShotRangeCurrentParagraph = ParaIndex;
-
-            return FReply::Handled().CaptureMouse(AsShared());
-        }
-
-    }
-
-
     // ============================================================
     // SAFETY
     // ============================================================
     if (!SourceScript || RenderedParagraphs.Num() == 0)
     {
         return FReply::Unhandled();
+    }
+
+    // ============================================================
+    // SHOT RANGE DRAG START (NORMAL LMB)
+    // ============================================================
+    if (!Tab.IsValid())
+    {
+        return FReply::Unhandled();
+    }
+
+    if (bShotModeActive &&
+        MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+    {
+        const float ScriptY = LocalPos.Y + ScrollOffsetY;
+        const int32 ParaIndex = ResolveParagraphForShot(ScriptY);
+
+        if (ParaIndex == INDEX_NONE)
+        {
+            return FReply::Handled();
+        }
+
+        if (bShotIntentPopupOpen)
+        {
+            return FReply::Handled();
+        }
+
+        bIsShotRangeDragging = true;
+        ShotRangeStartParagraph = ParaIndex;
+        ShotRangeCurrentParagraph = ParaIndex;
+
+        ShotRangeStartY = ScriptY;
+        ShotRangeStartLocalY = LocalPos.Y;
+        ShotGhostY = ScriptY;
+        ShotRangeStartX = LocalPos.X;
+
+        UE_LOG(LogGASPrePro, Warning,
+            TEXT("[ShotInput][DragStart] Para=%d Y=%.2f"),
+            ParaIndex,
+            ScriptY);
+
+        return FReply::Handled().CaptureMouse(AsShared());
     }
 
     // ============================================================
@@ -3393,12 +3441,6 @@ FReply SGASScriptPanel::OnMouseButtonDown(
 
         return FReply::Handled();
     }
-
-
-
-
-
-
 
     // ============================================================
     // ADD MODE (BLOCK INSERT)
@@ -3487,7 +3529,7 @@ FReply SGASScriptPanel::OnMouseButtonDoubleClick(
         return FReply::Unhandled();
     }
 
-    OpenShotIntentPopup(Marker->Id, /*bIsNewShot=*/false);
+    OpenShotIntentPopup(Marker->Id, Marker->BlockId, false);
     return FReply::Handled();
 }
 
@@ -3497,6 +3539,10 @@ FReply SGASScriptPanel::OnMouseMove(
     const FPointerEvent& MouseEvent
 )
 {
+
+    TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
+    const bool bShotModeActive = Tab.IsValid() && Tab->bShotAddArmed;
+
     // ------------------------------------------------------------
     // Shot tail resize UPDATE
     // ------------------------------------------------------------
@@ -3523,22 +3569,48 @@ FReply SGASScriptPanel::OnMouseMove(
         ShotDragGhostX = LocalPos.X - ShotDragOffset.X;
         ShotDragGhostY = LocalPos.Y;
 
+        UE_LOG(LogTemp, Warning,
+            TEXT("[VERIFY MOVE] ShotMode=%d Dragging=%d Capture=%d"),
+            bShotModeActive ? 1 : 0,
+            bIsShotRangeDragging ? 1 : 0,
+            HasMouseCapture() ? 1 : 0);
+
         bNeedsRedraw = true;
         return FReply::Handled();
     }
 
+    // ------------------------------------------------------------
+    // 🔥 KILL STALE DRAG (ONLY OUTSIDE SHOT MODE)
+    // ------------------------------------------------------------
+
+    if (!bShotModeActive && bIsShotRangeDragging && !HasMouseCapture())
+    {
+        bIsShotRangeDragging = false;
+
+        ShotRangeStartParagraph = INDEX_NONE;
+        ShotRangeCurrentParagraph = INDEX_NONE;
+
+        UE_LOG(LogGASPrePro, Warning,
+            TEXT("[ShotInput][Move] STALE DRAG KILL"));
+
+        ShotGhostY = -1.f;
+        ShotRangeStartLocalY = -1.f;
+
+        bNeedsRedraw = true;
+
+        return FReply::Handled();
+    }
 
     // ------------------------------------------------------------
     // Shot Range Drag UPDATE
     // ------------------------------------------------------------
-    if (bIsShotRangeDragging)
+    if (bIsShotRangeDragging && HasMouseCapture())
     {
         const FVector2D DragLocalPos =
             MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 
         // 🔑 Ghost Y is LOCAL space (authoritative for commit)
         ShotGhostY = DragLocalPos.Y;
-
 
         const int32 ParaIndex = HitTestParagraph(DragLocalPos.Y);
 
@@ -3558,8 +3630,9 @@ FReply SGASScriptPanel::OnMouseMove(
     // ------------------------------------------------------------
     // Shot Add Hover Preview (works OVER pills + between pills)
     // ------------------------------------------------------------
-    if (bShotAddArmed)
+    if (bShotModeActive && !bIsShotRangeDragging && bAllowShotHoverPreview)
     {
+
         const FVector2D LocalPos =
             MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 
@@ -3608,7 +3681,8 @@ FReply SGASScriptPanel::OnMouseMove(
     // ------------------------------------------------------------
     // Shot hover (selection preview)
     // ------------------------------------------------------------
-    if (!bShotAddArmed)
+
+    if (!bShotModeActive)
     {
         const FVector2D LocalPos =
             MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
@@ -3624,10 +3698,12 @@ FReply SGASScriptPanel::OnMouseMove(
             bNeedsRedraw = true;
         }
 
+
         // ------------------------------------------------------------
         // Shot pill tooltip window (explicit, pill-anchored)
         // ------------------------------------------------------------
-        if (bShotIntentPopupOpen || bShotAddArmed || bIsDraggingShot || bIsResizingShotTail || bIsShotRangeDragging)
+
+        if (bShotIntentPopupOpen || bShotModeActive || bIsDraggingShot || bIsResizingShotTail || bIsShotRangeDragging)
         {
             // Hard suppress tooltip during other interactions
             ShotHoverTooltipShotId.Empty();
@@ -3761,10 +3837,6 @@ FReply SGASScriptPanel::OnMouseMove(
     }
 
 
-
-
-
-
     // ------------------------------------------------------------
     // Existing hover logic (if any)
     // ------------------------------------------------------------
@@ -3778,6 +3850,10 @@ FReply SGASScriptPanel::OnMouseButtonUp(
 )
 {
     UE_LOG(LogGASPrePro, Warning, TEXT("OnMouseButtonUp fired"));
+
+    TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
+    const bool bValidTab = Tab.IsValid();
+
     // ------------------------------------------------------------
     // PAGE BREAK DELETE (ALT + CLICK, NO DRAG)
     // ------------------------------------------------------------
@@ -3824,42 +3900,87 @@ FReply SGASScriptPanel::OnMouseButtonUp(
         bIsShotRangeDragging = false;
 
         const float EndY = ShotGhostY;
-
-
-        // Anchor paragraph selection to START Y (already proven correct visually)
         const int32 ParaIndex = ShotRangeStartParagraph;
 
+        bool bShouldCommit = true;
 
+        FString SceneId;
+        int32 SceneParaIndex = INDEX_NONE;
 
-
-        if (ParaIndex != INDEX_NONE)
+        // --------------------------------------------------
+        // VALIDATE PARAGRAPH
+        // --------------------------------------------------
+        if (ParaIndex == INDEX_NONE)
         {
-            const int32 SceneParaIndex =
-                FindOwningSceneParagraphIndex(ParaIndex);
+            bShouldCommit = false;
+        }
 
-            if (SceneParaIndex != INDEX_NONE)
+        // --------------------------------------------------
+        // RESOLVE SCENE
+        // --------------------------------------------------
+        if (bShouldCommit)
+        {
+            SceneParaIndex = FindOwningSceneParagraphIndex(ParaIndex);
+
+            if (SceneParaIndex == INDEX_NONE)
             {
-                const int32 InsertIndex =
-                    CountShotsForScene(RenderedParagraphs[SceneParaIndex].BlockId);
-
-                UE_LOG(LogGASPrePro, Warning, TEXT("Calling CommitShotAtParagraph"));
-                CommitShotAtParagraph(
-                    SceneParaIndex,
-                    InsertIndex,
-                    ShotRangeStartLocalY,
-                    EndY,
-                    ShotRangeStartX
-                );
-
-                OnScriptMutated.ExecuteIfBound();
+                UE_LOG(LogGASPrePro, Warning, TEXT("[ShotMarker] No scene found (DRAG)"));
+                bShouldCommit = false;
+            }
+            else
+            {
+                SceneId = RenderedParagraphs[SceneParaIndex].BlockId;
             }
         }
 
+        // --------------------------------------------------
+        // SET ACTIVE SCENE
+        // --------------------------------------------------
+        if (bShouldCommit && bValidTab && Tab->ActiveCameraModeSceneId.IsEmpty())
+        {
+            Tab->ActiveCameraModeSceneId = SceneId;
+        }
 
+        // --------------------------------------------------
+        // SCENE GUARD
+        // --------------------------------------------------
+        if (bShouldCommit && bValidTab && SceneId != Tab->ActiveCameraModeSceneId)
+        {
+            UE_LOG(LogGASPrePro, Warning,
+                TEXT("[ShotMarker] Different scene clicked (DRAG)"));
+
+            bShouldCommit = false;
+        }
+
+        // --------------------------------------------------
+        // COMMIT
+        // --------------------------------------------------
+        if (bShouldCommit)
+        {
+            const int32 InsertIndex = CountShotsForScene(SceneId);
+
+            CommitShotAtParagraph(
+                SceneParaIndex,
+                InsertIndex,
+                ShotRangeStartLocalY,
+                EndY,
+                ShotRangeStartX
+            );
+
+            OnScriptMutated.ExecuteIfBound();
+        }
+
+        // --------------------------------------------------
+        // CLEANUP (ALWAYS RUNS)
+        // --------------------------------------------------
         ShotRangeStartParagraph = INDEX_NONE;
         ShotRangeCurrentParagraph = INDEX_NONE;
 
+        ShotGhostY = -1.f;
+        ShotRangeStartLocalY = -1.f;
+
         bNeedsRedraw = true;
+
         return FReply::Handled().ReleaseMouseCapture();
     }
     
@@ -4100,7 +4221,10 @@ FCursorReply SGASScriptPanel::OnCursorQuery(
     }
 
     // Shot add mode cursor logic
-    if (bShotAddArmed && RenderedParagraphs.Num() > 0)
+    TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
+    const bool bShotModeActive = Tab.IsValid() && Tab->bShotAddArmed;
+
+    if (bShotModeActive && RenderedParagraphs.Num() > 0)
     {
         const FVector2D LocalPos =
             MyGeometry.AbsoluteToLocal(CursorEvent.GetScreenSpacePosition());
@@ -4143,6 +4267,9 @@ FCursorReply SGASScriptPanel::OnCursorQuery(
 
     return FCursorReply::Unhandled();
 }
+
+
+
 
 bool SGASScriptPanel::CanChangeBlockType(int32 ParagraphIndex, EGASBlockType NewType) const
 {
@@ -4465,20 +4592,28 @@ int32 SGASScriptPanel::CountShotsForScene(const FString& SceneBlockId) const
 
 void SGASScriptPanel::SetAddShotArmed(bool bArmed)
 {
-    bShotAddArmed = bArmed;
+    if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+    {
+        Tab->bShotAddArmed = bArmed;
+    }
     HoveredShotParagraphIndex = INDEX_NONE;
     bNeedsRedraw = true;
 }
 
 void SGASScriptPanel::SetShotAddArmed(bool bInArmed)
 {
-    bShotAddArmed = bInArmed;
+    if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+    {
+        Tab->bShotAddArmed = bInArmed;
+    }
 
-    if (!bShotAddArmed)
+    TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
+    const bool bShotModeActive = Tab.IsValid() && Tab->bShotAddArmed;
+
+    if (!bShotModeActive)
     {
         HoveredShotParagraphIndex = INDEX_NONE;
-        HoveredShotMarkerId.Empty();
-        SelectedShotMarkerId.Empty();
+        ClearPanelShotSelection();
     }
 
     bNeedsRedraw = true;
@@ -4567,6 +4702,7 @@ void SGASScriptPanel::SetEnabledCastNames(
     RebuildEnabledCastOptions();
 }
 
+
 void SGASScriptPanel::RebuildEnabledCastOptions()
 {
     EnabledCastOptions.Reset();
@@ -4584,525 +4720,325 @@ void SGASScriptPanel::RebuildEnabledCastOptions()
     {
         SelectedShotIntentSubject.Reset();
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("Script Cast Count: %d"), SourceScript->Cast.Num());
 }
 
 // =============================================================
 // Shot Intent Popup (STUB)
 // =============================================================
-void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, bool bIsNewShot)
+void SGASScriptPanel::OnEnterShotMarkingMode(const FString& SceneId)
 {
-    UE_LOG(LogGASPrePro, Warning, TEXT("OpenShotIntentPopup called. bShotIntentPopupOpen = %s"),
-        bShotIntentPopupOpen ? TEXT("TRUE") : TEXT("FALSE"));
-    // -------------------------------------------------
-    // Prevent multiple Shot Intent popups
-    // -------------------------------------------------
-    if (bShotIntentPopupOpen)
+    if (ScriptTab.IsValid())
     {
-        return;
+        ScriptTab.Pin()->EnterShotMarkingMode(SceneId);
     }
+}
 
-    bShotIntentPopupOpen = true;
 
-    // -------------------------------------------------
-    // Ensure enabled cast options are ready
-    // -------------------------------------------------
-    if (EnabledCastOptions.Num() == 0)
+void SGAS_ScriptTab::UpdateShotIntentPreview()
+{
+    if (!PreviewWorld || !ShotCamera) return;
+
+    // ------------------------------------------------------------
+    // 1. Resolve Subject → StandInActor
+    // ------------------------------------------------------------
+    AGAS_StandInActor* TargetStandIn = nullptr;
+
+    for (TActorIterator<AGAS_StandInActor> It(PreviewWorld); It; ++It)
     {
-        RebuildEnabledCastOptions();
-    }
+        AGAS_StandInActor* Actor = Cast<AGAS_StandInActor>(*It);
 
-    if (!SourceScript)
-        return;
-
-    FGASShotIntent* ShotIntent =
-        SourceScript->ShotIntents.Find(MarkerId);
-
-    if (!ShotIntent)
-        return;
-
-    if (ShotIntent->MarkerId.IsEmpty())
-    {
-        return;
-    }
-
-
-    // -------------------------------------------------
-    // Create WORKING COPY (Cancel-safe)
-    // -------------------------------------------------
-    TSharedPtr<FGASShotIntentWorkingCopy> WorkingCopy =
-        MakeShared<FGASShotIntentWorkingCopy>();
-
-    WorkingCopy->ShotType = ShotIntent->ShotType;
-    WorkingCopy->Framing = ShotIntent->Framing;
-    WorkingCopy->Lens = ShotIntent->Lens;
-    WorkingCopy->CameraBehavior = ShotIntent->CameraBehavior;
-    WorkingCopy->SubjectId = ShotIntent->SubjectId;
-
-
-    // -------------------------------------------------
-    // Initialize Subject selection from WORKING COPY
-    // -------------------------------------------------
-    SelectedShotIntentSubject.Reset();
-
-    for (const TSharedPtr<FString>& Name : EnabledCastOptions)
-    {
-        if (Name.IsValid() && *Name == WorkingCopy->SubjectId)
+        if (Actor && SelectedShotIntentSubject.IsValid() && Actor->GAS_CharacterId == *SelectedShotIntentSubject)
         {
-            SelectedShotIntentSubject = Name;
+            TargetStandIn = Actor;
             break;
         }
     }
 
+    if (!TargetStandIn) return;
+
+    // ------------------------------------------------------------
+    // 2. Compute CU Transform
+    // ------------------------------------------------------------
+    const FVector TargetLocation = TargetStandIn->GetActorLocation();
+    const FVector UpOffset = FVector(0.f, 0.f, 160.f); // head height approx
+    const FVector FocusPoint = TargetLocation + UpOffset;
+
+    const float Distance = 120.f;
+
+    const FVector CameraLocation =
+        FocusPoint
+        - TargetStandIn->GetActorForwardVector() * Distance
+        + FVector(0.f, 0.f, 10.f);
+
+    const FRotator CameraRotation =
+        (FocusPoint - CameraLocation).Rotation();
+
+    // ------------------------------------------------------------
+    // 3. Apply to ShotCamera (SNAP)
+    // ------------------------------------------------------------
+    ShotCamera->SetActorLocation(CameraLocation);
+    ShotCamera->SetActorRotation(CameraRotation);
+
+    // ------------------------------------------------------------
+    // 4. Force SceneCapture Update
+    // ------------------------------------------------------------
+    if (PreviewSceneCapture)
+    {
+        PreviewSceneCapture->SetWorldLocationAndRotation(
+            CameraLocation,
+            CameraRotation
+        );
+
+        PreviewSceneCapture->CaptureScene();
+    }
+}
+
+void SGASScriptPanel::UpdateShotPreviewCamera(
+    const FString& CharacterId,
+    EGASShotType ShotType,
+    ACineCameraActor* TargetCamera
+)
+{
+    if (!GEditor || CharacterId.IsEmpty())
+        return;
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+    if (!World)
+        return;
+
+    AGAS_StandInActor* Actor =
+        FindStandInByCharacter(World, CharacterId);
+
+    if (!Actor)
+        return;
+
+    float Distance = 200.f;
+
+    switch (ShotType)
+    {
+    case EGASShotType::ECU: Distance = 60.f; break;
+    case EGASShotType::CU:  Distance = 100.f; break;
+    case EGASShotType::MCU: Distance = 140.f; break;
+    case EGASShotType::MS:  Distance = 200.f; break;
+    case EGASShotType::MLS: Distance = 300.f; break;
+    case EGASShotType::WS:  Distance = 500.f; break;
+    case EGASShotType::EWS: Distance = 800.f; break;
+    }
+
+    FVector TargetLocation = Actor->GetActorLocation();
+
+    // Try to get head height from mesh
+    if (USkeletalMeshComponent* Mesh = Actor->FindComponentByClass<USkeletalMeshComponent>())
+    {
+        FBox Bounds = Mesh->Bounds.GetBox();
+
+        // Approximate head height (top of bounds)
+        TargetLocation.Z = Bounds.Max.Z;
+    }
+
+    FVector CameraLocation =
+        TargetLocation + FVector(Distance, 0.f, 0.f);
+
+    FRotator LookAtRotation =
+        (TargetLocation - CameraLocation).Rotation();
+
+    // -------------------------------------------------
+    // Apply to REAL camera
+    // -------------------------------------------------
+    if (TargetCamera)
+    {
+        TargetCamera->SetActorLocation(CameraLocation);
+        TargetCamera->SetActorRotation(LookAtRotation);
+
+        if (UCineCameraComponent* CineComp =
+            TargetCamera->GetCineCameraComponent())
+        {
+            const float SensorWidth = 36.0f;
+            const float SensorHeight = SensorWidth / 2.39f;
+
+            CineComp->Filmback.SensorWidth = SensorWidth;
+            CineComp->Filmback.SensorHeight = SensorHeight;
+
+            CineComp->bConstrainAspectRatio = true;
+
+            CineComp->SetFieldOfView(50.f);
+        }
+    }
+
+    // -------------------------------------------------
+    // Apply to PREVIEW (must match real camera)
+    // -------------------------------------------------
+    if (ShotPreviewCapture)
+    {
+        ShotPreviewCapture->CaptureScene();
+    }
 
 
-    TSharedRef<SWindow> ShotWindow =
-        SNew(SWindow)
-        .Title(FText::FromString(TEXT("Shot Intent")))
-        .ClientSize(FVector2D(650.f, 460.f))
-        .SupportsMinimize(false)
-        .SupportsMaximize(false);
+}
 
-    ShotWindow->SetOnWindowClosed(
-        FOnWindowClosed::CreateLambda(
-            [this](const TSharedRef<SWindow>&)
-            {
-            bShotIntentPopupOpen = false;
-            }
-        )
-    );
+FString SGASScriptPanel::GetSelectedBlockId() const
+{
+    if (!RenderedParagraphs.IsValidIndex(SelectedParagraphIndex))
+    {
+        return FString();
+    }
 
-
-    ShotWindow->SetContent(
-        SNew(SBorder)
-        .Padding(12.f)
-        [
-            SNew(SHorizontalBox)
-
-                // -------------------------------------------------
-                // LEFT: Live Preview
-                // -------------------------------------------------
-                +SHorizontalBox::Slot()
-                .AutoWidth()
-                .Padding(0.f, 0.f, 12.f, 0.f)
-                [
-                    SNew(SBox)
-                        .WidthOverride(280.f)
-                        .HeightOverride(240.f)
-                        [
-                            SNew(SGASShotPreview)
-                                .ShotIntent(ShotIntent)
-                        ]
-                ]
-            // -------------------------------------------------
-            // RIGHT: Controls (your existing vertical stack)
-            // -------------------------------------------------
-            +SHorizontalBox::Slot()
-                .FillWidth(1.f)
-                [
-                    SNew(SVerticalBox)
-
-                        // -------------------------------------------------
-                        // Shot Type
-                        // -------------------------------------------------
-                        +SVerticalBox::Slot()
-                        .AutoHeight()
-                        .Padding(0.f, 4.f)
-                        [
-                            SNew(STextBlock)
-                                .Text(FText::FromString(TEXT("Shot Type")))
-                                .Font(FCoreStyle::Get().GetFontStyle("BoldFont"))
-                        ]
-
-                        + SVerticalBox::Slot()
-                        .AutoHeight()
-                        [
-                            SNew(SComboBox<TSharedPtr<EGASShotType>>)
-                                .OptionsSource(&ShotTypeOptions)
-                                .OnSelectionChanged_Lambda(
-                                    [WorkingCopy](TSharedPtr<EGASShotType> NewValue, ESelectInfo::Type)
-                                    {
-                                        if (NewValue.IsValid())
-                                        {
-                                            WorkingCopy->ShotType = *NewValue;
-                                        }
-                                    }
-                                )
-
-                                .OnGenerateWidget_Lambda(
-                                    [](TSharedPtr<EGASShotType> InItem)
-                                    {
-                                        return SNew(STextBlock)
-                                            .Text(FText::FromString(
-                                                StaticEnum<EGASShotType>()->GetDisplayNameTextByValue(
-                                                    (int64)*InItem
-                                                ).ToString()
-                                            ));
-                                    }
-                                )
-                                [
-                                    SNew(STextBlock)
-                                        .Text_Lambda(
-                                            [WorkingCopy]()
-                                            {
-                                                return StaticEnum<EGASShotType>()
-                                                    ->GetDisplayNameTextByValue(
-                                                        (int64)WorkingCopy->ShotType
-                                                    );
-                                            }
-                                        )
-
-                                ]
-                        ]
-
-                        // -------------------------------------------------
-                        // Framing
-                        // -------------------------------------------------
-                        +SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.f, 6.f, 0.f, 2.f)
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Framing")))
-                            ]
-
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            [
-                                SNew(SComboBox<TSharedPtr<EGASFramingBias>>)
-                                    .OptionsSource(&FramingOptions)
-                                    .OnSelectionChanged_Lambda(
-                                        [WorkingCopy](TSharedPtr<EGASFramingBias> NewValue, ESelectInfo::Type)
-                                        {
-                                            if (NewValue.IsValid())
-                                            {
-                                                WorkingCopy->Framing = *NewValue;
-                                            }
-                                        }
-                                    )
-
-                                    .OnGenerateWidget_Lambda(
-                                        [](TSharedPtr<EGASFramingBias> InItem)
-                                        {
-                                            return SNew(STextBlock)
-                                                .Text(StaticEnum<EGASFramingBias>()
-                                                    ->GetDisplayNameTextByValue((int64)*InItem));
-                                        }
-                                    )
-                                    [
-                                        SNew(STextBlock)
-                                            .Text_Lambda(
-                                                [WorkingCopy]()
-                                                {
-                                                    return StaticEnum<EGASFramingBias>()
-                                                        ->GetDisplayNameTextByValue((int64)WorkingCopy->Framing);
-                                                }
-                                            )
-
-                                    ]
-                            ]
-
-                            // -------------------------------------------------
-                            // Lens
-                            // -------------------------------------------------
-                            +SVerticalBox::Slot()
-                                .AutoHeight()
-                                .Padding(0.f, 6.f, 0.f, 2.f)
-                                [
-                                    SNew(STextBlock)
-                                        .Text(FText::FromString(TEXT("Lens")))
-                                ]
-
-                                + SVerticalBox::Slot()
-                                .AutoHeight()
-                                [
-                                    SNew(SComboBox<TSharedPtr<EGASLensIntent>>)
-                                        .OptionsSource(&LensOptions)
-                                        .OnSelectionChanged_Lambda(
-                                            [WorkingCopy](TSharedPtr<EGASLensIntent> NewValue, ESelectInfo::Type)
-                                            {
-                                                if (NewValue.IsValid())
-                                                {
-                                                    WorkingCopy->Lens = *NewValue;
-                                                }
-                                            }
-                                        )
-
-                                        .OnGenerateWidget_Lambda(
-                                            [](TSharedPtr<EGASLensIntent> InItem)
-                                            {
-                                                return SNew(STextBlock)
-                                                    .Text(StaticEnum<EGASLensIntent>()
-                                                        ->GetDisplayNameTextByValue((int64)*InItem));
-                                            }
-                                        )
-                                        [
-                                            SNew(STextBlock)
-                                                .Text_Lambda(
-                                                    [WorkingCopy]()
-                                                    {
-                                                        return StaticEnum<EGASLensIntent>()
-                                                            ->GetDisplayNameTextByValue((int64)WorkingCopy->Lens);
-                                                    }
-                                                )
-
-                                        ]
-                                ]
-
-                            // -------------------------------------------------
-                            // Camera Behavior
-                            // -------------------------------------------------
-                            +SVerticalBox::Slot()
-                                .AutoHeight()
-                                .Padding(0.f, 6.f, 0.f, 2.f)
-                                [
-                                    SNew(STextBlock)
-                                        .Text(FText::FromString(TEXT("Camera Behavior")))
-                                ]
-
-                                + SVerticalBox::Slot()
-                                .AutoHeight()
-                                [
-                                    SNew(SComboBox<TSharedPtr<EGASCameraBehavior>>)
-                                        .OptionsSource(&CameraBehaviorOptions)
-                                        .OnSelectionChanged_Lambda(
-                                            [WorkingCopy](TSharedPtr<EGASCameraBehavior> NewValue, ESelectInfo::Type)
-                                            {
-                                                if (NewValue.IsValid())
-                                                {
-                                                    WorkingCopy->CameraBehavior = *NewValue;
-                                                }
-                                            }
-                                        )
-
-                                        .OnGenerateWidget_Lambda(
-                                            [](TSharedPtr<EGASCameraBehavior> InItem)
-                                            {
-                                                return SNew(STextBlock)
-                                                    .Text(
-                                                        StaticEnum<EGASCameraBehavior>()
-                                                        ->GetDisplayNameTextByValue((int64)*InItem)
-                                                    );
-                                            }
-                                        )
-                                        [
-                                            SNew(STextBlock)
-                                                .Text_Lambda(
-                                                    [WorkingCopy]()
-                                                    {
-                                                        return StaticEnum<EGASCameraBehavior>()
-                                                            ->GetDisplayNameTextByValue((int64)WorkingCopy->CameraBehavior);
-                                                    }
-                                                )
-
-                                        ]
-                                ]
-
-
-                            // -------------------------------------------------
-                            // Subject
-                            // -------------------------------------------------
-                            +SVerticalBox::Slot()
-                                .AutoHeight()
-                                .Padding(0.f, 6.f, 0.f, 2.f)
-                                [
-                                    SNew(STextBlock)
-                                        .Text(FText::FromString(TEXT("Subject")))
-                                ]
-
-                                + SVerticalBox::Slot()
-                                .AutoHeight()
-                                [
-                                    SNew(SComboBox<TSharedPtr<FString>>)
-                                        .OptionsSource(&EnabledCastOptions)
-                                        .InitiallySelectedItem(SelectedShotIntentSubject)
-                                        .OnSelectionChanged_Lambda(
-                                            [this, WorkingCopy](TSharedPtr<FString> NewValue, ESelectInfo::Type)
-                                            {
-                                                SelectedShotIntentSubject = NewValue;
-                                                WorkingCopy->SubjectId = NewValue.IsValid() ? *NewValue : FString();
-                                            }
-                                        )
-
-                                        .OnGenerateWidget_Lambda(
-                                            [](TSharedPtr<FString> InItem)
-                                            {
-                                                return SNew(STextBlock)
-                                                    .Text(FText::FromString(InItem.IsValid() ? *InItem : TEXT("")));
-                                            }
-                                        )
-                                        [
-                                            SNew(STextBlock)
-                                                .Text_Lambda(
-                                                    [this]()
-                                                    {
-                                                        return SelectedShotIntentSubject.IsValid()
-                                                            ? FText::FromString(*SelectedShotIntentSubject)
-                                                            : FText::FromString(TEXT("Select Character"));
-                                                    }
-                                                )
-                                        ]
-                                ]
-
-                            // -------------------------------------------------
-                            // Close
-                            // -------------------------------------------------
-                            +SVerticalBox::Slot()
-                                .AutoHeight()
-                                .HAlign(HAlign_Right)
-                                .Padding(0.f, 12.f, 0.f, 0.f)
-                                [
-                                    SNew(SHorizontalBox)
-
-                                        // ---------------------------
-                                        // CANCEL
-                                        // ---------------------------
-                                        +SHorizontalBox::Slot()
-                                        .AutoWidth()
-                                        .Padding(4.f)
-                                        [
-                                            SNew(SButton)
-                                                .Text(FText::FromString(TEXT("Cancel")))
-                                                .OnClicked_Lambda(
-                                                    [this, ShotWindow, MarkerId, bIsNewShot]()
-                                                    {
-                                                        if (bIsNewShot && SourceScript)
-                                                        {
-                                                            // UNDO snapshot (so Cancel can be undone if needed)
-                                                            SourceScript->CaptureUndoSnapshot();
-
-                                                            // Remove marker
-                                                            SourceScript->Markers.RemoveAll(
-                                                                [&](const FGASMarker& M)
-                                                                {
-                                                                    return M.Id == MarkerId;
-                                                                }
-                                                            );
-
-                                                            // Remove paired intent
-                                                            SourceScript->ShotIntents.Remove(MarkerId);
-
-                                                            SelectedShotMarkerId.Empty();
-                                                            HoveredShotMarkerId.Empty();
-
-                                                            if (!bIsDraggingShot)
-                                                            {
-                                                                OnScriptMutated.ExecuteIfBound();
-
-                                                                if (OnRequestShotListRebuild.IsBound())
-                                                                {
-                                                                    OnRequestShotListRebuild.Execute();
-                                                                }
-                                                            }
-
-
-                                                            bNeedsRedraw = true;
-                                                        }
-
-                                                        bShotIntentPopupOpen = false;
-                                                        ShotWindow->RequestDestroyWindow();
-                                                        return FReply::Handled();
-                                                    }
-                                                )
-
-                                        ]
-
-                                    // ---------------------------
-                                    // OK (COMMIT)
-                                    // ---------------------------
-                                    +SHorizontalBox::Slot()
-                                        .AutoWidth()
-                                        .Padding(4.f)
-                                        [
-                                            SNew(SButton)
-                                                .Text(FText::FromString(TEXT("OK")))
-                                                .OnClicked_Lambda(
-                                                    [this, ShotWindow, MarkerId, WorkingCopy]()
-                                                    {
-                                                        if (!SourceScript)
-                                                        {
-                                                            ShotWindow->RequestDestroyWindow();
-                                                            return FReply::Handled();
-                                                        }
-
-                                                        FGASShotIntent* ShotIntent =
-                                                            SourceScript->ShotIntents.Find(MarkerId);
-
-                                                        if (!ShotIntent)
-                                                        {
-                                                            ShotWindow->RequestDestroyWindow();
-                                                            return FReply::Handled();
-                                                        }
-
-                                                        // UNDO SNAPSHOT
-                                                        SourceScript->CaptureUndoSnapshot();
-
-                                                        // Commit WorkingCopy → ShotIntent
-                                                        ShotIntent->ShotType = WorkingCopy->ShotType;
-                                                        ShotIntent->Framing = WorkingCopy->Framing;
-                                                        ShotIntent->Lens = WorkingCopy->Lens;
-                                                        ShotIntent->CameraBehavior = WorkingCopy->CameraBehavior;
-                                                        ShotIntent->SubjectId = WorkingCopy->SubjectId;
-
-
-
-                                                        // Persist to Marker metadata
-                                                        for (FGASMarker& Marker : SourceScript->Markers)
-                                                        {
-                                                            if (Marker.Id == ShotIntent->MarkerId)
-                                                            {
-                                                                Marker.Metadata.Add(
-                                                                    TEXT("ShotType"),
-                                                                    StaticEnum<EGASShotType>()
-                                                                    ->GetNameStringByValue((int64)ShotIntent->ShotType)
-                                                                );
-
-                                                                Marker.Metadata.Add(
-                                                                    TEXT("Lens"),
-                                                                    StaticEnum<EGASLensIntent>()
-                                                                    ->GetNameStringByValue((int64)ShotIntent->Lens)
-                                                                );
-
-                                                                Marker.Metadata.Add(
-                                                                    TEXT("Camera"),
-                                                                    StaticEnum<EGASCameraBehavior>()
-                                                                    ->GetNameStringByValue((int64)ShotIntent->CameraBehavior)
-                                                                );
-
-                                                                Marker.Metadata.Add(
-                                                                    TEXT("Framing"),
-                                                                    StaticEnum<EGASFramingBias>()
-                                                                    ->GetNameStringByValue((int64)ShotIntent->Framing)
-                                                                );
-
-                                                                Marker.Metadata.Add(TEXT("Subject"), ShotIntent->SubjectId);
-                                                                break;
-                                                            }
-                                                        }
-
-                                                        if (!bIsDraggingShot)
-                                                        {
-                                                            OnScriptMutated.ExecuteIfBound();
-
-                                                            if (OnRequestShotListRebuild.IsBound())
-                                                            {
-                                                                OnRequestShotListRebuild.Execute();
-                                                            }
-                                                        }
-
-                                                        bShotIntentPopupOpen = false;
-                                                        ShotWindow->RequestDestroyWindow();
-                                                        return FReply::Handled();
-                                                    }
-                                                )
-                                        ]
-                                ]
-                         ]
-
-        ]
-    );
-
-    FSlateApplication::Get().AddWindow(ShotWindow);
+    return RenderedParagraphs[SelectedParagraphIndex].BlockId;
 }
 
 
+FGASBlock* SGASScriptPanel::GetSceneBlockById(const FString& SceneId)
+{
+    if (!SourceScript)
+        return nullptr;
+
+    for (FGASBlock& Block : SourceScript->Blocks)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Block Id: %s"), *Block.Id);
+
+        if (Block.Id == SceneId)
+        {
+            return &Block;
+        }
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("Looking for SceneId: %s"), *SceneId);
+
+    return nullptr;
+}
+
+void SGAS_ScriptTab::OnShotIntentChanged()
+{
+    UpdateShotIntentPreview();
+}
+
+
+void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, const FString& SceneId, bool bHasBlocking)
+{
+    // -------------------------------------------------
+    // GET SCRIPT (✅ CORRECT SOURCE)
+    // -------------------------------------------------
+    FGASScript* Script = SourceScript;
+
+    EnabledCastNames.Empty();
+
+    if (!Script)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ShotIntent: Script NULL"));
+        return;
+    }
+
+    // -------------------------------------------------
+    // Get scene block FIRST
+    // -------------------------------------------------
+    FGASBlock* SceneBlock = GetSceneBlockById(SceneId);
+
+    if (!SceneBlock)
+    {
+        UE_LOG(LogTemp, Error, TEXT("ShotIntent: SceneBlock NOT FOUND"));
+        return;
+    }
+
+    // -------------------------------------------------
+    // Add NO SUBJECT (ONLY ONCE)
+    // -------------------------------------------------
+    EnabledCastNames.Add(MakeShared<FString>(TEXT("(No Subject)")));
+
+    // -------------------------------------------------
+    // Add ONLY characters in this scene
+    // -------------------------------------------------
+    for (const FString& CharacterId : SceneBlock->CharactersInScene)
+    {
+        EnabledCastNames.Add(
+            MakeShared<FString>(CharacterId)
+        );
+    }
+
+    RebuildEnabledCastOptions();
+    UE_LOG(LogTemp, Warning, TEXT("Cast Options Count: %d"), EnabledCastNames.Num());
+
+    FString ResolvedShotLabel = TEXT("1");
+
+    if (Script)
+    {
+        for (const FGASMarker& Marker : Script->Markers)
+        {
+            if (Marker.MarkerType != EGASMarkerType::ShotMarker)
+            {
+                continue;
+            }
+
+            // MarkerId being passed into this popup is NewMarker.Id
+            // NOT MarkerGuid.ToString()
+            if (Marker.Id == MarkerId)
+            {
+                ResolvedShotLabel = Marker.GetShotLabel(Script->ShotNumberingPolicy);
+
+                UE_LOG(LogTemp, Warning, TEXT("RESOLVED SHOT LABEL: %s"), *ResolvedShotLabel);
+                UE_LOG(LogTemp, Warning, TEXT("MATCHED MARKER SceneShotIndex: %d"), Marker.SceneShotIndex);
+
+                break;
+            }
+        }
+    }
+
+    // -------------------------------------------------
+    // CREATE WINDOW
+    // -------------------------------------------------
+    TSharedRef<SWindow> Window = SNew(SWindow)
+        .Title(FText::FromString("Shot Intent"))
+        .ClientSize(FVector2D(900, 700))
+        .SizingRule(ESizingRule::UserSized)
+        .SupportsMinimize(false)
+        .SupportsMaximize(false);
+
+    // -------------------------------------------------
+    // SET CONTENT
+    // -------------------------------------------------
+    Window->SetContent(
+        SNew(SGAS_ShotIntentWindow)
+        .Script(Script)
+        .SceneId(SceneId)
+        .MarkerId(MarkerId)
+        .ShotLabel(ResolvedShotLabel)
+        .CastOptions(EnabledCastNames)
+        .OwnerScriptTab(OwnerScriptTab)
+        .OwnerWindow(Window)
+        .OnConfirm_Lambda([this](FString MarkerId, EGASShotType ShotType, FString SubjectId)
+            {
+                if (!SourceScript)
+                    return;
+
+                FGASShotIntent* Intent = SourceScript->ShotIntents.Find(MarkerId);
+                if (!Intent)
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("ShotIntent: NOT FOUND"));
+                    return;
+                }
+
+                Intent->ShotType = ShotType;
+                Intent->SubjectId = SubjectId;
+
+                UE_LOG(LogTemp, Warning, TEXT("ShotIntent Updated: %s | %s"),
+                    *SubjectId,
+                    *UEnum::GetValueAsString(ShotType)
+                );
+
+                UpdateShotPreviewCamera(
+                    SubjectId,
+                    ShotType,
+                    Intent->CameraActor.Get()
+                );
+
+                if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+                {
+                    Tab->OnSaveScript();
+                }
+            })
+    );
+
+    FSlateApplication::Get().AddWindow(Window);
+}
 

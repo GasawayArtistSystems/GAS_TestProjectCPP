@@ -7,7 +7,9 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/ArrowComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GAS_StandInTypes.h"
+#include "Misc/Guid.h"
 
 
 #include "GAS_StandInActor.generated.h"
@@ -28,12 +30,28 @@ public:
 
 	FVector GetEyelineWorldLocation() const;
 
+	void SetCharacterSkeletalMesh(USkeletalMesh* NewMesh);
+	USkeletalMesh* GetCharacterMesh() const;
+
+	void RefreshMeshFromScript(struct FGASScript* Script);
+
 	// Script character this stand-in represents (inert binding for now)
 	UPROPERTY(EditAnywhere, Category = "GAS|Binding")
 	FName CharacterId;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
 	FString GAS_CharacterId;
+
+	UPROPERTY()
+	FGuid SequencerBindingGuid;
+
+	void FixMeshOffsetAfterSequencer();
+
+	UPROPERTY(Transient)
+	bool bIsSequencerDriven = false;
+
+	virtual void PostRegisterAllComponents() override;
+	virtual void PostLoad() override;
 
 
 protected:
@@ -81,8 +99,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Stand-In")
 	USkeletalMeshComponent* ProxySkeletalMesh;
 
-	UPROPERTY(EditAnywhere, Category = "GAS|StandIn")
+	UPROPERTY(Transient)
 	USkeletalMesh* SkeletalMeshAsset;
+
+	UPROPERTY()
+	bool bHasBeenGrounded = false;
 
 
 	enum class EGASStandInVisualMode : uint8

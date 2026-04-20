@@ -13,7 +13,6 @@ public:
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
-
     void Refresh();
 
 private:

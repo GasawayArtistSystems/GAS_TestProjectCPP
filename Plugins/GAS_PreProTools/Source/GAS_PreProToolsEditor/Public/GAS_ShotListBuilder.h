@@ -21,6 +21,7 @@ bool BuildShotListFromScript(
     TArray<FGASShotDefinitionListRow>& OutRows
 );
 
+
 // ============================================================
 // FUTURE Shot List Builder (Scene + Shots)
 // (NOT wired yet)
