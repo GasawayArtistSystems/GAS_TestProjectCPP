@@ -186,6 +186,8 @@ public:
 
     FGASBlock* GetSceneBlockById(const FString& SceneId);
 
+    FTransform LastPreviewTransform;
+
 private:
 
     // =========================================================

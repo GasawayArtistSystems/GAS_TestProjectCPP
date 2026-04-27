@@ -1024,6 +1024,54 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
     ClosePendingActionWindow();
 }
 
+
+void SGAS_ScriptTab::ApplyCameraToLastCreatedShot(
+    const FString& MarkerId,
+    const FVector& Location,
+    const FRotator& Rotation,
+    float FocalLength
+)
+{
+    if (!Script.IsValid())
+    {
+        return;
+    }
+
+    FGASShotIntent* Shot = Script->ShotIntents.Find(MarkerId);
+    if (!Shot)
+    {
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // SAVE DATA
+    // ------------------------------------------------------------
+    Shot->CameraLocation = Location;
+    Shot->CameraRotation = Rotation;
+    Shot->CameraFocalLength = FocalLength;
+
+    UE_LOG(LogTemp, Warning, TEXT("Camera Saved: %s"), *Location.ToString());
+
+    // ------------------------------------------------------------
+    // APPLY TO REAL CAMERA (CRITICAL FIX)
+    // ------------------------------------------------------------
+    if (Shot->CameraActor.IsValid())
+    {
+        ACineCameraActor* Cam = Shot->CameraActor.Get();
+        if (Cam)
+        {
+            Cam->SetActorLocationAndRotation(Location, Rotation);
+
+            if (UCineCameraComponent* Cine = Cam->GetCineCameraComponent())
+            {
+                Cine->SetCurrentFocalLength(FocalLength);
+            }
+
+            UE_LOG(LogTemp, Warning, TEXT("Applied to REAL camera"));
+        }
+    }
+}
+
 void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
 {
 
@@ -1262,94 +1310,98 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
     if (!World) return;
 
     // --------------------------------------------------
-    // Resolve camera (HANDLE SOFT POINTER)
+    // Resolve camera
     // --------------------------------------------------
     ACineCameraActor* Cam = Intent.CameraActor.Get();
     if (!Cam) return;
 
     // --------------------------------------------------
-    // Resolve subject (TEMP SAFE VERSION)
+    // 🔥 USE SAVED CAMERA IF AVAILABLE (THIS IS THE FIX)
     // --------------------------------------------------
-    AGAS_StandInActor* TargetActor = nullptr;
-
-    for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
+    if (!bIsEditingShot)
     {
-        if (It->GetActorLabel().Contains(Intent.SubjectId))
+        Cam->SetActorLocationAndRotation(
+            Intent.CameraLocation,
+            Intent.CameraRotation
+        );
+
+        if (UCineCameraComponent* Cine = Cam->GetCineCameraComponent())
         {
-            TargetActor = *It;
-            break;
+            Cine->SetCurrentFocalLength(Intent.CameraFocalLength);
         }
+
+        UE_LOG(LogTemp, Warning, TEXT("APPLIED FROM SHOT INTENT: %s"),
+            *Intent.CameraLocation.ToString());
     }
-
-    FVector TargetLocation = FVector(0, 0, 100);
-
-    if (TargetActor)
-    {
-        TargetLocation = TargetActor->GetActorLocation();
-        TargetLocation.Z += 140.f;
-    }
-
-    // --------------------------------------------------
-    // Distance by shot type
-    // --------------------------------------------------
-    float Distance = GetShotDistance(Intent.ShotType);
-    float HeightOffset = GetShotHeightOffset(Intent.ShotType);
-
-    // --------------------------------------------------
-    // Stable Orbit Direction (WORLD-BASED)
-    // --------------------------------------------------
-
-    // --------------------------------------------------
-    // Stable Character Facing Direction (EYELINE DRIVEN)
-    // --------------------------------------------------
-
-    FVector CharacterForward = FVector(1.f, 0.f, 0.f);
-
-    if (TargetActor)
+    else
     {
         // --------------------------------------------------
-        // Find Eyeline Arrow Component (SAFE)
+        // FALLBACK (ONLY if no saved camera yet)
         // --------------------------------------------------
-        UArrowComponent* Eyeline = TargetActor->FindComponentByClass<UArrowComponent>();
+        AGAS_StandInActor* TargetActor = nullptr;
 
-        if (Eyeline)
+        for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
         {
-            CharacterForward = Eyeline->GetForwardVector();
+            if (It->GetActorLabel().Contains(Intent.SubjectId))
+            {
+                TargetActor = *It;
+                break;
+            }
         }
-        else
+
+        FVector TargetLocation = FVector(0, 0, 100);
+
+        if (TargetActor)
         {
-            CharacterForward = TargetActor->GetActorForwardVector();
+            TargetLocation = TargetActor->GetActorLocation();
+            TargetLocation.Z += 140.f;
         }
+
+        float Distance = GetShotDistance(Intent.ShotType);
+        float HeightOffset = GetShotHeightOffset(Intent.ShotType);
+
+        FVector CharacterForward = FVector(1.f, 0.f, 0.f);
+
+        if (TargetActor)
+        {
+            UArrowComponent* Eyeline = TargetActor->FindComponentByClass<UArrowComponent>();
+
+            if (Eyeline)
+            {
+                CharacterForward = Eyeline->GetForwardVector();
+            }
+            else
+            {
+                CharacterForward = TargetActor->GetActorForwardVector();
+            }
+        }
+
+        FVector CameraDirection = CharacterForward;
+
+        FVector CameraLocation =
+            TargetLocation
+            + (CameraDirection * Distance)
+            + FVector(0.f, 0.f, HeightOffset);
+
+        FVector LookAtTarget = TargetLocation + FVector(0.f, 0.f, HeightOffset);
+
+        FRotator LookAtRotation =
+            (LookAtTarget - CameraLocation).Rotation();
+
+        Cam->SetActorLocation(CameraLocation);
+        Cam->SetActorRotation(LookAtRotation);
+
+        UE_LOG(LogTemp, Warning, TEXT("FALLBACK CAMERA USED"));
     }
 
-    // Always shoot FROM front (toward face)
-    FVector CameraDirection = CharacterForward;
-
-    // If you want slight variation later, you can rotate this vector
-    // Example (disabled for now):
-    // float AngleDeg = 0.f;
-    // CameraDirection = FRotator(0.f, AngleDeg, 0.f).RotateVector(-WorldForward);
-
-    FVector CameraLocation =
-        TargetLocation
-        + (CameraDirection * Distance)
-        + FVector(0.f, 0.f, HeightOffset);
-
-    FVector LookAtTarget = TargetLocation + FVector(0.f, 0.f, HeightOffset);
-
-    FRotator LookAtRotation =
-        (LookAtTarget - CameraLocation).Rotation();
-
-    Cam->SetActorLocation(CameraLocation);
-    Cam->SetActorRotation(LookAtRotation);
-
-    // Ensure preview is initialized ONCE
+    // --------------------------------------------------
+    // Preview sync
+    // --------------------------------------------------
     if (!PreviewSourceCamera.IsValid())
     {
         InitializeCameraPreview(Cam);
     }
 
-    // Always sync after camera moves
     SyncPreviewToRealCamera();
 }
 
@@ -2689,14 +2741,14 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
     // --------------------------------------------------------------------
     // 2. Import FDX into a temporary FGASScript
     // --------------------------------------------------------------------
-    FGASScript Script;
+    FGASScript TempScript;
 
     // Import options now come directly from the import dialog
     const FGASImportNumberingOptions& Options = ImportOptions;
 
 
 
-    if (!UGAS_FDXImporter::ImportFDXToScript(FilePath, Script, Options))
+    if (!UGAS_FDXImporter::ImportFDXToScript(FilePath, TempScript, Options))
     {
         UE_LOG(LogGASPrePro, Error, TEXT("FDX import failed: %s"), *FilePath);
         return;
@@ -2708,7 +2760,7 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
     // --------------------------------------------------------------------
     // 4. Populate authoritative in-memory script (JSON-backed)
     // --------------------------------------------------------------------
-    CurrentScript = Script;
+    CurrentScript = TempScript;
     BuildCastListFromScript();
     RebuildCastUI();
 
@@ -5767,9 +5819,9 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
 
 FString SGAS_ScriptTab::GetBlockingLevelPath(const FString& SceneId) const
 {
-    const FGASScript& Script = GetScript();
+    const FGASScript& LocalScript = GetScript();
 
-    for (const FGASBlock& Block : Script.Blocks)
+    for (const FGASBlock& Block : LocalScript.Blocks)
     {
         if (Block.Id == SceneId)
         {
@@ -5780,7 +5832,7 @@ FString SGAS_ScriptTab::GetBlockingLevelPath(const FString& SceneId) const
     return FString();
 }
 
-bool SGAS_ScriptTab::IsBlockingLevelOpen(const FString& SceneId)
+bool SGAS_ScriptTab::IsBlockingLevelOpen(const FString& LevelPath)
 {
 #if WITH_EDITOR
     if (!GEditor) return false;
@@ -5788,13 +5840,9 @@ bool SGAS_ScriptTab::IsBlockingLevelOpen(const FString& SceneId)
     UWorld* World = GEditor->GetEditorWorldContext().World();
     if (!World) return false;
 
-    const FString CurrentMap =
-        World->GetOutermost()->GetName();
+    const FString CurrentMap = World->GetOutermost()->GetName();
 
-    const FString TargetMap =
-        GetBlockingLevelPath(SceneId);
-
-    return !TargetMap.IsEmpty() && CurrentMap == TargetMap;
+    return !LevelPath.IsEmpty() && CurrentMap == LevelPath;
 #else
     return false;
 #endif
@@ -5842,9 +5890,9 @@ void SGAS_ScriptTab::OpenBlockingLevelIfNeeded(const FString& SceneId)
 
 FString SGAS_ScriptTab::GetSequencePath(const FString& SceneId) const
 {
-    const FGASScript& Script = GetScript();
+    const FGASScript& LocalScript = GetScript();
 
-    for (const FGASBlock& Block : Script.Blocks)
+    for (const FGASBlock& Block : LocalScript.Blocks)
     {
         if (Block.Id == SceneId)
         {
@@ -5975,6 +6023,47 @@ void SGAS_ScriptTab::SetActiveBlockingShot(const FGuid& ShotId)
     }
 #endif
 
+    if (!Script.IsValid())
+    {
+        return;
+    }
+
+    FGASShotIntent* Shot = Script->ShotIntents.Find(ShotId.ToString());
+    if (!Shot)
+    {
+        return;
+    }
+
+    if (Shot->CameraActor.IsValid())
+    {
+        ACineCameraActor* Cam = Shot->CameraActor.Get();
+
+        if (Cam)
+        {
+            if (!Shot->CameraLocation.IsNearlyZero() || !Shot->CameraRotation.IsNearlyZero())
+            {
+                Cam->SetActorLocationAndRotation(
+                    Shot->CameraLocation,
+                    Shot->CameraRotation
+                );
+
+                if (UCineCameraComponent* Cine = Cam->GetCineCameraComponent())
+                {
+                    Cine->SetCurrentFocalLength(Shot->CameraFocalLength);
+                }
+
+                UE_LOG(LogTemp, Warning, TEXT("FINAL CAMERA APPLIED (SetActive): %s"),
+                    *Shot->CameraLocation.ToString());
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("SKIPPING CAMERA APPLY (no saved data yet)"));
+            }
+        }
+    }
+
+
+
 }
 
 FGuid SGAS_ScriptTab::GetActiveBlockingShot() const
@@ -6067,6 +6156,32 @@ void SGAS_ScriptTab::HandleShotCameraMoved(const FString& MarkerId, const FTrans
     // Your existing dirty + save pipeline
     MarkScriptDirty();
     EnsureScriptSaved();
+}
+
+void SGAS_ScriptTab::UpdateShotIntentCameraFromPreview(
+    const FString& MarkerId,
+    const FVector& Location,
+    const FRotator& Rotation,
+    float FocalLength
+)
+{
+    if (!Script.IsValid())
+    {
+        return;
+    }
+
+    FGASShotIntent* Shot = Script->ShotIntents.Find(MarkerId);
+    if (!Shot)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UpdateShotIntentCameraFromPreview: Shot NOT FOUND for %s"), *MarkerId);
+        return;
+    }
+
+    Shot->CameraLocation = Location;
+    Shot->CameraRotation = Rotation;
+    Shot->CameraFocalLength = FocalLength;
+
+    UE_LOG(LogTemp, Warning, TEXT("CAPTURED FINAL PREVIEW CAMERA: %s"), *Location.ToString());
 }
 
 void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)

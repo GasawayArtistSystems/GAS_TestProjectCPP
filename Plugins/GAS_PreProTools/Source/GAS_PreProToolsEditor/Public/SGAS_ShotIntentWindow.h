@@ -5,11 +5,12 @@
 #include "ScriptModel.h"
 #include "SGAS_ScriptTab.h"
 
-DECLARE_DELEGATE_ThreeParams(
+DECLARE_DELEGATE_FourParams(
     FOnConfirmShotIntent,
-    FString,        // MarkerId
-    EGASShotType,   // ShotType
-    FString         // SubjectId
+    FString,
+    EGASShotType,
+    FString,
+    FTransform
 );
 
 
@@ -84,6 +85,19 @@ private:
     // ------------------------------------------------------------
 
     FReply OnDollyForward();
+    FReply OnDollyBackward();
+
+    FReply OnCrabLeft();
+    FReply OnCrabRight();
+
+    FReply OnPedestalUp();
+    FReply OnPedestalDown();
+
+    FReply OnPanLeft();
+    FReply OnPanRight();
+
+    FReply OnTiltUp();
+    FReply OnTiltDown();
 
 
 

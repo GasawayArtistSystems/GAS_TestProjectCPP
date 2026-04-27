@@ -166,7 +166,6 @@ struct FGASShotListCSVRow
     FString Notes;
 };
 
-
 // ============================================================
 // LEGACY: Scene List Row (TRANSITIONAL)
 // Used by GAS_ShotListBuilder.cpp (scene-only v1)

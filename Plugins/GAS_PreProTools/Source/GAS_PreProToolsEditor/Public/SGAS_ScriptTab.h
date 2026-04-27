@@ -36,7 +36,6 @@ class SScrollBox;
 struct FGASBlock;
 struct FGASImportNumberingOptions;
 struct FGASSetDescriptor;
-struct FGASShotIntent;
 
 // =====================================================
 // Local Helper Structs
@@ -116,6 +115,7 @@ public:
     {
         return CurrentScript;
     }
+
 
     // --------------------------------------------------
     // Tool Window / UI State
@@ -221,6 +221,24 @@ public:
     void ReleaseCameraPreview();
     void UpdateCameraFromShotIntent(FGASShotIntent& Intent);
 
+    void ApplyCameraToLastCreatedShot(
+        const FString& MarkerId,
+        const FVector& Location,
+        const FRotator& Rotation,
+        float FocalLength
+    );
+
+    TSharedPtr<FGASScript> Script;
+
+    void UpdateShotIntentCameraFromPreview(
+        const FString& MarkerId,
+        const FVector& Location,
+        const FRotator& Rotation,
+        float FocalLength
+    );
+
+    bool bIsEditingShot = false;
+
     // --------------------------------------------------
     // Public Shot-State Flags
     // --------------------------------------------------
@@ -240,12 +258,14 @@ public:
 
     FDelegateHandle OnMapOpenedHandle;
 
+    FText GetNewProjectAspectText() const;
+
 private:
 
     // --------------------------------------------------
     // UI / TEMP STATE
     // --------------------------------------------------
-    FText GetNewProjectAspectText() const;
+
     void OnNewProjectAspectChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type SelectInfo);
     TArray<TSharedPtr<FString>> NewProjectAspectOptions;
     TSharedPtr<FString> NewProjectSelectedAspect;

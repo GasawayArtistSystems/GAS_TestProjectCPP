@@ -67,7 +67,7 @@ FString ResizingShotMarkerId;
 float ShotTailGhostY = -1.f;
 static float ShotTailResizeStartY = -1.f;
 
-static ACineCameraActor* GLastCreatedCamera = nullptr;
+extern ACineCameraActor* GLastCreatedCamera;
 
 static TArray<TSharedPtr<EGASShotType>> ShotTypeOptions = {
     MakeShared<EGASShotType>(EGASShotType::ECU),
@@ -1949,6 +1949,7 @@ void SGASScriptPanel::CommitShotAtParagraph(
     FGASShotIntent* CreatedIntent =
         SourceScript->ShotIntents.Find(NewMarker.Id);
 
+
     if (CreatedIntent)
     {
         CreatedIntent->CameraName = TEXT("TEMP");
@@ -1997,6 +1998,7 @@ void SGASScriptPanel::CommitShotAtParagraph(
                 CreatedIntent->CameraActor = Cam;
 
 
+
                 CreatedIntent->CameraName = Cam->GetName();
 
                 // -------------------------------------------------
@@ -2042,9 +2044,6 @@ void SGASScriptPanel::CommitShotAtParagraph(
                     TargetLocation = FVector(0.f, 0.f, 100.f);
                 }
 
-                // -------------------------------------------------
-                // Camera Solve (mesh forward)
-                // -------------------------------------------------
                 // -------------------------------------------------
                 // Camera Solve (ABSOLUTE WORLD TEST)
                 // -------------------------------------------------
@@ -2127,6 +2126,8 @@ void SGASScriptPanel::CommitShotAtParagraph(
 
                 UE_LOG(LogGASPrePro, Warning, TEXT("Shot Camera Assigned: %s"), *Cam->GetName());
 
+
+
                 if (OwnerScriptTab.IsValid())
                 {
                     // TEMP CRASH ISOLATION
@@ -2158,6 +2159,11 @@ void SGASScriptPanel::CommitShotAtParagraph(
             {
                 if (WeakThis.IsValid())
                 {
+                    if (WeakThis.Pin()->OwnerScriptTab.IsValid())
+                    {
+                        WeakThis.Pin()->OwnerScriptTab.Pin()->bIsEditingShot = true;
+                    }
+
                     WeakThis.Pin()->OpenShotIntentPopup(NewMarkerId, SceneBlockId, true);
                 }
                 return false;
@@ -4942,8 +4948,11 @@ void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, const FString
         .CastOptions(EnabledCastNames)
         .OwnerScriptTab(OwnerScriptTab)
         .OwnerWindow(Window)
-        .OnConfirm_Lambda([this](FString MarkerId, EGASShotType ShotType, FString SubjectId)
+        .OnConfirm_Lambda([this](FString MarkerId, EGASShotType ShotType, FString SubjectId, FTransform PreviewTransform)
             {
+                // 🔥 ADD THIS LINE
+                LastPreviewTransform = PreviewTransform;
+
                 if (!SourceScript)
                     return;
 
@@ -4967,6 +4976,39 @@ void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, const FString
                     ShotType,
                     Intent->CameraActor.Get()
                 );
+
+                if (ACineCameraActor* Cam = Intent->CameraActor.Get())
+                {
+                    Cam->SetActorTransform(PreviewTransform);
+
+                    Intent->CameraLocation = Cam->GetActorLocation();
+                    Intent->CameraRotation = Cam->GetActorRotation();
+
+                    if (UCineCameraComponent* Cine = Cam->GetCineCameraComponent())
+                    {
+                        // keep what you already have
+                        Intent->CameraFocalLength = Cine->CurrentFocalLength;
+
+                        Cine->FocusSettings.FocusMethod = ECameraFocusMethod::Disable;
+                        Cine->CurrentAperture = 8.0f;
+
+                        // 🔥 MATCH PREVIEW EXPOSURE (USE AUTO, NOT MANUAL)
+                        Cine->PostProcessSettings.bOverride_AutoExposureMethod = true;
+                        Cine->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Histogram;
+
+                        Cine->PostProcessSettings.bOverride_AutoExposureBias = true;
+                        Cine->PostProcessSettings.AutoExposureBias = 0.25f;
+
+                        // Allow dynamic range (preview-like)
+                        Cine->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
+                        Cine->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
+                        Cine->PostProcessSettings.AutoExposureMinBrightness = 0.03f;
+                        Cine->PostProcessSettings.AutoExposureMaxBrightness = 2.0f;
+                    }
+
+                    UE_LOG(LogTemp, Warning, TEXT("APPLIED PREVIEW TRANSFORM AFTER CONFIRM: %s"),
+                        *Intent->CameraLocation.ToString());
+                }
 
                 if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
                 {

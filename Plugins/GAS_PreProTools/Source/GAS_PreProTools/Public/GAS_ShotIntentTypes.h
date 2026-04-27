@@ -96,4 +96,13 @@ struct FGASShotIntent
     UPROPERTY()
     FString CameraName;
 
+    UPROPERTY()
+    FVector CameraLocation = FVector::ZeroVector;
+
+    UPROPERTY()
+    FRotator CameraRotation = FRotator::ZeroRotator;
+
+    UPROPERTY()
+    float CameraFocalLength = 50.f;
+
 };
