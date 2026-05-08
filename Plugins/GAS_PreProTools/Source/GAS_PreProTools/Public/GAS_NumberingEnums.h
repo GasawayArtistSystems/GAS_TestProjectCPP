@@ -18,3 +18,13 @@ enum class EGASShotNumberingPolicy : uint8
     Numeric_10s,
     Alphabetic
 };
+
+UENUM(BlueprintType)
+enum class EGASProjectFrameRate : uint8
+{
+    FPS_23_976,
+    FPS_24,
+    FPS_25,
+    FPS_29_97,
+    FPS_30
+};

@@ -185,10 +185,6 @@ void UGASPreProProject::BuildDerivedShotList(
 
 void UGASPreProProject::PostLoad()
 {
-    if (DefaultAspectRatio.IsEmpty())
-    {
-        DefaultAspectRatio = TEXT("16:9");
-    }
     Super::PostLoad();
 
 #if WITH_EDITOR

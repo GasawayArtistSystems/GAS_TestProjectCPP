@@ -4,6 +4,7 @@
 #include "Engine/DataAsset.h"
 #include "ScriptModel.h"
 #include "Data/GASShot.h"
+#include "GAS_NumberingEnums.h"
 
 struct FGASDerivedShotRow;
 
@@ -19,6 +20,8 @@ struct FGASDerivedShotRow;
  They are order-sensitive and form the backbone of the document.
 ===============================================================================
 */
+
+
 
 USTRUCT(BlueprintType)
 struct FGASScriptBlock
@@ -143,9 +146,13 @@ class GAS_PREPROTOOLSEDITOR_API UGASPreProProject : public UDataAsset
 
 public:
 
-    /*-----------------------------------------
-        PROJECT IDENTITY
-    ------------------------------------------*/
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Project")
+    FGASProjectSettings ProjectSettings;
+
+    const FGASProjectSettings& GetProjectSettings() const
+    {
+        return ProjectSettings;
+    }
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Project")
     FString ProjectName;
@@ -158,12 +165,6 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Script")
     TArray<FGASScene> Scenes;
-
-    /*-----------------------------------------
-        CAMERA / PREVIEW SETTINGS
-    ------------------------------------------*/
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
-    FString DefaultAspectRatio = TEXT("16:9");
 
     /*-----------------------------------------
         SHOTS + MARKERS

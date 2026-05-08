@@ -460,6 +460,64 @@ struct FGASCharacterDefinition
     }
 };
 
+USTRUCT(BlueprintType)
+struct FGASProjectSettings
+{
+    GENERATED_BODY()
+
+    // ------------------------------------------------------------
+    // Project Display
+    // ------------------------------------------------------------
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString AspectRatio = TEXT("16:9");
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    EGASProjectFrameRate FrameRate =
+        EGASProjectFrameRate::FPS_24;
+
+    // ------------------------------------------------------------
+    // Scene Numbering
+    // ------------------------------------------------------------
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    EGASNumberingStyle SceneNumberingStyle =
+        EGASNumberingStyle::CountBy10;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    int32 SceneStartNumber = 10;
+
+    // ------------------------------------------------------------
+    // Shot Numbering
+    // ------------------------------------------------------------
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    EGASShotNumberingPolicy ShotNumberingPolicy =
+        EGASShotNumberingPolicy::Numeric_10s;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    int32 ShotStartNumber = 10;
+
+    // ------------------------------------------------------------
+    // Camera Defaults
+    // ------------------------------------------------------------
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    float DefaultLensMM = 50.f;
+
+    // ------------------------------------------------------------
+    // Project Behavior
+    // ------------------------------------------------------------
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bEnableBlocking = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bEnableShotLayers = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bAutoCreateMasterSequence = true;
+};
 
 // ------------------------------------------------------------
 // FULL SCRIPT CONTAINER
@@ -475,6 +533,8 @@ struct GAS_PREPROTOOLS_API FGASScript
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FString Uuid;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FGASProjectSettings ProjectSettings;
     // ------------------------------------------------------------
     // Scene Numbering Settings (Authoritative)
     // ------------------------------------------------------------

@@ -10,6 +10,8 @@
 
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SSpinBox.h"
+#include "Widgets/Input/SCheckBox.h"
 
 #include "CineCameraActor.h"
 #include "CineCameraComponent.h"
@@ -99,7 +101,10 @@ public:
     void ClearScript();
     void EnsureScriptSaved();
 
-    bool CreateNewProject(const FString& ProjectName, const FString& AspectRatio);
+    bool CreateNewProject(
+        const FString& ProjectName,
+        const FGASProjectSettings& InProjectSettings
+    );
     bool LoadProject(const FString& AssetPath);
     void PromptCreateNewProject();
     void PromptOpenProject();
@@ -198,7 +203,7 @@ public:
     FString GetBlockingLevelPath(const FString& SceneId) const;
     FString GetSequencePath(const FString& SceneId) const;
 
-    bool IsBlockingLevelOpen(const FString& SceneId);
+    bool IsBlockingLevelOpen(const FString& LevelPath);
     void OpenBlockingLevelIfNeeded(const FString& SceneId);
     void OpenBlockingLevel(const FString& LevelPath);
     void HandleMapOpened(const FString& Filename, bool bAsTemplate);
@@ -260,6 +265,8 @@ public:
 
     FText GetNewProjectAspectText() const;
 
+    void SaveScriptToJson();
+
 private:
 
     // --------------------------------------------------
@@ -269,6 +276,45 @@ private:
     void OnNewProjectAspectChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type SelectInfo);
     TArray<TSharedPtr<FString>> NewProjectAspectOptions;
     TSharedPtr<FString> NewProjectSelectedAspect;
+    TArray<TSharedPtr<FString>> NewProjectFrameRateOptions;
+    TSharedPtr<FString> NewProjectSelectedFrameRate;
+    TArray<TSharedPtr<FString>> NewProjectSceneNumberingOptions;
+    TSharedPtr<FString> NewProjectSelectedSceneNumbering;
+
+    TArray<TSharedPtr<FString>> NewProjectShotNumberingOptions;
+    TSharedPtr<FString> NewProjectSelectedShotNumbering;
+
+    TSharedPtr<SSpinBox<int32>> SceneStartNumberSpinBox;
+    TSharedPtr<SSpinBox<int32>> ShotStartNumberSpinBox;
+    TSharedPtr<SSpinBox<float>> DefaultLensSpinBox;
+    FGASProjectSettings PendingProjectSettings;
+
+    void OnNewProjectFrameRateChanged(
+        TSharedPtr<FString> NewValue,
+        ESelectInfo::Type SelectInfo
+    );
+
+    FText GetNewProjectFrameRateText() const;
+
+    void OnNewProjectSceneNumberingChanged(
+        TSharedPtr<FString> NewValue,
+        ESelectInfo::Type SelectInfo
+    );
+
+    FText GetNewProjectSceneNumberingText() const;
+
+    void OnNewProjectShotNumberingChanged(
+        TSharedPtr<FString> NewValue,
+        ESelectInfo::Type SelectInfo
+    );
+
+    FText GetNewProjectShotNumberingText() const;
+    void OnSceneStartNumberChanged(int32 NewValue);
+    void OnShotStartNumberChanged(int32 NewValue);
+    void OnDefaultLensChanged(float NewValue);
+    void OnEnableBlockingChanged(ECheckBoxState NewState);
+    void OnEnableShotLayersChanged(ECheckBoxState NewState);
+    void OnAutoMasterSequenceChanged(ECheckBoxState NewState);
 
     // --------------------------------------------------
     // UI Commands / Interactions
@@ -296,7 +342,7 @@ private:
 
     FString GetAuthoritativeScriptJsonPath() const;
     void LoadScriptFromJsonIfExists();
-    void SaveScriptToJson();
+    
 
     bool TickShotModeResume(float DeltaTime);
 

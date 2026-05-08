@@ -133,16 +133,230 @@ FText SGAS_ScriptTab::GetNewProjectAspectText() const
         : FText::FromString(TEXT("Select Aspect Ratio"));
 }
 
+FText SGAS_ScriptTab::GetNewProjectFrameRateText() const
+{
+    if (NewProjectSelectedFrameRate.IsValid())
+    {
+        return FText::FromString(*NewProjectSelectedFrameRate);
+    }
+
+    return FText::FromString(TEXT("24"));
+
+}
+
+FText SGAS_ScriptTab::GetNewProjectSceneNumberingText() const
+{
+    if (NewProjectSelectedSceneNumbering.IsValid())
+    {
+        return FText::FromString(
+            *NewProjectSelectedSceneNumbering
+        );
+    }
+
+    return FText::FromString(TEXT("By 10"));
+}
+
+FText SGAS_ScriptTab::GetNewProjectShotNumberingText() const
+{
+    if (NewProjectSelectedShotNumbering.IsValid())
+    {
+        return FText::FromString(
+            *NewProjectSelectedShotNumbering
+        );
+    }
+
+    return FText::FromString(TEXT("By 1"));
+}
+
 void SGAS_ScriptTab::OnNewProjectAspectChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type)
 {
     if (NewValue.IsValid())
     {
         NewProjectSelectedAspect = NewValue;
+
+        PendingProjectSettings.AspectRatio = *NewValue;
+    }
+}
+
+void SGAS_ScriptTab::OnNewProjectFrameRateChanged(
+    TSharedPtr<FString> NewValue,
+    ESelectInfo::Type)
+{
+    if (!NewValue.IsValid())
+    {
+        return;
+    }
+
+    NewProjectSelectedFrameRate = NewValue;
+
+    if (*NewValue == TEXT("23.976"))
+    {
+        PendingProjectSettings.FrameRate =
+            EGASProjectFrameRate::FPS_23_976;
+    }
+    else if (*NewValue == TEXT("24"))
+    {
+        PendingProjectSettings.FrameRate =
+            EGASProjectFrameRate::FPS_24;
+    }
+    else if (*NewValue == TEXT("25"))
+    {
+        PendingProjectSettings.FrameRate =
+            EGASProjectFrameRate::FPS_25;
+    }
+    else if (*NewValue == TEXT("29.97"))
+    {
+        PendingProjectSettings.FrameRate =
+            EGASProjectFrameRate::FPS_29_97;
+    }
+    else if (*NewValue == TEXT("30"))
+    {
+        PendingProjectSettings.FrameRate =
+            EGASProjectFrameRate::FPS_30;
     }
 }
 
 
+void SGAS_ScriptTab::OnNewProjectSceneNumberingChanged(
+    TSharedPtr<FString> NewValue,
+    ESelectInfo::Type)
+{
+    if (!NewValue.IsValid())
+    {
+        return;
+    }
 
+    NewProjectSelectedSceneNumbering = NewValue;
+
+    if (*NewValue == TEXT("By 10"))
+    {
+        PendingProjectSettings.SceneNumberingStyle =
+            EGASNumberingStyle::CountBy10;
+
+        PendingProjectSettings.SceneStartNumber = 10;
+
+        if (SceneStartNumberSpinBox.IsValid())
+        {
+            SceneStartNumberSpinBox->SetValue(10);
+            SceneStartNumberSpinBox->SetEnabled(true);
+        }
+    }
+    else if (*NewValue == TEXT("By 1"))
+    {
+        PendingProjectSettings.SceneNumberingStyle =
+            EGASNumberingStyle::CountBy1;
+
+        PendingProjectSettings.SceneStartNumber = 1;
+
+        if (SceneStartNumberSpinBox.IsValid())
+        {
+            SceneStartNumberSpinBox->SetValue(1);
+            SceneStartNumberSpinBox->SetEnabled(true);
+        }
+    }
+    else if (*NewValue == TEXT("Alphabetic"))
+    {
+        PendingProjectSettings.SceneNumberingStyle =
+            EGASNumberingStyle::Alphabetic;
+
+        if (SceneStartNumberSpinBox.IsValid())
+        {
+            SceneStartNumberSpinBox->SetEnabled(false);
+        }
+    }
+    else if (*NewValue == TEXT("Use FDX"))
+    {
+        PendingProjectSettings.SceneNumberingStyle =
+            EGASNumberingStyle::FromScript;
+
+        if (SceneStartNumberSpinBox.IsValid())
+        {
+            SceneStartNumberSpinBox->SetEnabled(false);
+        }
+    }
+}
+
+void SGAS_ScriptTab::OnNewProjectShotNumberingChanged(
+    TSharedPtr<FString> NewValue,
+    ESelectInfo::Type)
+{
+    if (!NewValue.IsValid())
+    {
+        return;
+    }
+
+    NewProjectSelectedShotNumbering = NewValue;
+
+    if (*NewValue == TEXT("By 1"))
+    {
+        PendingProjectSettings.ShotNumberingPolicy =
+            EGASShotNumberingPolicy::Numeric_1s;
+
+        PendingProjectSettings.ShotStartNumber = 1;
+
+        if (ShotStartNumberSpinBox.IsValid())
+        {
+            ShotStartNumberSpinBox->SetValue(1);
+            ShotStartNumberSpinBox->SetEnabled(true);
+        }
+    }
+    else if (*NewValue == TEXT("By 10"))
+    {
+        PendingProjectSettings.ShotNumberingPolicy =
+            EGASShotNumberingPolicy::Numeric_10s;
+
+        PendingProjectSettings.ShotStartNumber = 10;
+
+        if (ShotStartNumberSpinBox.IsValid())
+        {
+            ShotStartNumberSpinBox->SetValue(10);
+            ShotStartNumberSpinBox->SetEnabled(true);
+        }
+    }
+    else if (*NewValue == TEXT("Alphabetic"))
+    {
+        PendingProjectSettings.ShotNumberingPolicy =
+            EGASShotNumberingPolicy::Alphabetic;
+
+        if (ShotStartNumberSpinBox.IsValid())
+        {
+            ShotStartNumberSpinBox->SetEnabled(false);
+        }
+    }
+}
+
+void SGAS_ScriptTab::OnSceneStartNumberChanged(int32 NewValue)
+{
+    PendingProjectSettings.SceneStartNumber = NewValue;
+}
+
+void SGAS_ScriptTab::OnShotStartNumberChanged(int32 NewValue)
+{
+    PendingProjectSettings.ShotStartNumber = NewValue;
+}
+
+void SGAS_ScriptTab::OnDefaultLensChanged(float NewValue)
+{
+    PendingProjectSettings.DefaultLensMM = NewValue;
+}
+
+void SGAS_ScriptTab::OnEnableBlockingChanged(ECheckBoxState NewState)
+{
+    PendingProjectSettings.bEnableBlocking =
+        (NewState == ECheckBoxState::Checked);
+}
+
+void SGAS_ScriptTab::OnEnableShotLayersChanged(ECheckBoxState NewState)
+{
+    PendingProjectSettings.bEnableShotLayers =
+        (NewState == ECheckBoxState::Checked);
+}
+
+void SGAS_ScriptTab::OnAutoMasterSequenceChanged(ECheckBoxState NewState)
+{
+    PendingProjectSettings.bAutoCreateMasterSequence =
+        (NewState == ECheckBoxState::Checked);
+}
 
 // =======================================================
 // FOR BLOCKING SETUP
@@ -171,9 +385,17 @@ static void SaveSequenceAsset(ULevelSequence* Sequence)
     }
 
     const FString PackageName = Package->GetName();
-    if (PackageName.IsEmpty())
+
+    if (PackageName.IsEmpty() ||
+        PackageName == TEXT("None") ||
+        !FPackageName::IsValidLongPackageName(PackageName, false))
     {
-        UE_LOG(LogGASPrePro, Error, TEXT("SaveSequenceAsset: PackageName empty"));
+        UE_LOG(
+            LogGASPrePro,
+            Error,
+            TEXT("SaveSequenceAsset: Invalid PackageName [%s]"),
+            *PackageName
+        );
         return;
     }
 
@@ -1019,6 +1241,7 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
     if (ScriptPanel.IsValid())
     {
         ScriptPanel->RebuildLayout();
+        ScriptPanel->Invalidate(EInvalidateWidget::Paint);
     }
 
     ClosePendingActionWindow();
@@ -1149,7 +1372,7 @@ void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
 
     if (ActiveProject)
     {
-        Aspect = ActiveProject->DefaultAspectRatio;
+        Aspect = ActiveProject->ProjectSettings.AspectRatio;
     }
 
     const FVector2D Ratio = GAS_ParseAspectRatio(Aspect);
@@ -1428,7 +1651,7 @@ void SGAS_ScriptTab::SyncPreviewToRealCamera()
 
     if (ActiveProject)
     {
-        const FString& RatioString = ActiveProject->DefaultAspectRatio;
+        const FString& RatioString = ActiveProject->ProjectSettings.AspectRatio;
 
         if (RatioString.Contains(TEXT(":")))
         {
@@ -2188,8 +2411,19 @@ FReply SGAS_ScriptTab::OnImportScript()
     if (bOpened && OutFiles.Num() > 0)
     {
         // Import replaces the script wholesale
-        FGASImportNumberingOptions ImportOptions =
-            PromptImportNumberingOptions();
+        FGASImportNumberingOptions ImportOptions;
+
+        ImportOptions.SceneNumberingStyle =
+            PendingProjectSettings.SceneNumberingStyle;
+
+        ImportOptions.ShotNumberingPolicy =
+            PendingProjectSettings.ShotNumberingPolicy;
+
+        ImportOptions.bRespectScriptSceneNumbers =
+            (
+                PendingProjectSettings.SceneNumberingStyle ==
+                EGASNumberingStyle::FromScript
+                );
 
         LoadScriptFromFDX(
             OutFiles[0],
@@ -2303,7 +2537,11 @@ FReply SGAS_ScriptTab::OnToggleSceneNumbers()
 
 void SGAS_ScriptTab::PromptCreateNewProject()
 {
-    ReleaseCameraPreview();
+    if (PreviewSourceCamera.IsValid())
+    {
+        ReleaseCameraPreview();
+    }
+
     PreviewSourceCamera.Reset();
 
     TSharedPtr<SEditableTextBox> NameTextBox;
@@ -2314,12 +2552,69 @@ void SGAS_ScriptTab::PromptCreateNewProject()
     NewProjectAspectOptions.Add(MakeShared<FString>(TEXT("4:3")));
     NewProjectAspectOptions.Add(MakeShared<FString>(TEXT("1:1")));
 
+    NewProjectFrameRateOptions.Reset();
+    NewProjectFrameRateOptions.Add(MakeShared<FString>(TEXT("23.976")));
+    NewProjectFrameRateOptions.Add(MakeShared<FString>(TEXT("24")));
+    NewProjectFrameRateOptions.Add(MakeShared<FString>(TEXT("25")));
+    NewProjectFrameRateOptions.Add(MakeShared<FString>(TEXT("29.97")));
+    NewProjectFrameRateOptions.Add(MakeShared<FString>(TEXT("30")));
+
+    NewProjectSceneNumberingOptions.Reset();
+
+    NewProjectSceneNumberingOptions.Add(
+        MakeShared<FString>(TEXT("By 10"))
+    );
+
+    NewProjectSceneNumberingOptions.Add(
+        MakeShared<FString>(TEXT("By 1"))
+    );
+
+    NewProjectSceneNumberingOptions.Add(
+        MakeShared<FString>(TEXT("Alphabetic"))
+    );
+
+    NewProjectSceneNumberingOptions.Add(
+        MakeShared<FString>(TEXT("Use FDX"))
+    );
+
+    NewProjectShotNumberingOptions.Reset();
+
+    NewProjectShotNumberingOptions.Add(
+        MakeShared<FString>(TEXT("By 1"))
+    );
+
+    NewProjectShotNumberingOptions.Add(
+        MakeShared<FString>(TEXT("By 10"))
+    );
+
+    NewProjectShotNumberingOptions.Add(
+        MakeShared<FString>(TEXT("Alphabetic"))
+    );
+
+    PendingProjectSettings = FGASProjectSettings();
+
     NewProjectSelectedAspect = NewProjectAspectOptions[0];
+    PendingProjectSettings.AspectRatio = *NewProjectSelectedAspect;
+    NewProjectSelectedFrameRate = NewProjectFrameRateOptions[1];
+    PendingProjectSettings.FrameRate =
+        EGASProjectFrameRate::FPS_24;
+
+    NewProjectSelectedSceneNumbering =
+        NewProjectSceneNumberingOptions[0];
+
+    PendingProjectSettings.SceneNumberingStyle =
+        EGASNumberingStyle::CountBy10;
+
+    NewProjectSelectedShotNumbering =
+        NewProjectShotNumberingOptions[0];
+
+    PendingProjectSettings.ShotNumberingPolicy =
+        EGASShotNumberingPolicy::Numeric_1s;
 
     TSharedRef<SWindow> CreateWindow =
         SNew(SWindow)
         .Title(FText::FromString(TEXT("Create New GAS Project")))
-        .ClientSize(FVector2D(400.f, 220.f))
+        .ClientSize(FVector2D(400.f, 520.f))
         .SupportsMinimize(false)
         .SupportsMaximize(false);
 
@@ -2327,7 +2622,21 @@ void SGAS_ScriptTab::PromptCreateNewProject()
         SNew(SVerticalBox)
 
         + SVerticalBox::Slot()
-        .Padding(10.f, 10.f, 10.f, 5.f)
+        .AutoHeight()
+        .Padding(10.f, 10.f, 10.f, 8.f)
+        [
+            SNew(SBorder)
+                .Padding(FMargin(8.f, 6.f))
+                .BorderImage(FCoreStyle::Get().GetBrush("ToolPanel.GroupBorder"))
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("PROJECT")))
+                        .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .Padding(10.f, 2.f, 10.f, 5.f)
         .AutoHeight()
         [
             SNew(STextBlock)
@@ -2342,34 +2651,437 @@ void SGAS_ScriptTab::PromptCreateNewProject()
         ]
 
         + SVerticalBox::Slot()
-        .Padding(10.f, 5.f, 10.f, 5.f)
+        .Padding(10.f, 5.f, 10.f, 10.f)
         .AutoHeight()
         [
-            SNew(STextBlock)
-                .Text(FText::FromString(TEXT("Aspect Ratio")))
+            SNew(SHorizontalBox)
+
+                // =====================================================
+                // Aspect Ratio
+                // =====================================================
+
+                +SHorizontalBox::Slot()
+                .AutoWidth()
+                .Padding(0.f, 0.f, 16.f, 0.f)
+                [
+                    SNew(SVerticalBox)
+
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.f, 0.f, 0.f, 4.f)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("Aspect Ratio")))
+                        ]
+
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SNew(SBox)
+                                .WidthOverride(140.f)
+                                [
+                                    SNew(SComboBox<TSharedPtr<FString>>)
+                                        .OptionsSource(&NewProjectAspectOptions)
+                                        .InitiallySelectedItem(NewProjectSelectedAspect)
+
+                                        .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+                                            {
+                                                return SNew(STextBlock)
+                                                    .Text(
+                                                        Item.IsValid()
+                                                        ? FText::FromString(*Item)
+                                                        : FText::GetEmpty()
+                                                    );
+                                            })
+
+                                        .OnSelectionChanged(
+                                            this,
+                                            &SGAS_ScriptTab::OnNewProjectAspectChanged
+                                        )
+
+                                        [
+                                            SNew(STextBlock)
+                                                .Text(
+                                                    this,
+                                                    &SGAS_ScriptTab::GetNewProjectAspectText
+                                                )
+                                        ]
+                                ]
+                        ]
+                ]
+
+            // =====================================================
+            // Frame Rate
+            // =====================================================
+
+            +SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SVerticalBox)
+
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.f, 0.f, 0.f, 4.f)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("Frame Rate")))
+                        ]
+
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SNew(SBox)
+                                .WidthOverride(120.f)
+                                [
+                                    SNew(SComboBox<TSharedPtr<FString>>)
+                                        .OptionsSource(&NewProjectFrameRateOptions)
+                                        .InitiallySelectedItem(NewProjectSelectedFrameRate)
+
+                                        .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+                                            {
+                                                return SNew(STextBlock)
+                                                    .Text(
+                                                        Item.IsValid()
+                                                        ? FText::FromString(*Item)
+                                                        : FText::GetEmpty()
+                                                    );
+                                            })
+
+                                        .OnSelectionChanged(
+                                            this,
+                                            &SGAS_ScriptTab::OnNewProjectFrameRateChanged
+                                        )
+
+                                        [
+                                            SNew(STextBlock)
+                                                .Text(
+                                                    this,
+                                                    &SGAS_ScriptTab::GetNewProjectFrameRateText
+                                                )
+                                        ]
+                                ]
+                        ]
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(10.f, 10.f, 10.f, 8.f)
+        [
+            SNew(SBorder)
+                .Padding(FMargin(8.f, 6.f))
+                .BorderImage(FCoreStyle::Get().GetBrush("ToolPanel.GroupBorder"))
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("NUMBERING")))
+                        .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .Padding(10.f, 2.f, 10.f, 10.f)
+        .AutoHeight()
+        [
+            SNew(SHorizontalBox)
+
+                // =====================================================
+                // Scene Numbering
+                // =====================================================
+
+                +SHorizontalBox::Slot()
+                .AutoWidth()
+                .Padding(0.f, 0.f, 16.f, 0.f)
+                [
+                    SNew(SVerticalBox)
+
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.f, 0.f, 0.f, 4.f)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("Scene Numbering")))
+                        ]
+
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SNew(SBox)
+                                .WidthOverride(160.f)
+                                [
+                                    SNew(SComboBox<TSharedPtr<FString>>)
+                                        .OptionsSource(&NewProjectSceneNumberingOptions)
+                                        .InitiallySelectedItem(NewProjectSelectedSceneNumbering)
+
+                                        .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+                                            {
+                                                return SNew(STextBlock)
+                                                    .Text(
+                                                        Item.IsValid()
+                                                        ? FText::FromString(*Item)
+                                                        : FText::GetEmpty()
+                                                    );
+                                            })
+
+                                        .OnSelectionChanged(
+                                            this,
+                                            &SGAS_ScriptTab::OnNewProjectSceneNumberingChanged
+                                        )
+
+                                        [
+                                            SNew(STextBlock)
+                                                .Text(
+                                                    this,
+                                                    &SGAS_ScriptTab::GetNewProjectSceneNumberingText
+                                                )
+                                        ]
+                                ]
+                        ]
+                ]
+
+            // =====================================================
+            // Shot Numbering
+            // =====================================================
+
+            +SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SVerticalBox)
+
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        .Padding(0.f, 0.f, 0.f, 4.f)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("Shot Numbering")))
+                        ]
+
+                        + SVerticalBox::Slot()
+                        .AutoHeight()
+                        [
+                            SNew(SBox)
+                                .WidthOverride(160.f)
+                                [
+                                    SNew(SComboBox<TSharedPtr<FString>>)
+                                        .OptionsSource(&NewProjectShotNumberingOptions)
+                                        .InitiallySelectedItem(NewProjectSelectedShotNumbering)
+
+                                        .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+                                            {
+                                                return SNew(STextBlock)
+                                                    .Text(
+                                                        Item.IsValid()
+                                                        ? FText::FromString(*Item)
+                                                        : FText::GetEmpty()
+                                                    );
+                                            })
+
+                                        .OnSelectionChanged(
+                                            this,
+                                            &SGAS_ScriptTab::OnNewProjectShotNumberingChanged
+                                        )
+
+                                        [
+                                            SNew(STextBlock)
+                                                .Text(
+                                                    this,
+                                                    &SGAS_ScriptTab::GetNewProjectShotNumberingText
+                                                )
+                                        ]
+                                ]
+                        ]
+                ]
         ]
 
         + SVerticalBox::Slot()
-        .Padding(10.f, 0.f, 10.f, 10.f)
-        .AutoHeight()
-        [
-            SNew(SComboBox<TSharedPtr<FString>>)
-                .OptionsSource(&NewProjectAspectOptions)
-                .InitiallySelectedItem(NewProjectSelectedAspect)
+            .Padding(10.f, 0.f, 10.f, 10.f)
+            .AutoHeight()
+            [
+                SNew(SHorizontalBox)
 
-                .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
-                    {
-                        return SNew(STextBlock)
-                            .Text(Item.IsValid() ? FText::FromString(*Item) : FText::GetEmpty());
-                    })
+                    // =====================================================
+                    // Scene Start Number
+                    // =====================================================
 
-                .OnSelectionChanged(this, &SGAS_ScriptTab::OnNewProjectAspectChanged)
+                    +SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .Padding(0.f, 0.f, 16.f, 0.f)
+                    [
+                        SNew(SVerticalBox)
 
-                [
-                    SNew(STextBlock)
-                        .Text(this, &SGAS_ScriptTab::GetNewProjectAspectText)
-                ]
-        ]
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.f, 0.f, 0.f, 4.f)
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(TEXT("Scene Start")))
+                            ]
+
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            [
+                                SAssignNew(SceneStartNumberSpinBox, SSpinBox<int32>)
+                                    .MinValue(1)
+                                    .MaxValue(9999)
+                                    .Value(PendingProjectSettings.SceneStartNumber)
+                                    .MinDesiredWidth(120.f)
+                                    .OnValueChanged(
+                                        this,
+                                        &SGAS_ScriptTab::OnSceneStartNumberChanged
+                                    )
+                            ]
+                    ]
+
+                // =====================================================
+                // Shot Start Number
+                // =====================================================
+
+                +SHorizontalBox::Slot()
+                    .AutoWidth()
+                    [
+                        SNew(SVerticalBox)
+
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.f, 0.f, 0.f, 4.f)
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(TEXT("Shot Start")))
+                            ]
+
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            [
+                                SAssignNew(ShotStartNumberSpinBox, SSpinBox<int32>)
+                                    .MinValue(1)
+                                    .MaxValue(9999)
+                                    .Value(PendingProjectSettings.ShotStartNumber)
+                                    .MinDesiredWidth(120.f)
+                                    .OnValueChanged(
+                                        this,
+                                        &SGAS_ScriptTab::OnShotStartNumberChanged
+                                    )
+                            ]
+                    ]
+            ]
+
+        + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(10.f, 10.f, 10.f, 8.f)
+            [
+                SNew(SBorder)
+                    .Padding(FMargin(8.f, 6.f))
+                    .BorderImage(FCoreStyle::Get().GetBrush("ToolPanel.GroupBorder"))
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::FromString(TEXT("CAMERA")))
+                            .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+                    ]
+            ]
+
+        + SVerticalBox::Slot()
+            .Padding(10.f, 2.f, 10.f, 10.f)
+            .AutoHeight()
+            [
+                SNew(SHorizontalBox)
+
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    [
+                        SNew(SVerticalBox)
+
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            .Padding(0.f, 0.f, 0.f, 4.f)
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(TEXT("Default Lens")))
+                            ]
+
+                            + SVerticalBox::Slot()
+                            .AutoHeight()
+                            [
+                                SAssignNew(DefaultLensSpinBox, SSpinBox<float>)
+                                    .MinValue(8.f)
+                                    .MaxValue(300.f)
+                                    .Delta(1.f)
+                                    .Value(PendingProjectSettings.DefaultLensMM)
+                                    .MinDesiredWidth(120.f)
+                                    .OnValueChanged(
+                                        this,
+                                        &SGAS_ScriptTab::OnDefaultLensChanged
+                                    )
+                            ]
+                    ]
+            ]
+
+        + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(10.f, 10.f, 10.f, 8.f)
+            [
+                SNew(SBorder)
+                    .Padding(FMargin(8.f, 6.f))
+                    .BorderImage(FCoreStyle::Get().GetBrush("ToolPanel.GroupBorder"))
+                    [
+                        SNew(STextBlock)
+                            .Text(FText::FromString(TEXT("WORKFLOW")))
+                            .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+                    ]
+            ]
+
+        + SVerticalBox::Slot()
+            .Padding(10.f, 2.f, 10.f, 10.f)
+            .AutoHeight()
+            [
+                SNew(SVerticalBox)
+
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.f, 2.f)
+                    [
+                        SNew(SCheckBox)
+                            .IsChecked(ECheckBoxState::Checked)
+                            .OnCheckStateChanged(
+                                this,
+                                &SGAS_ScriptTab::OnEnableBlockingChanged
+                            )
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(TEXT("Enable Blocking")))
+                            ]
+                    ]
+
+                + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.f, 2.f)
+                    [
+                        SNew(SCheckBox)
+                            .IsChecked(ECheckBoxState::Checked)
+                            .OnCheckStateChanged(
+                                this,
+                                &SGAS_ScriptTab::OnEnableShotLayersChanged
+                            )
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(TEXT("Enable Shot Layers")))
+                            ]
+                    ]
+
+                + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.f, 2.f)
+                    [
+                        SNew(SCheckBox)
+                            .IsChecked(ECheckBoxState::Checked)
+                            .OnCheckStateChanged(
+                                this,
+                                &SGAS_ScriptTab::OnAutoMasterSequenceChanged
+                            )
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(TEXT("Auto Create Master Sequence")))
+                            ]
+                    ]
+            ]
 
         + SVerticalBox::Slot()
         .Padding(10.f)
@@ -2398,7 +3110,9 @@ void SGAS_ScriptTab::PromptCreateNewProject()
                                     return FReply::Handled();
                                 }
 
-                                if (CreateNewProject(EnteredName, NewProjectSelectedAspect.IsValid() ? *NewProjectSelectedAspect : TEXT("16:9")))
+                                if (CreateNewProject(
+                                    EnteredName,
+                                    PendingProjectSettings))
                                 {
                                     // Reset script state
                                     CurrentScript = FGASScript();
@@ -2556,7 +3270,9 @@ FReply SGAS_ScriptTab::OnAddShotMarkerClicked()
 }
 
 
-bool SGAS_ScriptTab::CreateNewProject(const FString& ProjectName, const FString& AspectRatio) 
+bool SGAS_ScriptTab::CreateNewProject(
+    const FString& ProjectName,
+    const FGASProjectSettings& InProjectSettings)
 {
     if (ProjectName.IsEmpty())
     {
@@ -2609,7 +3325,37 @@ bool SGAS_ScriptTab::CreateNewProject(const FString& ProjectName, const FString&
             *AssetName,
             RF_Public | RF_Standalone
         );
-    NewProject->DefaultAspectRatio = AspectRatio;
+    NewProject->ProjectSettings.AspectRatio =
+        InProjectSettings.AspectRatio;
+
+    NewProject->ProjectSettings.FrameRate =
+        InProjectSettings.FrameRate;
+
+    NewProject->ProjectSettings.SceneNumberingStyle =
+        InProjectSettings.SceneNumberingStyle;
+
+    NewProject->ProjectSettings.SceneStartNumber =
+        InProjectSettings.SceneStartNumber;
+
+    NewProject->ProjectSettings.ShotNumberingPolicy =
+        InProjectSettings.ShotNumberingPolicy;
+
+    NewProject->ProjectSettings.ShotStartNumber =
+        InProjectSettings.ShotStartNumber;
+
+    NewProject->ProjectSettings.DefaultLensMM =
+        InProjectSettings.DefaultLensMM;
+
+    NewProject->ProjectSettings.bEnableBlocking =
+        InProjectSettings.bEnableBlocking;
+
+    NewProject->ProjectSettings.bEnableShotLayers =
+        InProjectSettings.bEnableShotLayers;
+
+    NewProject->ProjectSettings.bAutoCreateMasterSequence =
+        InProjectSettings.bAutoCreateMasterSequence;
+
+    NewProject->MarkPackageDirty();
 
     if (!NewProject)
     {
@@ -2620,7 +3366,6 @@ bool SGAS_ScriptTab::CreateNewProject(const FString& ProjectName, const FString&
     NewProject->ProjectName = CleanName;
 
     // Mark dirty and register
-    NewProject->MarkPackageDirty();
     FAssetRegistryModule::AssetCreated(NewProject);
 
     // Save package to disk
@@ -2687,7 +3432,12 @@ bool SGAS_ScriptTab::LoadProject(const FString& AssetPath)
 
     UE_LOG(LogGASPrePro, Verbose, TEXT("ACTIVE PROJECT POINTER: %p"), ActiveProject);
 
-    UE_LOG(LogGASPrePro, Verbose, TEXT("PROJECT LOADED: %s"), *ActiveProject->ProjectName);
+    UE_LOG(
+        LogGASPrePro,
+        Verbose,
+        TEXT("PROJECT LOADED: %s"),
+        *ActiveProject->ProjectName
+    );
 
     // Load script JSON for this project
     LoadScriptFromJsonIfExists();
@@ -3540,7 +4290,8 @@ bool SGAS_ScriptTab::CreateBlockingLevelForScene(
         return false;
     }
 
-    const FString ProjectName = ActiveProject->ProjectName;
+    const FString ProjectName =
+        ActiveProject->ProjectName;
     const FString SceneId = SceneBlock.Id;
 
 
@@ -3797,206 +4548,24 @@ void SGAS_ScriptTab::OnBlockingCastModified()
     UE_LOG(LogGASPrePro, Warning, TEXT("Blocking cast modified — saving"));
 
     bIsUpdatingCast = true;
+
     MarkScriptDirty();
     SaveScriptToJson();
 
-    UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-    if (!World)
-        return;
-
-    // --------------------------------------------------
-    // Find Scene Block
-    // --------------------------------------------------
-
-    FGASBlock* SceneBlock = nullptr;
-
-    for (FGASBlock& Block : CurrentScript.Blocks)
+    if (GEditor)
     {
-        if (Block.Id == ActiveBlockingSceneId.ToString())
+        if (UWorld* World = GEditor->GetEditorWorldContext().World())
         {
-            SceneBlock = &Block;
-            break;
+            World->MarkPackageDirty();
         }
     }
-
-    if (!SceneBlock)
-        return;
-
-    // --------------------------------------------------
-    // DEBUG: Print expected characters
-    // --------------------------------------------------
-
-    UE_LOG(LogTemp, Error, TEXT("=== SCENE CHARACTERS ==="));
-    for (const FString& CharId : SceneBlock->CharactersInScene)
-    {
-        UE_LOG(LogTemp, Error, TEXT("SCENE HAS → %s"), *CharId);
-    }
-
-    // --------------------------------------------------
-    // Remove actors NOT in cast (DO THIS FIRST)
-    // --------------------------------------------------
-
-    TArray<AActor*> ActorsToDestroy;
-
-    for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
-    {
-        AGAS_StandInActor* StandIn = *It;
-
-        if (!StandIn)
-            continue;
-
-        const FString ActorId = StandIn->GAS_CharacterId.TrimStartAndEnd();
-
-        UE_LOG(LogTemp, Error, TEXT("CHECK → Actor: %s | ID: %s"),
-            *StandIn->GetName(),
-            *ActorId);
-
-        if (!SceneBlock->CharactersInScene.Contains(ActorId))
-        {
-            UE_LOG(LogTemp, Warning, TEXT("❌ Removing actor %s (ID: %s)"),
-                *StandIn->GetName(),
-                *ActorId);
-
-            ActorsToDestroy.Add(StandIn);
-        }
-    }
-
-    // Destroy AFTER iteration (safe)
-    for (AActor* Actor : ActorsToDestroy)
-    {
-        if (!Actor) continue;
-
-        UE_LOG(LogTemp, Warning, TEXT("🔥 FORCE DESTROY → %s"), *Actor->GetName());
-
-        Actor->Modify();
-
-        Actor->Destroy();
-
-        Actor->MarkAsGarbage();
-    }
-
-    GEditor->ForceGarbageCollection();
-
-    // --------------------------------------------------
-    // 🔥 FULL RESET SEQUENCER (authoritative rebuild)
-    // --------------------------------------------------
 
     if (GActiveBlockingSequence)
     {
-        UMovieScene* MovieScene = GActiveBlockingSequence->GetMovieScene();
-
-        if (MovieScene)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("🔥 CLEARING ALL SEQUENCER BINDINGS"));
-
-            // Remove ALL bindings safely (engine-compatible)
-            TArray<FMovieSceneBinding> AllBindings = MovieScene->GetBindings();
-
-            for (const FMovieSceneBinding& Binding : AllBindings)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("🔥 Removing binding GUID: %s"),
-                    *Binding.GetObjectGuid().ToString());
-
-                MovieScene->RemovePossessable(Binding.GetObjectGuid());
-                MovieScene->RemoveSpawnable(Binding.GetObjectGuid());
-            }
-        }
-
-        // --------------------------------------------------
-        // Rebind ONLY valid actors
-        // --------------------------------------------------
-
-        if (!GActiveBlockingSequence)
-        {
-            UE_LOG(LogTemp, Error, TEXT("❌ No Active Blocking Sequence"));
-            return;
-        }
-
-        for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
-        {
-            AGAS_StandInActor* Actor = *It;
-            if (!Actor) continue;
-
-            FString ActorId = Actor->GAS_CharacterId.TrimStartAndEnd();
-
-            // 🔥 HARD FILTER: ONLY bind actors that STILL EXIST IN SCRIPT
-            if (!SceneBlock->CharactersInScene.Contains(ActorId))
-            {
-                UE_LOG(LogTemp, Error, TEXT("🚫 SKIP BIND (removed): %s"), *ActorId);
-                continue;
-            }
-
-            // 🔥 ALSO prevent duplicate bindings
-            if (FGASSequencerBindingUtils::IsActorAlreadyBound(GActiveBlockingSequence, Actor))
-            {
-                UE_LOG(LogTemp, Warning, TEXT("SKIP BIND (already bound): %s"), *ActorId);
-                continue;
-            }
-
-            FGASSequencerBindingUtils::EnsureActorTransformTrack(
-                GActiveBlockingSequence,
-                Actor
-            );
-        }
-
         GActiveBlockingSequence->MarkPackageDirty();
     }
 
-    // --------------------------------------------------
-    // Respawn missing stand-ins
-    // --------------------------------------------------
-
-    SpawnSceneCast(SceneBlock);
-
-    // --------------------------------------------------
-    // Refresh meshes from script definitions
-    // --------------------------------------------------
-
-    for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
-    {
-        AGAS_StandInActor* StandIn = *It;
-
-        if (!StandIn)
-            continue;
-
-        //StandIn->RefreshMeshFromScript(&CurrentScript);
-    }
-
-    // --------------------------------------------------
-    // Bind ONLY VALID stand-ins to Sequencer
-    // --------------------------------------------------
-
-    if (GActiveBlockingSequence)
-    {
-        for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
-        {
-            AGAS_StandInActor* Actor = *It;
-            if (!Actor) continue;
-
-            FString ActorId = Actor->GAS_CharacterId.TrimStartAndEnd();
-
-            if (SceneBlock->CharactersInScene.Contains(ActorId))
-            {
-                UMovieScene3DTransformTrack* TransformTrack =
-                    FGASSequencerBindingUtils::EnsureActorTransformTrack(
-                        GActiveBlockingSequence,
-                        Actor
-                    );
-
-                UE_LOG(LogTemp, Warning,
-                    TEXT("Rebinding valid actor: %s -> %s"),
-                    *ActorId,
-                    TransformTrack ? TEXT("OK") : TEXT("FAILED"));
-            }
-        }
-    }
-
-    // --------------------------------------------------
-    // Mark world dirty
-    // --------------------------------------------------
-
     bIsUpdatingCast = false;
-    World->MarkPackageDirty();
 }
 
 void SGAS_ScriptTab::SpawnSceneCast(FGASBlock* SceneBlock)
@@ -5704,7 +6273,8 @@ void SGAS_ScriptTab::LoadScriptFromJsonIfExists()
 
 FString SGAS_ScriptTab::GetAuthoritativeScriptJsonPath() const
 {
-    if (!ActiveProject || ActiveProject->ProjectName.IsEmpty())
+    if (!ActiveProject ||
+        ActiveProject->ProjectName.IsEmpty())
     {
         return TEXT("");
     }
@@ -5713,7 +6283,9 @@ FString SGAS_ScriptTab::GetAuthoritativeScriptJsonPath() const
         FPaths::ProjectSavedDir() + TEXT("GAS/");
 
     FString ProjectDir =
-        BaseDir + ActiveProject->ProjectName + TEXT("/");
+        BaseDir +
+        ActiveProject->ProjectName +
+        TEXT("/");
 
     IFileManager::Get().MakeDirectory(*ProjectDir, true);
 
@@ -5814,7 +6386,6 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
     EnterShotMarkingMode(SceneId);
     bIsResumingShotMode = false;
 
-    OpenCastWindowForScene(SceneId);
 }
 
 FString SGAS_ScriptTab::GetBlockingLevelPath(const FString& SceneId) const
@@ -5922,7 +6493,7 @@ void SGAS_ScriptTab::EnterShotMarkingMode(const FString& SceneId)
     // --------------------------------------------------
     // If correct blocking level is NOT open yet, open it and resume later
     // --------------------------------------------------
-    if (!bIsResumingShotMode && !IsBlockingLevelOpen(SceneId))
+    if (!bIsResumingShotMode && !IsBlockingLevelOpen(BlockingPath))
     {
         UE_LOG(LogGASPrePro, Warning,
             TEXT("[ShotMode] Opening level FIRST Scene=%s Path=%s"),

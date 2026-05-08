@@ -660,18 +660,23 @@ FReply SGAS_BlockingCastWindow::OnAddClicked()
         }
     }
 
+    LeftItems.Remove(SelectedLeftItem);
+
     if (!bAlreadyInRight)
     {
         RightItems.Add(MakeShared<FString>(Name));
     }
 
-    RefreshLists();
-    RightListView->RequestListRefresh();
+    SelectedLeftItem.Reset();
 
     if (World)
     {
         World->MarkPackageDirty();
     }
+
+    RefreshLists();
+
+    OnCastModified.ExecuteIfBound();
 
     return FReply::Handled();
 }
@@ -696,7 +701,7 @@ FReply SGAS_BlockingCastWindow::OnRemoveClicked()
     if (!SceneBlock)
         return FReply::Handled();
 
-    const FString& Name = *SelectedRightItem;
+    const FString Name = SelectedRightItem->ToUpper();
 
     UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 
@@ -743,17 +748,11 @@ FReply SGAS_BlockingCastWindow::OnRemoveClicked()
 
         if (ActorToRemove)
         {
-            TWeakObjectPtr<AActor> ActorWeak = ActorToRemove;
+            UE_LOG(LogTemp, Error, TEXT("🔥 DESTROYING ACTOR IMMEDIATELY"));
 
-            if (ActorToRemove)
-            {
-                UE_LOG(LogTemp, Error, TEXT("🔥 DESTROYING ACTOR IMMEDIATELY"));
-
-                ActorToRemove->Modify();
-                ActorToRemove->Destroy();
-
-                ActorToRemove = nullptr;
-            }
+            ActorToRemove->Modify();
+            ActorToRemove->Destroy();
+            ActorToRemove = nullptr;
         }
 
         World->MarkPackageDirty();
@@ -766,7 +765,31 @@ FReply SGAS_BlockingCastWindow::OnRemoveClicked()
         }
     );
 
+    bool bAlreadyInLeft = false;
+
+    for (const TSharedPtr<FString>& Item : LeftItems)
+    {
+        if (Item.IsValid() && *Item == Name)
+        {
+            bAlreadyInLeft = true;
+            break;
+        }
+    }
+
+    if (!bAlreadyInLeft)
+    {
+        LeftItems.Add(MakeShared<FString>(Name));
+    }
+
+    SelectedRightItem.Reset();
+
     RefreshLists();
+
+    if (Script)
+    {
+        // save only, no global cast rebuild
+        OnCastModified.ExecuteIfBound();
+    }
 
     return FReply::Handled();
 }

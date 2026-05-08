@@ -1715,25 +1715,21 @@ int32 SGASScriptPanel::ResolveParagraphForShot(float ScriptY) const
 
 FString FGASMarker::GetShotLabel(EGASShotNumberingPolicy Policy) const
 {
-    int32 Index = SceneShotIndex;
-
     switch (Policy)
     {
     case EGASShotNumberingPolicy::Numeric_1s:
-        return FString::FromInt(Index + 1);
-
     case EGASShotNumberingPolicy::Numeric_10s:
-        return FString::FromInt((Index + 1) * 10);
+        return FString::FromInt(ShotIndex);
 
     case EGASShotNumberingPolicy::Alphabetic:
     {
-        int32 LetterIndex = Index % 26;
-        TCHAR Letter = 'A' + LetterIndex;
+        const int32 LetterIndex = FMath::Max(0, ShotIndex - 1);
+        const TCHAR Letter = 'A' + (LetterIndex % 26);
         return FString::Chr(Letter);
     }
 
     default:
-        return FString::FromInt(Index + 1);
+        return FString::FromInt(ShotIndex);
     }
 }
 
@@ -1849,6 +1845,13 @@ void SGASScriptPanel::CommitShotAtParagraph(
             MaxExistingShotNumber =
                 FMath::Max(MaxExistingShotNumber, Marker.ShotIndex);
         }
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("CHECK Marker=%s Block=%s Wanted=%s ShotIndex=%d"),
+            *Marker.Id,
+            *Marker.BlockId,
+            *SceneBlockId,
+            Marker.ShotIndex);
     }
 
     switch (SourceScript->ShotNumberingPolicy)
@@ -3011,6 +3014,7 @@ FReply SGASScriptPanel::OnMouseButtonDown(
     if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
     {
         const FString HitShotId = HitTestShot(LocalPos);
+        UE_LOG(LogTemp, Warning, TEXT("RIGHT CLICK HitShotId = %s"), *HitShotId);
         if (!HitShotId.IsEmpty() && SourceScript)
         {
             // Capture info up front
@@ -3085,7 +3089,8 @@ FReply SGASScriptPanel::OnMouseButtonDown(
 
                                                 if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
                                                 {
-                                                    Tab->RequestDeleteShotMarker(HitShotId);
+                                                    Tab->MarkScriptDirty();
+                                                    Tab->SaveScriptToJson();
                                                 }
 
                                                 ClearPanelShotSelection();
