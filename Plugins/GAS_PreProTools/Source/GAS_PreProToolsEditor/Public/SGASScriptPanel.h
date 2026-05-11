@@ -167,6 +167,9 @@ public:
         const FString& Value
     );
 
+    bool bEditingExistingShot = false;
+    FString EditingMarkerId;
+
     float GetScrollOffsetY() const { return ScrollOffsetY; }
     float GetClampedScrollOffsetY() const { return ScrollOffsetY; }
     void SetExternalScrollOffset(float InOffset);
@@ -182,7 +185,12 @@ public:
     void UpdateShotPreviewCamera(const FString& CharacterId, EGASShotType ShotType, ACineCameraActor* TargetCamera);
     TWeakObjectPtr<ACineCameraActor> ActiveShotPreviewCamera;
 
-    void OpenShotIntentPopup(const FString& MarkerId, const FString& SceneId, bool bHasBlocking);
+    void OpenShotIntentPopup(
+        const FString& MarkerId,
+        const FString& SceneId,
+        bool bHasBlocking,
+        bool bIsNewShot
+    );
 
     FGASBlock* GetSceneBlockById(const FString& SceneId);
 

@@ -54,7 +54,6 @@ private:
 
 
     TSharedPtr<SGAS_TestWindow> MainToolWindow;
-    TSharedPtr<SGAS_ScriptTab> PersistentScriptTab;
 
 };
 

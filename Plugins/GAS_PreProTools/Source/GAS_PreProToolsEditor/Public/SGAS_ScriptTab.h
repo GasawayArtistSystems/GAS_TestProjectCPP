@@ -195,6 +195,8 @@ public:
         const FGASSetDescriptor& SelectedSet
     );
 
+    bool CreateEmptySceneLevel(FGASBlock& SceneBlock);
+
     void FinalizeBlockingLevel(UWorld* World);
 
     FGASBlock* GetSceneBlockFromCursor();
@@ -243,6 +245,10 @@ public:
     );
 
     bool bIsEditingShot = false;
+    bool bRestoreSavedCameraThisFrame = false;
+
+    FString PendingShotIntentMarkerId;
+    FString PendingShotIntentSceneId;
 
     // --------------------------------------------------
     // Public Shot-State Flags
@@ -286,7 +292,6 @@ private:
 
     TSharedPtr<SSpinBox<int32>> SceneStartNumberSpinBox;
     TSharedPtr<SSpinBox<int32>> ShotStartNumberSpinBox;
-    TSharedPtr<SSpinBox<float>> DefaultLensSpinBox;
     FGASProjectSettings PendingProjectSettings;
 
     void OnNewProjectFrameRateChanged(
@@ -311,7 +316,6 @@ private:
     FText GetNewProjectShotNumberingText() const;
     void OnSceneStartNumberChanged(int32 NewValue);
     void OnShotStartNumberChanged(int32 NewValue);
-    void OnDefaultLensChanged(float NewValue);
     void OnEnableBlockingChanged(ECheckBoxState NewState);
     void OnEnableShotLayersChanged(ECheckBoxState NewState);
     void OnAutoMasterSequenceChanged(ECheckBoxState NewState);
@@ -397,6 +401,11 @@ private:
     // --------------------------------------------------
     UPROPERTY()
     UGASPreProProject* ActiveProject = nullptr;
+
+    UGASPreProProject* GetActiveProject() const
+    {
+        return ActiveProject;
+    }
 
     bool bIsScriptDirty = false;
 

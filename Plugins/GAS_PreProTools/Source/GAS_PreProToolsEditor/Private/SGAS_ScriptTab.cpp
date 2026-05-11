@@ -69,6 +69,7 @@
 #include "Engine/LevelStreamingDynamic.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/LevelStreaming.h"
+#include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Styling/SlateBrush.h"
 
@@ -259,8 +260,11 @@ void SGAS_ScriptTab::OnNewProjectSceneNumberingChanged(
         PendingProjectSettings.SceneNumberingStyle =
             EGASNumberingStyle::Alphabetic;
 
+        PendingProjectSettings.SceneStartNumber = 1;
+
         if (SceneStartNumberSpinBox.IsValid())
         {
+            SceneStartNumberSpinBox->SetValue(1);
             SceneStartNumberSpinBox->SetEnabled(false);
         }
     }
@@ -318,8 +322,11 @@ void SGAS_ScriptTab::OnNewProjectShotNumberingChanged(
         PendingProjectSettings.ShotNumberingPolicy =
             EGASShotNumberingPolicy::Alphabetic;
 
+        PendingProjectSettings.ShotStartNumber = 1;
+
         if (ShotStartNumberSpinBox.IsValid())
         {
+            ShotStartNumberSpinBox->SetValue(1);
             ShotStartNumberSpinBox->SetEnabled(false);
         }
     }
@@ -333,11 +340,6 @@ void SGAS_ScriptTab::OnSceneStartNumberChanged(int32 NewValue)
 void SGAS_ScriptTab::OnShotStartNumberChanged(int32 NewValue)
 {
     PendingProjectSettings.ShotStartNumber = NewValue;
-}
-
-void SGAS_ScriptTab::OnDefaultLensChanged(float NewValue)
-{
-    PendingProjectSettings.DefaultLensMM = NewValue;
 }
 
 void SGAS_ScriptTab::OnEnableBlockingChanged(ECheckBoxState NewState)
@@ -802,7 +804,7 @@ static FGASImportNumberingOptions PromptImportNumberingOptions()
                         {
                             ShotBy1->SetIsChecked(ECheckBoxState::Unchecked);
                             ShotAlpha->SetIsChecked(ECheckBoxState::Unchecked);
-                            Options.ShotNumberingPolicy = EGASShotNumberingPolicy::Numeric_10s;
+                            Options.ShotNumberingPolicy = EGASShotNumberingPolicy::Numeric_1s;
                         }
                     })
                 [
@@ -1297,6 +1299,48 @@ void SGAS_ScriptTab::ApplyCameraToLastCreatedShot(
 
 void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
 {
+    static double LastPreviewInitTime = 0.0;
+
+    const double CurrentTime = FPlatformTime::Seconds();
+
+    if ((CurrentTime - LastPreviewInitTime) < 0.25)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("InitializeCameraPreview THROTTLED"));
+        return;
+    }
+
+    LastPreviewInitTime = CurrentTime;
+
+
+    if (GExitPurge || GIsRequestingExit || IsEngineExitRequested())
+    {
+        return;
+    }
+
+    UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!EditorWorld || !IsValid(EditorWorld))
+    {
+        return;
+    }
+
+    int32 SceneCaptureCount = 0;
+    int32 CineCameraCount = 0;
+
+    for (TObjectIterator<USceneCaptureComponent2D> It; It; ++It)
+    {
+        ++SceneCaptureCount;
+    }
+
+    for (TObjectIterator<ACineCameraActor> It; It; ++It)
+    {
+        ++CineCameraCount;
+    }
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("PREVIEW AUDIT | SceneCaptures=%d | CineCameras=%d"),
+        SceneCaptureCount,
+        CineCameraCount);
 
     UE_LOG(LogTemp, Warning, TEXT("InitializeCameraPreview called"));
 
@@ -1341,29 +1385,30 @@ void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
     // --------------------------------------------------
     // If preview component belongs to an old camera / old world, kill it
     // --------------------------------------------------
-    if (PreviewSceneCapture)
+
+    if (!InSourceCamera ||
+        !IsValid(InSourceCamera) ||
+        InSourceCamera->IsActorBeingDestroyed())
     {
-        const bool bBadOwner =
-            (PreviewSceneCapture->GetOwner() != InSourceCamera);
+        UE_LOG(LogTemp, Error,
+            TEXT("InitializeCameraPreview: source camera invalid before assignment"));
+        return;
+    }
 
-        const bool bBadWorld =
-            (PreviewSceneCapture->GetWorld() != World);
+    UCineCameraComponent* SourceCameraComponent =
+        InSourceCamera->GetCineCameraComponent();
 
-        if (bBadOwner || bBadWorld || !IsValid(PreviewSceneCapture))
-        {
-            PreviewSceneCapture->DestroyComponent();
-            PreviewSceneCapture = nullptr;
-        }
+    if (!SourceCameraComponent ||
+        !IsValid(SourceCameraComponent) ||
+        SourceCameraComponent->IsBeingDestroyed())
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("InitializeCameraPreview: source camera component invalid"));
+        return;
     }
 
     PreviewCameraActor = InSourceCamera;
-    PreviewCameraComponent = PreviewCameraActor->GetCineCameraComponent();
-
-    if (!PreviewCameraComponent)
-    {
-        UE_LOG(LogTemp, Error, TEXT("PreviewCameraComponent missing"));
-        return;
-    }
+    PreviewCameraComponent = SourceCameraComponent;
 
     // --------------------------------------------------
     // Aspect from PROJECT (authoritative)
@@ -1397,7 +1442,7 @@ void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
 
         CameraPreviewRenderTarget->ClearColor = FLinearColor::Black;
         CameraPreviewRenderTarget->InitAutoFormat(TargetWidth, TargetHeight);
-        CameraPreviewRenderTarget->UpdateResourceImmediate(true);
+        //CameraPreviewRenderTarget->UpdateResourceImmediate(true);
 
         UE_LOG(LogTemp, Warning, TEXT("RenderTarget CREATED %d x %d"), TargetWidth, TargetHeight);
     }
@@ -1405,27 +1450,37 @@ void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
         CameraPreviewRenderTarget->SizeY != TargetHeight)
     {
         CameraPreviewRenderTarget->ResizeTarget(TargetWidth, TargetHeight);
-        CameraPreviewRenderTarget->UpdateResourceImmediate(true);
+        //CameraPreviewRenderTarget->UpdateResourceImmediate(true);
 
         UE_LOG(LogTemp, Warning, TEXT("RenderTarget RESIZED %d x %d"), TargetWidth, TargetHeight);
     }
 
     // --------------------------------------------------
-    // Reuse Scene Capture if already there
+    // ALWAYS rebuild scene capture after map transitions
     // --------------------------------------------------
-    if (!PreviewSceneCapture)
+
+    if (PreviewSceneCapture)
     {
-        PreviewSceneCapture = NewObject<USceneCaptureComponent2D>(
-            InSourceCamera,
-            USceneCaptureComponent2D::StaticClass(),
-            NAME_None,
-            RF_Transient
-        );
+        if (IsValid(PreviewSceneCapture) &&
+            !PreviewSceneCapture->IsBeingDestroyed())
+        {
+            PreviewSceneCapture->DestroyComponent();
+        }
+
+        PreviewSceneCapture = nullptr;
     }
+
+    PreviewSceneCapture = NewObject<USceneCaptureComponent2D>(
+        InSourceCamera,
+        USceneCaptureComponent2D::StaticClass(),
+        NAME_None,
+        RF_Transient
+    );
 
     if (!PreviewSceneCapture)
     {
-        UE_LOG(LogTemp, Error, TEXT("Failed to create SceneCapture"));
+        UE_LOG(LogTemp, Error,
+            TEXT("Failed to create SceneCapture"));
         return;
     }
 
@@ -1511,7 +1566,7 @@ void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
     // Final capture
     // --------------------------------------------------
 
-    PreviewSceneCapture->CaptureScene();
+    /*PreviewSceneCapture->CaptureScene();*/
 
     UE_LOG(LogTemp, Warning, TEXT("Preview synced AFTER camera transform"));
     UE_LOG(LogTemp, Warning, TEXT("REAL CAM LOC: %s"),
@@ -1538,10 +1593,30 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
     ACineCameraActor* Cam = Intent.CameraActor.Get();
     if (!Cam) return;
 
+    if (!IsValid(Cam))
+    {
+        UE_LOG(LogTemp, Error, TEXT("[GAS CameraPreview] Invalid camera actor. Skipping preview update."));
+        return;
+    }
+
+    if (Cam->GetWorld() != World)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[GAS CameraPreview] Camera belongs to different world. Skipping preview update."));
+        return;
+    }
+
+    if (Intent.SubjectId == TEXT("(No Subject)"))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[GAS CameraPreview] No Subject selected. Skipping camera framing."));
+
+        return;
+    }
+
     // --------------------------------------------------
     // 🔥 USE SAVED CAMERA IF AVAILABLE (THIS IS THE FIX)
     // --------------------------------------------------
-    if (!bIsEditingShot)
+    if (bRestoreSavedCameraThisFrame)
     {
         Cam->SetActorLocationAndRotation(
             Intent.CameraLocation,
@@ -1555,6 +1630,8 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
 
         UE_LOG(LogTemp, Warning, TEXT("APPLIED FROM SHOT INTENT: %s"),
             *Intent.CameraLocation.ToString());
+
+        bRestoreSavedCameraThisFrame = false;
     }
     else
     {
@@ -1618,14 +1695,11 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
     }
 
     // --------------------------------------------------
-    // Preview sync
+    // Preview handled by SGAS_ShotIntentWindow only.
+    // Do NOT initialize SGAS_ScriptTab preview here.
+    // This prevents stale cross-world SceneCapture crashes.
     // --------------------------------------------------
-    if (!PreviewSourceCamera.IsValid())
-    {
-        InitializeCameraPreview(Cam);
-    }
-
-    SyncPreviewToRealCamera();
+    return;
 }
 
 void SGAS_ScriptTab::SyncPreviewToRealCamera()
@@ -1687,23 +1761,93 @@ void SGAS_ScriptTab::SyncPreviewToRealCamera()
 
 void SGAS_ScriptTab::ReleaseCameraPreview()
 {
+    UE_LOG(LogTemp, Warning,
+        TEXT("ReleaseCameraPreview CALLED"));
+
+    const bool bEngineShuttingDown =
+        GExitPurge ||
+        GIsRequestingExit ||
+        IsEngineExitRequested();
+
+    // --------------------------------------------------
+    // PreviewSceneCapture
+    // --------------------------------------------------
+
     if (PreviewSceneCapture)
     {
-        PreviewSceneCapture->DestroyComponent();
+        if (IsValid(PreviewSceneCapture))
+        {
+            PreviewSceneCapture->TextureTarget = nullptr;
+            PreviewSceneCapture->bCaptureEveryFrame = false;
+            PreviewSceneCapture->bCaptureOnMovement = false;
+
+            if (!bEngineShuttingDown &&
+                !PreviewSceneCapture->IsBeingDestroyed())
+            {
+                PreviewSceneCapture->DestroyComponent();
+            }
+        }
+
         PreviewSceneCapture = nullptr;
     }
 
+    // --------------------------------------------------
+    // PreviewCaptureComponent
+    // --------------------------------------------------
+
     if (PreviewCaptureComponent)
     {
-        PreviewCaptureComponent->DestroyComponent();
+        if (IsValid(PreviewCaptureComponent))
+        {
+            PreviewCaptureComponent->TextureTarget = nullptr;
+            PreviewCaptureComponent->bCaptureEveryFrame = false;
+            PreviewCaptureComponent->bCaptureOnMovement = false;
+
+            if (!bEngineShuttingDown &&
+                !PreviewCaptureComponent->IsBeingDestroyed())
+            {
+                PreviewCaptureComponent->DestroyComponent();
+            }
+        }
+
         PreviewCaptureComponent = nullptr;
     }
 
+    // --------------------------------------------------
+    // Preview Camera Actor
+    // --------------------------------------------------
+
+    if (PreviewCameraActor)
+    {
+        if (IsValid(PreviewCameraActor))
+        {
+            if (!bEngineShuttingDown &&
+                !PreviewCameraActor->IsActorBeingDestroyed())
+            {
+                PreviewCameraActor->Destroy();
+            }
+        }
+
+        PreviewCameraActor = nullptr;
+    }
+
+    // --------------------------------------------------
+    // Remaining refs
+    // --------------------------------------------------
+
     PreviewSourceCamera = nullptr;
-    PreviewCameraActor = nullptr;
     PreviewCameraComponent = nullptr;
-    CameraPreviewRenderTarget = nullptr;
+
+    if (CameraPreviewRenderTarget &&
+        IsValid(CameraPreviewRenderTarget))
+    {
+        CameraPreviewRenderTarget = nullptr;
+    }
+
     PreviewBrush.Reset();
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("ReleaseCameraPreview FINISHED"));
 }
 
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
@@ -1737,9 +1881,9 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                 .AutoWidth()
                 [
                     SNew(SBox)
-                        .WidthOverride(60.f)
-                        .MinDesiredWidth(60.f)
-                        .MaxDesiredWidth(60.f)
+                        .WidthOverride(52.f)
+                        .MinDesiredWidth(52.f)
+                        .MaxDesiredWidth(52.f)
                         [
                             SNew(SVerticalBox)
 
@@ -1769,7 +1913,6 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                             // --- Scene Number Toggle --------------------------------
                             + SVerticalBox::Slot()
                                 .AutoHeight()
-                                .Padding(0, 8, 0, 0)
                                 [
                                     SNew(SBox)
                                         .WidthOverride(48.f)
@@ -2259,12 +2402,31 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
         {
             ScriptPanel->SetScript(&CurrentScript);
 
+            FGASSceneNumberingSettings EffectiveSceneNumbering =
+                CurrentScript.SceneNumbering;
+
+
+            if (ActiveProject)
+            {
+                const FGASProjectSettings& ProjectSettings =
+                    ActiveProject->GetProjectSettings();
+
+                EffectiveSceneNumbering.Style =
+                    ProjectSettings.SceneNumberingStyle;
+
+                EffectiveSceneNumbering.StartNumber =
+                    ProjectSettings.SceneStartNumber;
+
+ 
+            }
+
+
             TArray<FRenderedParagraph> Rendered =
                 ScriptLayoutEngine::LayoutScript(
                     CurrentScript.Blocks,
                     CachedScriptPanelWidth,
                     CurrentScript.UserPageBreaks,
-                    CurrentScript.SceneNumbering
+                    EffectiveSceneNumbering
                 );
 
             ScriptPanel->SetRenderedScript(Rendered);
@@ -2294,13 +2456,13 @@ bool SGAS_ScriptTab::TickShotModeResume(float DeltaTime)
 {
     if (!bPendingShotResumeAfterMapOpen)
     {
-        return true;
+        return false;
     }
 
     if (PendingResumeSceneId.IsEmpty())
     {
         bPendingShotResumeAfterMapOpen = false;
-        return true;
+        return false;
     }
 
     UE_LOG(LogGASPrePro, Warning, TEXT("[ShotMode] Deferred resume executing Scene=%s"), *PendingResumeSceneId);
@@ -2314,7 +2476,7 @@ bool SGAS_ScriptTab::TickShotModeResume(float DeltaTime)
     EnterShotMarkingMode(SceneId);
     bIsResumingShotMode = false;
 
-    return true;
+    return false;
 }
 
 static FString ParagraphTypeToString(EGASBlockType Type)
@@ -2610,6 +2772,7 @@ void SGAS_ScriptTab::PromptCreateNewProject()
 
     PendingProjectSettings.ShotNumberingPolicy =
         EGASShotNumberingPolicy::Numeric_1s;
+    PendingProjectSettings.ShotStartNumber = 1;
 
     TSharedRef<SWindow> CreateWindow =
         SNew(SWindow)
@@ -2964,55 +3127,6 @@ void SGAS_ScriptTab::PromptCreateNewProject()
                     ]
             ]
 
-        + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(10.f, 10.f, 10.f, 8.f)
-            [
-                SNew(SBorder)
-                    .Padding(FMargin(8.f, 6.f))
-                    .BorderImage(FCoreStyle::Get().GetBrush("ToolPanel.GroupBorder"))
-                    [
-                        SNew(STextBlock)
-                            .Text(FText::FromString(TEXT("CAMERA")))
-                            .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-                    ]
-            ]
-
-        + SVerticalBox::Slot()
-            .Padding(10.f, 2.f, 10.f, 10.f)
-            .AutoHeight()
-            [
-                SNew(SHorizontalBox)
-
-                    + SHorizontalBox::Slot()
-                    .AutoWidth()
-                    [
-                        SNew(SVerticalBox)
-
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            .Padding(0.f, 0.f, 0.f, 4.f)
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Default Lens")))
-                            ]
-
-                            + SVerticalBox::Slot()
-                            .AutoHeight()
-                            [
-                                SAssignNew(DefaultLensSpinBox, SSpinBox<float>)
-                                    .MinValue(8.f)
-                                    .MaxValue(300.f)
-                                    .Delta(1.f)
-                                    .Value(PendingProjectSettings.DefaultLensMM)
-                                    .MinDesiredWidth(120.f)
-                                    .OnValueChanged(
-                                        this,
-                                        &SGAS_ScriptTab::OnDefaultLensChanged
-                                    )
-                            ]
-                    ]
-            ]
 
         + SVerticalBox::Slot()
             .AutoHeight()
@@ -3343,9 +3457,6 @@ bool SGAS_ScriptTab::CreateNewProject(
     NewProject->ProjectSettings.ShotStartNumber =
         InProjectSettings.ShotStartNumber;
 
-    NewProject->ProjectSettings.DefaultLensMM =
-        InProjectSettings.DefaultLensMM;
-
     NewProject->ProjectSettings.bEnableBlocking =
         InProjectSettings.bEnableBlocking;
 
@@ -3524,7 +3635,28 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
     // ------------------------------------------------------------
     // Persist shot numbering policy into script (CRITICAL)
     // ------------------------------------------------------------
-    CurrentScript.ShotNumberingPolicy = ImportOptions.ShotNumberingPolicy;
+    if (ActiveProject)
+    {
+        const FGASProjectSettings& ProjectSettings =
+            ActiveProject->GetProjectSettings();
+
+        CurrentScript.ShotNumberingPolicy =
+            ProjectSettings.ShotNumberingPolicy;
+
+        CurrentScript.SceneNumbering.Style =
+            ProjectSettings.SceneNumberingStyle;
+
+        CurrentScript.SceneNumbering.StartNumber =
+            ProjectSettings.SceneStartNumber;
+
+        CurrentScript.ShotStartNumber =
+            ProjectSettings.ShotStartNumber;
+    }
+    else
+    {
+        CurrentScript.ShotNumberingPolicy =
+            ImportOptions.ShotNumberingPolicy;
+    }
 
 
 
@@ -3556,12 +3688,28 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
             PanelWidth = 1100.f;
     }
 
+    FGASSceneNumberingSettings EffectiveSceneNumbering =
+        CurrentScript.SceneNumbering;
+
+    if (ActiveProject)
+    {
+        const FGASProjectSettings& ProjectSettings =
+            ActiveProject->GetProjectSettings();
+
+        EffectiveSceneNumbering.Style =
+            ProjectSettings.SceneNumberingStyle;
+
+        EffectiveSceneNumbering.StartNumber =
+            ProjectSettings.SceneStartNumber;
+
+    }
+
     TArray<FRenderedParagraph> Rendered =
         ScriptLayoutEngine::LayoutScript(
             CurrentScript.Blocks,
             PanelWidth,
             CurrentScript.UserPageBreaks,
-            CurrentScript.SceneNumbering
+            EffectiveSceneNumbering
         );
 
     ScriptPanel->SetRenderedScript(Rendered);
@@ -3570,7 +3718,7 @@ void SGAS_ScriptTab::LoadScriptFromFDX(
 
     BuildShotListFromScriptV2(
         CurrentScript,
-        CurrentScript.SceneNumbering,
+        EffectiveSceneNumbering,
         Rendered,
         SceneRowsV2
     );
@@ -4427,6 +4575,127 @@ bool SGAS_ScriptTab::CreateBlockingLevelForScene(
 
     GASBlockingAccess::SetBlockingActive(true);
     GASBlockingAccess::SetActiveSceneId(ActiveBlockingSceneId);
+
+    return true;
+}
+
+bool SGAS_ScriptTab::CreateEmptySceneLevel(
+    FGASBlock& SceneBlock
+)
+{
+    if (!ActiveProject)
+    {
+        UE_LOG(LogGASPrePro, Error,
+            TEXT("[SceneLevel] ActiveProject NULL"));
+
+        return false;
+    }
+
+    const FString ProjectName =
+        ActiveProject->ProjectName;
+
+    const FString SceneName =
+        SceneBlock.Text
+        .Replace(TEXT(" "), TEXT("_"))
+        .Replace(TEXT("."), TEXT(""))
+        .Replace(TEXT(":"), TEXT(""))
+        .Replace(TEXT("/"), TEXT("_"));
+
+    const FString MapName =
+        FString::Printf(
+            TEXT("%s_SCENE"),
+            *SceneName
+        );
+
+    const FString PackagePath =
+        FString::Printf(
+            TEXT("/Game/PrePro/Projects/%s/Blocking/Scenes/%s"),
+            *ProjectName,
+            *MapName
+        );
+
+    UE_LOG(LogGASPrePro, Warning,
+        TEXT("[SceneLevel] Creating Empty Scene Level: %s"),
+        *PackagePath);
+
+    UPackage* Package =
+        CreatePackage(*PackagePath);
+
+    if (!Package)
+    {
+        UE_LOG(LogGASPrePro, Error,
+            TEXT("[SceneLevel] Failed to create package"));
+
+        return false;
+    }
+
+    UWorldFactory* WorldFactory =
+        NewObject<UWorldFactory>();
+
+    if (!WorldFactory)
+    {
+        UE_LOG(LogGASPrePro, Error,
+            TEXT("[SceneLevel] Failed to create world factory"));
+
+        return false;
+    }
+
+    const FString AssetName =
+        FPackageName::GetLongPackageAssetName(PackagePath);
+
+    UWorld* NewWorld =
+        Cast<UWorld>(
+            WorldFactory->FactoryCreateNew(
+                UWorld::StaticClass(),
+                Package,
+                *AssetName,
+                RF_Public | RF_Standalone,
+                nullptr,
+                GWarn
+            )
+        );
+
+    if (!NewWorld)
+    {
+        UE_LOG(LogGASPrePro, Error,
+            TEXT("[SceneLevel] Failed to create world asset"));
+
+        return false;
+    }
+
+    FAssetRegistryModule::AssetCreated(NewWorld);
+
+    Package->MarkPackageDirty();
+
+    const FString FilePath =
+        FPackageName::LongPackageNameToFilename(
+            PackagePath,
+            FPackageName::GetMapPackageExtension()
+        );
+
+    FSavePackageArgs SaveArgs;
+    SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+
+    const bool bSaved =
+        UPackage::SavePackage(
+            Package,
+            NewWorld,
+            *FilePath,
+            SaveArgs
+        );
+
+    if (!bSaved)
+    {
+        UE_LOG(LogGASPrePro, Error,
+            TEXT("[SceneLevel] Failed to save world"));
+
+        return false;
+    }
+
+    SceneBlock.BlockingLevelPath = PackagePath;
+
+    UE_LOG(LogGASPrePro, Warning,
+        TEXT("[SceneLevel] Empty scene level created successfully"));
 
     return true;
 }
@@ -6349,6 +6618,9 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
         bPendingAutoOpenCastWindow = false;
 
         const FString SceneId = ActiveBlockingSceneId.ToString();
+
+        ClosePendingActionWindow();
+
         if (!SceneId.IsEmpty())
         {
             OpenCastWindowForScene(SceneId);
@@ -6362,11 +6634,13 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
     // ------------------------------------------------------------
     if (PendingShotModeLevelPath.IsEmpty())
     {
+        ClosePendingActionWindow();
         return;
     }
 
     if (!Filename.Contains(PendingShotModeLevelPath))
     {
+        ClosePendingActionWindow();
         return;
     }
 
@@ -6385,6 +6659,11 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
     bIsResumingShotMode = true;
     EnterShotMarkingMode(SceneId);
     bIsResumingShotMode = false;
+
+    PendingShotIntentMarkerId.Empty();
+    PendingShotIntentSceneId.Empty();
+
+    ClosePendingActionWindow();
 
 }
 
@@ -6486,7 +6765,17 @@ void SGAS_ScriptTab::EnterShotMarkingMode(const FString& SceneId)
 
     if (BlockingPath.IsEmpty())
     {
-        UE_LOG(LogGASPrePro, Warning, TEXT("[ShotMode] No blocking path for Scene=%s"), *SceneId);
+        UE_LOG(LogGASPrePro, Warning,
+            TEXT("[ShotMode] No scene level exists for Scene=%s"),
+            *SceneId);
+
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            FText::FromString(
+                TEXT("This scene does not have a scene level yet.\n\nPlease create blocking first.")
+            )
+        );
+
         return;
     }
 
@@ -6532,10 +6821,27 @@ void SGAS_ScriptTab::EnterShotMarkingMode(const FString& SceneId)
 
 SGAS_ScriptTab::~SGAS_ScriptTab()
 {
+    UE_LOG(LogTemp, Error, TEXT("SGAS_ScriptTab DESTROYED"));
+
     if (OnMapOpenedHandle.IsValid())
     {
         FEditorDelegates::OnMapOpened.Remove(OnMapOpenedHandle);
+        OnMapOpenedHandle.Reset();
     }
+
+    if (GExitPurge || GIsRequestingExit || IsEngineExitRequested())
+    {
+        PreviewSceneCapture = nullptr;
+        PreviewCaptureComponent = nullptr;
+        PreviewSourceCamera = nullptr;
+        PreviewCameraActor = nullptr;
+        PreviewCameraComponent = nullptr;
+        CameraPreviewRenderTarget = nullptr;
+        PreviewBrush.Reset();
+        return;
+    }
+
+    ReleaseCameraPreview();
 }
 
 

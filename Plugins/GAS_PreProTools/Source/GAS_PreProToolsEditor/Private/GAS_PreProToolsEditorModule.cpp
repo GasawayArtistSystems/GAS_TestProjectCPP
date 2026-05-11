@@ -118,18 +118,6 @@ void FGAS_PreProToolsEditorModule::RegisterMenus()
             }))
     );
 
-    // Standalone Script Tab
-    Section.AddMenuEntry(
-        "OpenScriptTab",
-        FText::FromString("Script Tab"),
-        FText::FromString("Opens the GAS Pre Pro Script tab."),
-        FSlateIcon(),
-        FUIAction(FExecuteAction::CreateLambda([]()
-            {
-                FGlobalTabmanager::Get()->TryInvokeTab(FName("GAS_ScriptTab"));
-            }))
-    );
-
     Section.AddMenuEntry(
         "OpenGASSetBrowser",
         FText::FromString("GAS Sets"),
@@ -154,15 +142,6 @@ void FGAS_PreProToolsEditorModule::RegisterTabSpawner()
     )
         .SetDisplayName(FText::FromString("GAS Pre Pro Tools"))
         .SetMenuType(ETabSpawnerMenuType::Hidden);
-
-
-    // Script Tab (PERSISTENT POINTER VERSION)
-    FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-        "GAS_ScriptTab",
-        FOnSpawnTab::CreateRaw(this, &FGAS_PreProToolsEditorModule::SpawnScriptTab)
-    )
-        .SetDisplayName(FText::FromString("GAS Script"))
-        .SetMenuType(ETabSpawnerMenuType::Hidden);
 }
 
 
@@ -184,25 +163,6 @@ TSharedRef<SDockTab> FGAS_PreProToolsEditorModule::SpawnMainToolTab(
 
     return DockTab;
 }
-
-TSharedRef<SDockTab> FGAS_PreProToolsEditorModule::SpawnScriptTab(
-    const FSpawnTabArgs& Args)
-{
-    TSharedRef<SDockTab> DockTab =
-        SNew(SDockTab)
-        .TabRole(ETabRole::NomadTab)
-        [
-            SAssignNew(PersistentScriptTab, SGAS_ScriptTab)
-        ];
-
-    return DockTab;
-}
-
-TSharedPtr<SGAS_ScriptTab> FGAS_PreProToolsEditorModule::GetPersistentScriptTab() const
-{
-    return PersistentScriptTab;
-}
-
 
 
 void FGAS_PreProToolsEditorModule::MarkToolDirty()
@@ -302,53 +262,6 @@ void FGAS_PreProToolsEditorModule::OnWorldActorsReady(
     const UWorld::InitializationValues /*IVS*/
 )
 {
-#if WITH_EDITOR
-    if (!World || !World->IsEditorWorld())
-    {
-        return;
-    }
-
-    if (!PersistentScriptTab.IsValid())
-    {
-        return;
-    }
-
-    FGASScript* Script =
-        PersistentScriptTab.IsValid()
-        ? PersistentScriptTab->GetCurrentScript()
-        : nullptr;
-
-    if (!Script)
-    {
-        return;
-    }
-
-    for (TActorIterator<AGAS_BlockingAnchorActor> It(World); It; ++It)
-    {
-        AGAS_BlockingAnchorActor* Anchor = *It;
-
-        if (!Anchor)
-        {
-            continue;
-        }
-
-        for (const FGASMarker& Marker : Script->Markers)
-        {
-            if (Marker.MarkerType == EGASMarkerType::ShotMarker)
-            {
-                Anchor->SetCurrentShotID(Marker.MarkerGuid);
-
-                UE_LOG(LogGASPrePro, Warning,
-                    TEXT("Auto-selected ShotID: %s"),
-                    *Anchor->GetCurrentShotID().ToString());
-
-                break;
-            }
-        }
-
-        break; // only first anchor
-    }
-#endif
 }
 
 
@@ -357,57 +270,11 @@ void FGAS_PreProToolsEditorModule::OnMapOpened(
     bool /*bAsTemplate*/
 )
 {
-#if WITH_EDITOR
-    if (!PersistentScriptTab.IsValid())
-    {
-        return;
-    }
-
-    FGASScript* Script =
-        PersistentScriptTab->GetCurrentScript();
-
-    if (!Script)
-    {
-        return;
-    }
-
-    UWorld* World = GEditor->GetEditorWorldContext().World();
-    if (!World)
-    {
-        return;
-    }
-
-    for (TActorIterator<AGAS_BlockingAnchorActor> It(World); It; ++It)
-    {
-        AGAS_BlockingAnchorActor* Anchor = *It;
-        if (!Anchor)
-        {
-            continue;
-        }
-
-        for (const FGASMarker& Marker : Script->Markers)
-        {
-            if (Marker.MarkerType == EGASMarkerType::ShotMarker)
-            {
-                Anchor->SetCurrentShotID(Marker.MarkerGuid);
-
-                UE_LOG(LogGASPrePro, Warning,
-                    TEXT("Auto-selected ShotID: %s"),
-                    *Anchor->GetCurrentShotID().ToString());
-
-                break;
-            }
-        }
-
-        break;
-    }
-#endif
 }
 
 void FGAS_PreProToolsEditorModule::UnregisterTabSpawner()
 {
     FGlobalTabmanager::Get()->UnregisterNomadTabSpawner("GAS_TestWindow");
-    FGlobalTabmanager::Get()->UnregisterNomadTabSpawner("GAS_ScriptTab");
     FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(GAS_SetBrowserTabName);
 }
 

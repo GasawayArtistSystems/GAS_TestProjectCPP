@@ -126,6 +126,42 @@ void FGAS_PreProToolsStyle::Initialize()
         )
     );
 
+    // Register FileIcon_40.png
+    StyleInstance->Set(
+        "GAS.FileIcon_40",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("FileIcon_40.png")),
+            FVector2D(28.f, 28.f)
+        )
+    );
+
+    // Register SetsIcon_40.png
+    StyleInstance->Set(
+        "GAS.SetsIcon_40",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("SetsIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
+    // Register OverheadIcon_40.png
+    StyleInstance->Set(
+        "GAS.OverheadIcon_40",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("OverheadIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
+    // Register LensIcon_40.png
+    StyleInstance->Set(
+        "GAS.LensIcon_40",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("LensIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
     // Register style set
     FSlateStyleRegistry::RegisterSlateStyle(*StyleInstance);
 }

@@ -28,6 +28,7 @@ public:
         SLATE_EVENT(FOnConfirmShotIntent, OnConfirm)
         SLATE_ARGUMENT(FGASShotIntent, ShotIntent)
         SLATE_ARGUMENT(TWeakPtr<SWindow>, OwnerWindow)
+        SLATE_ARGUMENT(bool, IsNewShot)
 
     SLATE_END_ARGS()
 
@@ -62,6 +63,8 @@ private:
     USceneCaptureComponent2D* SceneCaptureComponent = nullptr;
     UTextureRenderTarget2D* PreviewRenderTarget = nullptr;
     TSharedPtr<FSlateBrush> PreviewBrush;
+
+    bool bIsNewShot = false;
 
     // ------------------------------------------------------------
     // Preview Camera State (TEMP - does NOT touch ShotIntent)

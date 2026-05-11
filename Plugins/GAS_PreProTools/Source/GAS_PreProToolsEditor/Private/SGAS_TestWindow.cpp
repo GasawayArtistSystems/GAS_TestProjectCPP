@@ -5,6 +5,7 @@
 #include "SGASScriptPanel.h"
 #include "GASPreProLog.h"
 #include "GASBlockingAccess.h"
+#include "GAS_PreProToolsStyle.h"
 
 
 #include "Widgets/Layout/SBox.h"
@@ -12,7 +13,9 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboButton.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Text/STextBlock.h"
+
 
 
 static TArray<TSharedPtr<FString>> EmptySceneNumberingOptions;
@@ -20,7 +23,7 @@ static TArray<TSharedPtr<FString>> EmptySceneNumberingOptions;
 
 void SGAS_TestWindow::Construct(const FArguments& InArgs)
 {
-
+    UE_LOG(LogTemp, Error, TEXT("SGAS_TestWindow CONSTRUCT HIT"));
     ChildSlot
         [
             SNew(SVerticalBox)
@@ -28,19 +31,29 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                 // Tab buttons row
                 + SVerticalBox::Slot()
                 .AutoHeight()
-                .Padding(4.f)
+                .Padding(1.f)
                 [
                     SNew(SHorizontalBox)
+
                         + SHorizontalBox::Slot()
                         .AutoWidth()
                         .Padding(4)
                         [
                             SNew(SComboButton)
+                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                .ContentPadding(0.f)
+
                                 .ButtonContent()
                                 [
-                                    SNew(STextBlock)
-                                        .Text(FText::FromString(TEXT("Project")))
+                                    SNew(SBox)
+                                        .WidthOverride(28.f)
+                                        .HeightOverride(28.f)
+                                        [
+                                            SNew(SImage)
+                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.FileIcon_40"))
+                                        ]
                                 ]
+
                                 .MenuContent()
                                 [
                                     SNew(SVerticalBox)
@@ -52,7 +65,6 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                                 .Text(FText::FromString(TEXT("New Project")))
                                                 .OnClicked_Lambda([this]()
                                                     {
-
                                                         if (ScriptTabWidget.IsValid())
                                                         {
                                                             ScriptTabWidget->PromptCreateNewProject();
@@ -73,54 +85,74 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                                         {
                                                             ScriptTabWidget->PromptOpenProject();
                                                         }
+
                                                         return FReply::Handled();
                                                     })
                                         ]
                                 ]
                         ]
 
-                        + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .Padding(2.f, 0.f)
-                        [
-                            SNew(SButton)
-                                .Text_Lambda([this]()
-                                    {
-                                        return GetScriptTabLabel();
-                                    })
-                                .OnClicked_Lambda([this]()
-                                    {
-                                        SetActiveTab(EGASMainTab::Script);
-                                        return FReply::Handled();
-                                    })
-
-                        ]
-
                     + SHorizontalBox::Slot()
                         .AutoWidth()
-                        .Padding(2.f, 0.f)
+                        .Padding(0.f)
                         [
                             SNew(SButton)
-                                .Text(FText::FromString(TEXT("Shot List")))
-                                .OnClicked_Lambda([this]()
-                                    {
-                                        SetActiveTab(EGASMainTab::ShotList);
-                                        return FReply::Handled();
-                                    })
-                        ]
-                    + SHorizontalBox::Slot()
-                        .AutoWidth()
-                        .Padding(2.f, 0.f)
-                        [
-                            SNew(SButton)
-                                .Text(FText::FromString(TEXT("Sets")))
+
+                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+
                                 .OnClicked_Lambda([]()
                                     {
                                         FGlobalTabmanager::Get()->TryInvokeTab(
                                             FName("GAS_SetBrowser")
                                         );
+
                                         return FReply::Handled();
                                     })
+
+                                [
+                                    SNew(SImage)
+                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SetsIcon_40"))
+                                ]
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(0.f)
+                        [
+                            SNew(SButton)
+
+                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+
+                                .OnClicked_Lambda([]()
+                                    {
+                                        UE_LOG(LogTemp, Warning, TEXT("OVERHEAD CLICKED"));
+                                        return FReply::Handled();
+                                    })
+
+                                [
+                                    SNew(SImage)
+                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.OverheadIcon_40"))
+                                ]
+                        ]
+
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(0.f)
+                        [
+                            SNew(SButton)
+
+                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+
+                                .OnClicked_Lambda([]()
+                                    {
+                                        UE_LOG(LogTemp, Warning, TEXT("LENS TOOL CLICKED"));
+                                        return FReply::Handled();
+                                    })
+
+                                [
+                                    SNew(SImage)
+                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.LensIcon_40"))
+                                ]
                         ]
 
                     + SHorizontalBox::Slot()
@@ -230,7 +262,7 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
 
                 + SVerticalBox::Slot()
                     .FillHeight(1.f)
-                    .Padding(4.f)
+                    .Padding(1.f)
                     [
                         SNew(SOverlay)
 

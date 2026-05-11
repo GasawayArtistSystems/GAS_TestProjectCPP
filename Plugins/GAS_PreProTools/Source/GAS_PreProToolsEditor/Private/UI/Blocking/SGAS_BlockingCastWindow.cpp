@@ -213,17 +213,6 @@ void SGAS_BlockingCastWindow::Construct(const FArguments& InArgs)
                                             {
                                                 FString CurrentMeshName = TEXT("None");
 
-                                                for (const FGASCharacterDefinition& Def : Script->Cast)
-                                                {
-                                                    if (Def.CharacterName.ToUpper() == *Item)
-                                                    {
-                                                        if (!Def.DefaultMeshPath.IsEmpty())
-                                                        {
-                                                            CurrentMeshName = FPackageName::GetShortName(Def.DefaultMeshPath);
-                                                        }
-                                                        break;
-                                                    }
-                                                }
 
                                                 return SNew(STableRow<TSharedPtr<FString>>, Owner)
                                                     [
@@ -313,7 +302,29 @@ void SGAS_BlockingCastWindow::Construct(const FArguments& InArgs)
 
                                                                     [
                                                                         SNew(STextBlock)
-                                                                            .Text(FText::FromString(CurrentMeshName))
+                                                                            .Text_Lambda([this, Item]()
+                                                                                {
+                                                                                    if (!Script)
+                                                                                    {
+                                                                                        return FText::FromString(TEXT("None"));
+                                                                                    }
+
+                                                                                    const FGASCharacterDefinition* Def =
+                                                                                        Script->FindCharacterDefinition(*Item);
+
+                                                                                    if (!Def)
+                                                                                    {
+                                                                                        return FText::FromString(TEXT("None"));
+                                                                                    }
+
+                                                                                    if (Def->DefaultMeshPath.IsEmpty())
+                                                                                    {
+                                                                                        return FText::FromString(TEXT("None"));
+                                                                                    }
+
+                                                                                    return FText::FromString(
+                                                                                        FPackageName::GetShortName(Def->DefaultMeshPath));
+                                                                                })
                                                                     ]
                                                             ]
                                                     ];

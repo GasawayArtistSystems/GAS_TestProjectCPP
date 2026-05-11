@@ -187,6 +187,9 @@ struct FGASMarker
     int32 ShotIndex = 0;
 
     UPROPERTY()
+    int32 ShotStartNumber = 1;
+
+    UPROPERTY()
     int32 SceneShotIndex = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
@@ -351,6 +354,9 @@ struct FGASSceneNumberingSettings
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASNumberingStyle Style = EGASNumberingStyle::FromScript;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS|Numbering")
+    int32 StartNumber = 1;
 };
 
 // ------------------------------------------------------------
@@ -499,13 +505,6 @@ struct FGASProjectSettings
     int32 ShotStartNumber = 10;
 
     // ------------------------------------------------------------
-    // Camera Defaults
-    // ------------------------------------------------------------
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
-    float DefaultLensMM = 50.f;
-
-    // ------------------------------------------------------------
     // Project Behavior
     // ------------------------------------------------------------
 
@@ -541,6 +540,9 @@ struct GAS_PREPROTOOLS_API FGASScript
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     FGASSceneNumberingSettings SceneNumbering;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS|Numbering")
+    int32 StartNumber = 1;
+
     // ------------------------------------------------------------
     // Shot Numbering Policy (Authoritative)
     // ------------------------------------------------------------
@@ -550,6 +552,9 @@ struct GAS_PREPROTOOLS_API FGASScript
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TArray<FGASBlock> Blocks;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS|Numbering")
+    int32 ShotStartNumber = 1;
 
     // ------------------------------------------------------------
     // Script-Level Cast (Authoritative Character Definitions)

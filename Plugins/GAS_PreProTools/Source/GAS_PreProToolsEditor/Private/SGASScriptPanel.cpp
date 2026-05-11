@@ -379,12 +379,16 @@ void SGASScriptPanel::RebuildLayout()
         PanelWidth = 1100.f;
     }
 
+    FGASSceneNumberingSettings EffectiveSceneNumbering =
+        SourceScript->SceneNumbering;
+
+
     TArray<FRenderedParagraph> NewRendered =
         ScriptLayoutEngine::LayoutScript(
             SourceScript->Blocks,
             PanelWidth,
             SourceScript->UserPageBreaks,
-            SourceScript->SceneNumbering
+            EffectiveSceneNumbering
         );
 
     SetRenderedScript(NewRendered);
@@ -1718,6 +1722,8 @@ FString FGASMarker::GetShotLabel(EGASShotNumberingPolicy Policy) const
     switch (Policy)
     {
     case EGASShotNumberingPolicy::Numeric_1s:
+        return FString::FromInt(ShotIndex);
+
     case EGASShotNumberingPolicy::Numeric_10s:
         return FString::FromInt(ShotIndex);
 
@@ -1758,7 +1764,6 @@ void SGASScriptPanel::CommitShotAtParagraph(
     float CommitX
 )
 {
-    UE_LOG(LogGASPrePro, Warning, TEXT("RenderedParagraphs.Num = %d"), RenderedParagraphs.Num());
 
     if (!SourceScript)
     {
@@ -1822,9 +1827,49 @@ void SGASScriptPanel::CommitShotAtParagraph(
     const bool bHasBlocking =
         (SceneBlockPtr && !SceneBlockPtr->BlockingLevelPath.IsEmpty());
 
+    if (!bHasBlocking)
+    {
+        const EAppReturnType::Type Result =
+            FMessageDialog::Open(
+                EAppMsgType::YesNo,
+                FText::FromString(
+                    TEXT(
+                        "This scene does not have a scene level yet.\n\n"
+                        "Create one now?"
+                    )
+                )
+            );
+
+        if (Result == EAppReturnType::No)
+        {
+            return;
+        }
+
+        if (OwnerScriptTab.IsValid() && SceneBlockPtr)
+        {
+            TSharedPtr<SGAS_ScriptTab> LocalScriptTab =
+                OwnerScriptTab.Pin();
+
+            const bool bCreated =
+                LocalScriptTab->CreateEmptySceneLevel(*SceneBlockPtr);
+
+            if (bCreated)
+            {
+                LocalScriptTab->OpenBlockingLevel(
+                    SceneBlockPtr->BlockingLevelPath
+                );
+            }
+        }
+
+        return;
+    }
 
     FGASMarker NewMarker;
     NewMarker.Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
+
+    bEditingExistingShot = false;
+    EditingMarkerId = NewMarker.Id;
+
     const FString NewMarkerId = NewMarker.Id;
     NewMarker.MarkerType = EGASMarkerType::ShotMarker;
     NewMarker.BlockId = SceneBlockId;
@@ -1842,36 +1887,78 @@ void SGASScriptPanel::CommitShotAtParagraph(
         if (Marker.MarkerType == EGASMarkerType::ShotMarker &&
             Marker.BlockId == SceneBlockId)
         {
-            MaxExistingShotNumber =
-                FMath::Max(MaxExistingShotNumber, Marker.ShotIndex);
+            if (Marker.ShotIndex > 0)
+            {
+                MaxExistingShotNumber =
+                    FMath::Max(MaxExistingShotNumber, Marker.ShotIndex);
+            }
         }
 
-        UE_LOG(LogTemp, Warning,
-            TEXT("CHECK Marker=%s Block=%s Wanted=%s ShotIndex=%d"),
-            *Marker.Id,
-            *Marker.BlockId,
-            *SceneBlockId,
-            Marker.ShotIndex);
     }
+
+
+    const bool bHasExistingShots =
+        (MaxExistingShotNumber > 0);
 
     switch (SourceScript->ShotNumberingPolicy)
     {
     case EGASShotNumberingPolicy::Numeric_10s:
-        NewMarker.ShotIndex = MaxExistingShotNumber + 10;
+
+        if (!bHasExistingShots)
+        {
+            NewMarker.ShotIndex =
+                SourceScript->ShotStartNumber;
+        }
+        else
+        {
+            NewMarker.ShotIndex =
+                MaxExistingShotNumber + 10;
+        }
+
         break;
 
     case EGASShotNumberingPolicy::Numeric_1s:
-        NewMarker.ShotIndex = MaxExistingShotNumber + 1;
+
+        if (!bHasExistingShots)
+        {
+            NewMarker.ShotIndex =
+                SourceScript->ShotStartNumber;
+        }
+        else
+        {
+            NewMarker.ShotIndex =
+                MaxExistingShotNumber + 1;
+        }
+
         break;
 
     case EGASShotNumberingPolicy::Alphabetic:
-        NewMarker.ShotIndex = MaxExistingShotNumber + 1;
+
+        NewMarker.ShotIndex =
+            bHasExistingShots
+            ? MaxExistingShotNumber + 1
+            : 1;
+
         break;
 
     default:
-        NewMarker.ShotIndex = MaxExistingShotNumber + 1;
+
+        if (!bHasExistingShots)
+        {
+            NewMarker.ShotIndex =
+                SourceScript->ShotStartNumber;
+        }
+        else
+        {
+            NewMarker.ShotIndex =
+                MaxExistingShotNumber + 1;
+        }
+
         break;
     }
+
+    NewMarker.ShotStartNumber =
+        SourceScript->ShotStartNumber;
 
     // Position (SCRIPT SPACE ONLY)
     NewMarker.ScreenX = CommitX - (ShotPillWidth * 0.5f);
@@ -1924,7 +2011,11 @@ void SGASScriptPanel::CommitShotAtParagraph(
     }
     else
     {
-        NewMarker.SetSpatialState(EGASShotSpatialState::BlockingReady);
+        // TEMP:
+        // Empty scene levels still count as "NoBlocking"
+        // until real blocking actors exist.
+
+        NewMarker.SetSpatialState(EGASShotSpatialState::NoBlocking);
     }
 
     // TEMP TEST: give this shot a camera
@@ -2167,7 +2258,23 @@ void SGASScriptPanel::CommitShotAtParagraph(
                         WeakThis.Pin()->OwnerScriptTab.Pin()->bIsEditingShot = true;
                     }
 
-                    WeakThis.Pin()->OpenShotIntentPopup(NewMarkerId, SceneBlockId, true);
+                    const bool bSceneHasBlocking =
+                        WeakThis.Pin()->SourceScript
+                        ? WeakThis.Pin()->SourceScript->Blocks.ContainsByPredicate(
+                            [&SceneBlockId](const FGASBlock& B)
+                            {
+                                return B.Id == SceneBlockId
+                                    && B.Type == EGASBlockType::SceneHeading
+                                    && !B.BlockingLevelPath.IsEmpty();
+                            })
+                        : false;
+
+                    WeakThis.Pin()->OpenShotIntentPopup(
+                        NewMarkerId,
+                        SceneBlockId,
+                        bSceneHasBlocking,
+                        true
+                    );
                 }
                 return false;
             }
@@ -3032,7 +3139,20 @@ FReply SGASScriptPanel::OnMouseButtonDown(
                 }
             }
 
+            UE_LOG(LogTemp, Warning,
+                TEXT("DELETE CHECK | Armed=%s | Active=%s | Target=%s"),
+                Tab->bShotAddArmed ? TEXT("TRUE") : TEXT("FALSE"),
+                *Tab->ActiveCameraModeSceneId,
+                *SceneBlockId);
 
+            if (Tab->bShotAddArmed &&
+                Tab->ActiveCameraModeSceneId != SceneBlockId)
+            {
+                UE_LOG(LogTemp, Warning,
+                    TEXT("Blocked delete from different scene while shot mode active"));
+
+                return FReply::Handled();
+            }
 
             TSharedRef<SWindow> ConfirmWindow =
                 SNew(SWindow)
@@ -3085,6 +3205,11 @@ FReply SGASScriptPanel::OnMouseButtonDown(
                                                 if (SourceScript)
                                                 {
                                                     SourceScript->CaptureUndoSnapshot();
+                                                }
+
+                                                if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+                                                {
+                                                    Tab->RequestDeleteShotMarker(HitShotId);
                                                 }
 
                                                 if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
@@ -3476,7 +3601,7 @@ FReply SGASScriptPanel::OnMouseButtonDoubleClick(
         return FReply::Unhandled();
     }
 
-    OpenShotIntentPopup(Marker->Id, Marker->BlockId, false);
+    OpenShotIntentPopup(Marker->Id, Marker->BlockId, false, false);
     return FReply::Handled();
 }
 
@@ -3902,6 +4027,7 @@ FReply SGASScriptPanel::OnMouseButtonUp(
         // --------------------------------------------------
         // COMMIT
         // --------------------------------------------------
+
         if (bShouldCommit)
         {
             const int32 InsertIndex = CountShotsForScene(SceneId);
@@ -4843,7 +4969,7 @@ FGASBlock* SGASScriptPanel::GetSceneBlockById(const FString& SceneId)
 
     for (FGASBlock& Block : SourceScript->Blocks)
     {
-        UE_LOG(LogTemp, Warning, TEXT("Block Id: %s"), *Block.Id);
+        //UE_LOG(LogTemp, Warning, TEXT("Block Id: %s"), *Block.Id);
 
         if (Block.Id == SceneId)
         {
@@ -4851,7 +4977,7 @@ FGASBlock* SGASScriptPanel::GetSceneBlockById(const FString& SceneId)
         }
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("Looking for SceneId: %s"), *SceneId);
+    //UE_LOG(LogTemp, Warning, TEXT("Looking for SceneId: %s"), *SceneId);
 
     return nullptr;
 }
@@ -4862,7 +4988,12 @@ void SGAS_ScriptTab::OnShotIntentChanged()
 }
 
 
-void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, const FString& SceneId, bool bHasBlocking)
+void SGASScriptPanel::OpenShotIntentPopup(
+    const FString& MarkerId,
+    const FString& SceneId,
+    bool bHasBlocking,
+    bool bIsNewShot
+)
 {
     // -------------------------------------------------
     // GET SCRIPT (✅ CORRECT SOURCE)
@@ -4931,12 +5062,55 @@ void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, const FString
         }
     }
 
+    EditingMarkerId = MarkerId;
+    bEditingExistingShot = !bIsNewShot;
+    if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+    {
+        Tab->bRestoreSavedCameraThisFrame = !bIsNewShot;
+    }
+
+    TSharedPtr<SGAS_ScriptTab> ScriptTabPinned = OwnerScriptTab.Pin();
+    if (!ScriptTabPinned.IsValid())
+    {
+        UE_LOG(LogTemp, Error, TEXT("ShotIntent: OwnerScriptTab invalid"));
+        return;
+    }
+
+    const FString BlockingLevelPath =
+        ScriptTabPinned->GetBlockingLevelPath(SceneId);
+
+    UWorld* World =
+        GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+
+    const FString CurrentMap =
+        World ? World->GetOutermost()->GetName() : FString();
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("[ShotIntent] BlockingLevelPath = %s"),
+        *BlockingLevelPath);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("[ShotIntent] CurrentMap = %s"),
+        *CurrentMap);
+
+    //if (!BlockingLevelPath.IsEmpty() &&
+    //    !CurrentMap.Equals(BlockingLevelPath, ESearchCase::IgnoreCase) &&
+    //    !CurrentMap.Contains(FPackageName::ObjectPathToPackageName(BlockingLevelPath)))
+    //{
+    //    UE_LOG(LogTemp, Warning,
+    //        TEXT("[ShotIntent] Wrong blocking level open. Popup blocked. BlockingLevel=%s CurrentMap=%s"),
+    //        *BlockingLevelPath,
+    //        *CurrentMap);
+
+    //    return;
+    //}
+
     // -------------------------------------------------
     // CREATE WINDOW
     // -------------------------------------------------
     TSharedRef<SWindow> Window = SNew(SWindow)
         .Title(FText::FromString("Shot Intent"))
-        .ClientSize(FVector2D(900, 700))
+        .ClientSize(FVector2D(900, 750))
         .SizingRule(ESizingRule::UserSized)
         .SupportsMinimize(false)
         .SupportsMaximize(false);
@@ -4949,6 +5123,7 @@ void SGASScriptPanel::OpenShotIntentPopup(const FString& MarkerId, const FString
         .Script(Script)
         .SceneId(SceneId)
         .MarkerId(MarkerId)
+        .IsNewShot(bIsNewShot)
         .ShotLabel(ResolvedShotLabel)
         .CastOptions(EnabledCastNames)
         .OwnerScriptTab(OwnerScriptTab)
