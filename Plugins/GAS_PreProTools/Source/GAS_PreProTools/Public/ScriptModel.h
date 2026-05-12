@@ -79,7 +79,8 @@ FORCEINLINE FLinearColor GAS_SpatialStateToColor(EGASShotSpatialState InState)
     switch (InState)
     {
     case EGASShotSpatialState::NoBlocking:     return FLinearColor::Red;
-    case EGASShotSpatialState::BlockingReady:  return FLinearColor::Yellow;
+    case EGASShotSpatialState::BlockingReady:
+        return FLinearColor(0.2f, 0.55f, 1.0f, 1.0f);
 
         // Future (not implemented yet) — still give stable colors now.
     case EGASShotSpatialState::CameraPlaced:   return FLinearColor(0.f, 1.f, 1.f);

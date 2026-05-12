@@ -581,9 +581,23 @@ FReply SGAS_BlockingCastWindow::OnAddClicked()
     {
         bool bAlreadySpawned = false;
 
+        ULevel* CurrentLevel = World->GetCurrentLevel();
+
         for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
         {
-            if (It->GAS_CharacterId == Name)
+            AGAS_StandInActor* Existing = *It;
+
+            if (!Existing)
+            {
+                continue;
+            }
+
+            if (Existing->GetLevel() != CurrentLevel)
+            {
+                continue;
+            }
+
+            if (Existing->GAS_CharacterId == Name)
             {
                 bAlreadySpawned = true;
                 break;

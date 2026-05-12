@@ -35,6 +35,7 @@
 #include "SlateExtras.h"
 #include "Containers/Ticker.h"
 #include "Misc/Optional.h"
+#include "Misc/PackageName.h"
 
 #include "CineCameraActor.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -1824,45 +1825,17 @@ void SGASScriptPanel::CommitShotAtParagraph(
     // --------------------------------------------------
     // Determine Blocking State (Authoritative)
     // --------------------------------------------------
-    const bool bHasBlocking =
-        (SceneBlockPtr && !SceneBlockPtr->BlockingLevelPath.IsEmpty());
+    bool bHasBlocking = false;
 
-    if (!bHasBlocking)
+    if (SceneBlockPtr &&
+        !SceneBlockPtr->BlockingLevelPath.IsEmpty())
     {
-        const EAppReturnType::Type Result =
-            FMessageDialog::Open(
-                EAppMsgType::YesNo,
-                FText::FromString(
-                    TEXT(
-                        "This scene does not have a scene level yet.\n\n"
-                        "Create one now?"
-                    )
-                )
+        bHasBlocking =
+            FPackageName::DoesPackageExist(
+                SceneBlockPtr->BlockingLevelPath
             );
-
-        if (Result == EAppReturnType::No)
-        {
-            return;
-        }
-
-        if (OwnerScriptTab.IsValid() && SceneBlockPtr)
-        {
-            TSharedPtr<SGAS_ScriptTab> LocalScriptTab =
-                OwnerScriptTab.Pin();
-
-            const bool bCreated =
-                LocalScriptTab->CreateEmptySceneLevel(*SceneBlockPtr);
-
-            if (bCreated)
-            {
-                LocalScriptTab->OpenBlockingLevel(
-                    SceneBlockPtr->BlockingLevelPath
-                );
-            }
-        }
-
-        return;
     }
+
 
     FGASMarker NewMarker;
     NewMarker.Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
@@ -2007,19 +1980,21 @@ void SGASScriptPanel::CommitShotAtParagraph(
 
     if (!bHasBlocking)
     {
-        NewMarker.SetSpatialState(EGASShotSpatialState::NoBlocking);
+        NewMarker.SetSpatialState(
+            EGASShotSpatialState::NoBlocking
+        );
     }
     else
     {
-        // TEMP:
-        // Empty scene levels still count as "NoBlocking"
-        // until real blocking actors exist.
-
-        NewMarker.SetSpatialState(EGASShotSpatialState::NoBlocking);
+        NewMarker.SetSpatialState(
+            EGASShotSpatialState::BlockingReady
+        );
     }
 
-    // TEMP TEST: give this shot a camera
-    NewMarker.BindCameraTransform(FTransform::Identity);
+    if (bHasBlocking)
+    {
+        NewMarker.BindCameraTransform(FTransform::Identity);
+    }
 
 
     // ------------------------------------------------------------
@@ -2049,7 +2024,7 @@ void SGASScriptPanel::CommitShotAtParagraph(
         CreatedIntent->CameraName = TEXT("TEMP");
     }
 
-    if (CreatedIntent)
+    if (CreatedIntent && bHasBlocking)
     {
         UWorld* World = nullptr;
 

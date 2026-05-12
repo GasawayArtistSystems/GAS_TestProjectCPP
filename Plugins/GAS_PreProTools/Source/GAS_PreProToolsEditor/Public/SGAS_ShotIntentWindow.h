@@ -83,6 +83,8 @@ private:
     void InitializePreviewState();
     void ApplyPreviewState();
 
+    void RefreshPreview();
+
     // ------------------------------------------------------------
     // Preview Camera Nudges
     // ------------------------------------------------------------

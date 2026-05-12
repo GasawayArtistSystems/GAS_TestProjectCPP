@@ -1133,7 +1133,12 @@ void SGAS_ScriptTab::RequestDeleteShotMarker(const FString& MarkerId)
 
 void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
 {
-    UpdatePendingActionWindow(TEXT("Deleting shot and camera..."));
+    FScopedSlowTask SlowTask(
+        0.f,
+        FText::FromString(TEXT("Deleting Shot"))
+    );
+
+    SlowTask.MakeDialog(false);
 
     if (MarkerId.IsEmpty())
     {
@@ -1143,12 +1148,10 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
     // ------------------------------------------------------------
     // Find camera info before removing shot intent
     // ------------------------------------------------------------
-    FString CameraName;
     TWeakObjectPtr<ACineCameraActor> CameraPtr = nullptr;
 
     if (FGASShotIntent* Intent = CurrentScript.ShotIntents.Find(MarkerId))
     {
-        CameraName = Intent->CameraName;
         CameraPtr = Intent->CameraActor.Get();
     }
 
@@ -1165,32 +1168,18 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
             {
                 if (ACineCameraActor* Camera = CameraPtr.Get())
                 {
-                    World->DestroyActor(Camera);
+                    Camera->SetActorHiddenInGame(true);
+                    Camera->SetIsTemporarilyHiddenInEditor(true);
 
                     UE_LOG(LogGASPrePro, Warning,
-                        TEXT("[DeleteShot] Deleted camera by pointer: %s"),
+                        TEXT("[DeleteShot] Camera hidden instead of destroyed: %s"),
                         *Camera->GetName());
                 }
             }
-            // ----------------------------------------------------
-            // Fallback: find by camera name in currently opened level
-            // ----------------------------------------------------
-            else if (!CameraName.IsEmpty())
+            else
             {
-                for (TActorIterator<AActor> It(World); It; ++It)
-                {
-                    AActor* Actor = *It;
-                    if (Actor && Actor->GetName() == CameraName)
-                    {
-                        World->DestroyActor(Actor);
-
-                        UE_LOG(LogGASPrePro, Warning,
-                            TEXT("[DeleteShot] Deleted camera by name: %s"),
-                            *CameraName);
-
-                        break;
-                    }
-                }
+                UE_LOG(LogGASPrePro, Warning,
+                    TEXT("[DeleteShot] Camera pointer invalid, skipping actor destroy"));
             }
         }
     }
@@ -1230,6 +1219,7 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
         );
     }
 
+
     MarkScriptDirty();
     SaveScriptToJson();
     RebuildShotList();
@@ -1246,7 +1236,6 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
         ScriptPanel->Invalidate(EInvalidateWidget::Paint);
     }
 
-    ClosePendingActionWindow();
 }
 
 
@@ -1456,38 +1445,52 @@ void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
     }
 
     // --------------------------------------------------
-    // ALWAYS rebuild scene capture after map transitions
+    // Reuse existing scene capture whenever possible
     // --------------------------------------------------
 
-    if (PreviewSceneCapture)
+    const bool bNeedNewSceneCapture =
+        !PreviewSceneCapture ||
+        !IsValid(PreviewSceneCapture) ||
+        PreviewSceneCapture->IsBeingDestroyed() ||
+        PreviewSceneCapture->GetWorld() != World;
+
+    if (bNeedNewSceneCapture)
     {
-        if (IsValid(PreviewSceneCapture) &&
+        if (PreviewSceneCapture &&
+            IsValid(PreviewSceneCapture) &&
             !PreviewSceneCapture->IsBeingDestroyed())
         {
             PreviewSceneCapture->DestroyComponent();
         }
 
         PreviewSceneCapture = nullptr;
-    }
 
-    PreviewSceneCapture = NewObject<USceneCaptureComponent2D>(
-        InSourceCamera,
-        USceneCaptureComponent2D::StaticClass(),
-        NAME_None,
-        RF_Transient
-    );
+        PreviewSceneCapture = NewObject<USceneCaptureComponent2D>(
+            InSourceCamera,
+            USceneCaptureComponent2D::StaticClass(),
+            NAME_None,
+            RF_Transient
+        );
 
-    if (!PreviewSceneCapture)
-    {
-        UE_LOG(LogTemp, Error,
-            TEXT("Failed to create SceneCapture"));
-        return;
-    }
+        if (!PreviewSceneCapture)
+        {
+            UE_LOG(LogTemp, Error,
+                TEXT("Failed to create SceneCapture"));
+            return;
+        }
 
-    if (!PreviewSceneCapture->IsRegistered())
-    {
-        PreviewSceneCapture->SetupAttachment(PreviewCameraActor->GetRootComponent());
+        PreviewSceneCapture->SetupAttachment(
+            PreviewCameraActor->GetRootComponent());
+
         PreviewSceneCapture->RegisterComponentWithWorld(World);
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("NEW PreviewSceneCapture CREATED"));
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("REUSING existing PreviewSceneCapture"));
     }
 
     // --------------------------------------------------
@@ -2623,29 +2626,10 @@ FReply SGAS_ScriptTab::OnSaveScript()
 
         if (World)
         {
-            UE_LOG(LogTemp, Warning, TEXT("Saving LEVEL"));
+            UE_LOG(LogTemp, Warning,
+                TEXT("Marking LEVEL dirty only"));
 
             World->MarkPackageDirty();
-
-            UPackage* Package = World->GetOutermost();
-            if (Package)
-            {
-                FString PackageFileName = FPackageName::LongPackageNameToFilename(
-                    Package->GetName(),
-                    FPackageName::GetMapPackageExtension()
-                );
-
-                FSavePackageArgs SaveArgs;
-                SaveArgs.TopLevelFlags = RF_Standalone;
-                SaveArgs.SaveFlags = SAVE_NoError;
-
-                UPackage::SavePackage(
-                    Package,
-                    nullptr,
-                    *PackageFileName,
-                    SaveArgs
-                );
-            }
         }
     }
 #endif
