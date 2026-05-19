@@ -87,6 +87,10 @@
 
 ACineCameraActor* GLastCreatedCamera = nullptr;
 
+// TEMP!!!
+void SGAS_ScriptTab::UpdateShotIntentPreview()
+{
+}
 
 // =======================================================
 // Fixed panel widths (UI constants)
@@ -363,6 +367,103 @@ void SGAS_ScriptTab::OnAutoMasterSequenceChanged(ECheckBoxState NewState)
 // =======================================================
 // FOR BLOCKING SETUP
 // =======================================================
+
+bool SGAS_ScriptTab::SceneHasNonBlockingShots(
+    const FString& SceneId
+) const
+{
+    for (const FGASMarker& Marker : CurrentScript.Markers)
+    {
+        if (Marker.MarkerType != EGASMarkerType::ShotMarker)
+        {
+            continue;
+        }
+
+        if (Marker.BlockId != SceneId)
+        {
+            continue;
+        }
+
+        if (Marker.IsNonBlocking())
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool SGAS_ScriptTab::SceneHasBlockingShots(
+    const FString& SceneId
+) const
+{
+    for (const FGASMarker& Marker : CurrentScript.Markers)
+    {
+        if (Marker.MarkerType != EGASMarkerType::ShotMarker)
+        {
+            continue;
+        }
+
+        if (Marker.BlockId != SceneId)
+        {
+            continue;
+        }
+
+        if (Marker.IsBlocking())
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void SGAS_ScriptTab::PromoteNonBlockingShotsToBlocking(
+    const FString& SceneId
+)
+{
+    int32 PromoteCount = 0;
+
+    for (FGASMarker& Marker : CurrentScript.Markers)
+    {
+        if (Marker.MarkerType != EGASMarkerType::ShotMarker)
+        {
+            continue;
+        }
+
+        if (Marker.BlockId != SceneId)
+        {
+            continue;
+        }
+
+        if (!Marker.IsNonBlocking())
+        {
+            continue;
+        }
+
+        Marker.ShotOrigin = EGASShotOrigin::Blocking;
+
+        Marker.SetSpatialState(
+            EGASShotSpatialState::BlockingReady
+        );
+
+        PromoteCount++;
+    }
+
+    if (PromoteCount > 0)
+    {
+        UE_LOG(
+            LogGASPrePro,
+            Warning,
+            TEXT("Promoted %d NonBlocking shots for scene %s"),
+            PromoteCount,
+            *SceneId
+        );
+
+        MarkScriptDirty();
+        EnsureScriptSaved();
+    }
+}
 
 static void SaveSequenceAsset(ULevelSequence* Sequence)
 {
@@ -1148,11 +1249,11 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
     // ------------------------------------------------------------
     // Find camera info before removing shot intent
     // ------------------------------------------------------------
-    TWeakObjectPtr<ACineCameraActor> CameraPtr = nullptr;
+    TWeakObjectPtr<AGAS_ShotCameraActor> CameraPtr = nullptr;
 
     if (FGASShotIntent* Intent = CurrentScript.ShotIntents.Find(MarkerId))
     {
-        CameraPtr = Intent->CameraActor.Get();
+        CameraPtr = Intent->CameraActor;
     }
 
 #if WITH_EDITOR
@@ -1166,7 +1267,7 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
             // ----------------------------------------------------
             if (CameraPtr.IsValid())
             {
-                if (ACineCameraActor* Camera = CameraPtr.Get())
+                if (AGAS_ShotCameraActor* Camera = CameraPtr.Get())
                 {
                     Camera->SetActorHiddenInGame(true);
                     Camera->SetIsTemporarilyHiddenInEditor(true);
@@ -1246,12 +1347,19 @@ void SGAS_ScriptTab::ApplyCameraToLastCreatedShot(
     float FocalLength
 )
 {
-    if (!Script.IsValid())
-    {
-        return;
-    }
+    UE_LOG(LogTemp, Error,
+        TEXT("[CAM SAVE] CurrentScript Ptr=%p MarkerCount=%d ShotIntentCount=%d"),
+        &CurrentScript,
+        CurrentScript.Markers.Num(),
+        CurrentScript.ShotIntents.Num());
 
-    FGASShotIntent* Shot = Script->ShotIntents.Find(MarkerId);
+    UE_LOG(LogTemp, Error,
+        TEXT("[CAM SAVE] ApplyCameraToLastCreatedShot CALLED MarkerId=%s Loc=%s"),
+        *MarkerId,
+        *Location.ToString());
+
+    FGASShotIntent* Shot = CurrentScript.ShotIntents.Find(MarkerId);
+
     if (!Shot)
     {
         return;
@@ -1264,327 +1372,87 @@ void SGAS_ScriptTab::ApplyCameraToLastCreatedShot(
     Shot->CameraRotation = Rotation;
     Shot->CameraFocalLength = FocalLength;
 
+    // ------------------------------------------------------------
+    // AUTHORITATIVE MARKER CAMERA PERSISTENCE
+    // ------------------------------------------------------------
+    for (FGASMarker& Marker : CurrentScript.Markers)
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("[CAM SAVE] Checking Marker=%s Against=%s"),
+            *Marker.Id,
+            *MarkerId);
+
+        if (Marker.Id == MarkerId)
+        {
+            const FTransform CameraTransform(Rotation, Location);
+
+            Marker.BindCameraTransform(CameraTransform);
+
+            UE_LOG(LogTemp, Error,
+                TEXT("[CAM SAVE] Marker persisted Id=%s bHasCamera=%d Transform=%s"),
+                *Marker.Id,
+                Marker.bHasCamera ? 1 : 0,
+                *Marker.CameraTransform.ToString());
+
+            UE_LOG(LogTemp, Warning,
+                TEXT("AUTHORITATIVE CAMERA SAVED: %s"),
+                *MarkerId);
+
+            MarkScriptDirty();
+            EnsureScriptSaved();
+
+            break;
+        }
+    }
+
+    UE_LOG(LogTemp, Error,
+        TEXT("[CAM SAVE] Finished marker search"));
+
     UE_LOG(LogTemp, Warning, TEXT("Camera Saved: %s"), *Location.ToString());
 
     // ------------------------------------------------------------
     // APPLY TO REAL CAMERA (CRITICAL FIX)
     // ------------------------------------------------------------
-    if (Shot->CameraActor.IsValid())
+    if (IsValid(Shot->CameraActor))
     {
-        ACineCameraActor* Cam = Shot->CameraActor.Get();
+        AGAS_ShotCameraActor* Cam = Shot->CameraActor;
+
         if (Cam)
         {
             Cam->SetActorLocationAndRotation(Location, Rotation);
 
-            if (UCineCameraComponent* Cine = Cam->GetCineCameraComponent())
+            if (Cam->CineCamera)
             {
-                Cine->SetCurrentFocalLength(FocalLength);
+                Cam->CineCamera->SetCurrentFocalLength(FocalLength);
             }
-
-            UE_LOG(LogTemp, Warning, TEXT("Applied to REAL camera"));
         }
     }
 }
 
-void SGAS_ScriptTab::InitializeCameraPreview(ACineCameraActor* InSourceCamera)
-{
-    static double LastPreviewInitTime = 0.0;
-
-    const double CurrentTime = FPlatformTime::Seconds();
-
-    if ((CurrentTime - LastPreviewInitTime) < 0.25)
-    {
-        UE_LOG(LogTemp, Warning,
-            TEXT("InitializeCameraPreview THROTTLED"));
-        return;
-    }
-
-    LastPreviewInitTime = CurrentTime;
-
-
-    if (GExitPurge || GIsRequestingExit || IsEngineExitRequested())
-    {
-        return;
-    }
-
-    UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-    if (!EditorWorld || !IsValid(EditorWorld))
-    {
-        return;
-    }
-
-    int32 SceneCaptureCount = 0;
-    int32 CineCameraCount = 0;
-
-    for (TObjectIterator<USceneCaptureComponent2D> It; It; ++It)
-    {
-        ++SceneCaptureCount;
-    }
-
-    for (TObjectIterator<ACineCameraActor> It; It; ++It)
-    {
-        ++CineCameraCount;
-    }
-
-    UE_LOG(LogTemp, Warning,
-        TEXT("PREVIEW AUDIT | SceneCaptures=%d | CineCameras=%d"),
-        SceneCaptureCount,
-        CineCameraCount);
-
-    UE_LOG(LogTemp, Warning, TEXT("InitializeCameraPreview called"));
-
-    if (!GEditor)
-    {
-        return;
-    }
-
-    if (!IsValid(InSourceCamera) || !InSourceCamera->IsValidLowLevel())
-    {
-        UE_LOG(LogTemp, Error, TEXT("InitializeCameraPreview: invalid camera"));
-        return;
-    }
-
-    if (!InSourceCamera->GetWorld() || InSourceCamera->GetWorld()->WorldType != EWorldType::Editor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("InitializeCameraPreview: camera is not in editor world"));
-        return;
-    }
-
-    UWorld* World = GEditor->GetEditorWorldContext().World();
-    if (!World || World->WorldType != EWorldType::Editor)
-    {
-        UE_LOG(LogTemp, Error, TEXT("INVALID WORLD CONTEXT"));
-        return;
-    }
-
-    if (!InSourceCamera || !InSourceCamera->GetWorld())
-    {
-        UE_LOG(LogTemp, Error, TEXT("Camera has no valid world"));
-        return;
-    }
-
-    if (InSourceCamera->GetWorld() != World)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Camera belongs to a different world — skipping preview init"));
-        return;
-    }
-
-    PreviewSourceCamera = InSourceCamera;
-
-    // --------------------------------------------------
-    // If preview component belongs to an old camera / old world, kill it
-    // --------------------------------------------------
-
-    if (!InSourceCamera ||
-        !IsValid(InSourceCamera) ||
-        InSourceCamera->IsActorBeingDestroyed())
-    {
-        UE_LOG(LogTemp, Error,
-            TEXT("InitializeCameraPreview: source camera invalid before assignment"));
-        return;
-    }
-
-    UCineCameraComponent* SourceCameraComponent =
-        InSourceCamera->GetCineCameraComponent();
-
-    if (!SourceCameraComponent ||
-        !IsValid(SourceCameraComponent) ||
-        SourceCameraComponent->IsBeingDestroyed())
-    {
-        UE_LOG(LogTemp, Error,
-            TEXT("InitializeCameraPreview: source camera component invalid"));
-        return;
-    }
-
-    PreviewCameraActor = InSourceCamera;
-    PreviewCameraComponent = SourceCameraComponent;
-
-    // --------------------------------------------------
-    // Aspect from PROJECT (authoritative)
-    // --------------------------------------------------
-    FString Aspect = TEXT("16:9");
-
-    if (ActiveProject)
-    {
-        Aspect = ActiveProject->ProjectSettings.AspectRatio;
-    }
-
-    const FVector2D Ratio = GAS_ParseAspectRatio(Aspect);
-
-    const float AspectRatio =
-        (Ratio.Y > KINDA_SMALL_NUMBER)
-        ? (Ratio.X / Ratio.Y)
-        : (16.0f / 9.0f);
-
-    const int32 TargetWidth = 1280;
-    const int32 TargetHeight = FMath::RoundToInt((float)TargetWidth / AspectRatio);
-
-    UE_LOG(LogTemp, Warning, TEXT("Preview Aspect: %s  →  %f"), *Aspect, AspectRatio);
-
-    // --------------------------------------------------
-    // Render Target
-    // --------------------------------------------------
-    if (!CameraPreviewRenderTarget)
-    {
-        CameraPreviewRenderTarget =
-            NewObject<UTextureRenderTarget2D>(GetTransientPackage());
-
-        CameraPreviewRenderTarget->ClearColor = FLinearColor::Black;
-        CameraPreviewRenderTarget->InitAutoFormat(TargetWidth, TargetHeight);
-        //CameraPreviewRenderTarget->UpdateResourceImmediate(true);
-
-        UE_LOG(LogTemp, Warning, TEXT("RenderTarget CREATED %d x %d"), TargetWidth, TargetHeight);
-    }
-    else if (CameraPreviewRenderTarget->SizeX != TargetWidth ||
-        CameraPreviewRenderTarget->SizeY != TargetHeight)
-    {
-        CameraPreviewRenderTarget->ResizeTarget(TargetWidth, TargetHeight);
-        //CameraPreviewRenderTarget->UpdateResourceImmediate(true);
-
-        UE_LOG(LogTemp, Warning, TEXT("RenderTarget RESIZED %d x %d"), TargetWidth, TargetHeight);
-    }
-
-    // --------------------------------------------------
-    // Reuse existing scene capture whenever possible
-    // --------------------------------------------------
-
-    const bool bNeedNewSceneCapture =
-        !PreviewSceneCapture ||
-        !IsValid(PreviewSceneCapture) ||
-        PreviewSceneCapture->IsBeingDestroyed() ||
-        PreviewSceneCapture->GetWorld() != World;
-
-    if (bNeedNewSceneCapture)
-    {
-        if (PreviewSceneCapture &&
-            IsValid(PreviewSceneCapture) &&
-            !PreviewSceneCapture->IsBeingDestroyed())
-        {
-            PreviewSceneCapture->DestroyComponent();
-        }
-
-        PreviewSceneCapture = nullptr;
-
-        PreviewSceneCapture = NewObject<USceneCaptureComponent2D>(
-            InSourceCamera,
-            USceneCaptureComponent2D::StaticClass(),
-            NAME_None,
-            RF_Transient
-        );
-
-        if (!PreviewSceneCapture)
-        {
-            UE_LOG(LogTemp, Error,
-                TEXT("Failed to create SceneCapture"));
-            return;
-        }
-
-        PreviewSceneCapture->SetupAttachment(
-            PreviewCameraActor->GetRootComponent());
-
-        PreviewSceneCapture->RegisterComponentWithWorld(World);
-
-        UE_LOG(LogTemp, Warning,
-            TEXT("NEW PreviewSceneCapture CREATED"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning,
-            TEXT("REUSING existing PreviewSceneCapture"));
-    }
-
-    // --------------------------------------------------
-    // FORCE WORLD MATCH (THIS IS THE FIX)
-    // --------------------------------------------------
-
-    PreviewSceneCapture->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-
-    PreviewSceneCapture->SetWorldLocation(
-        PreviewCameraActor->GetActorLocation()
-    );
-
-    PreviewSceneCapture->SetWorldRotation(
-        PreviewCameraActor->GetActorRotation()
-    );
-
-    // --------------------------------------------------
-    // Hard match real camera
-    // --------------------------------------------------
-    PreviewSceneCapture->TextureTarget = CameraPreviewRenderTarget;
-    PreviewSceneCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
-
-    // ADD THIS BLOCK HERE
-    PreviewSceneCapture->PostProcessSettings.bOverride_AutoExposureMethod = true;
-    PreviewSceneCapture->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
-
-    PreviewSceneCapture->PostProcessSettings.bOverride_AutoExposureBias = true;
-    PreviewSceneCapture->PostProcessSettings.AutoExposureBias = -2.0f;
-
-    PreviewSceneCapture->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
-    PreviewSceneCapture->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
-    PreviewSceneCapture->PostProcessSettings.AutoExposureMinBrightness = 1.0f;
-    PreviewSceneCapture->PostProcessSettings.AutoExposureMaxBrightness = 1.0f;
-
-    PreviewSceneCapture->ProjectionType = ECameraProjectionMode::Perspective;
-    PreviewSceneCapture->FOVAngle =
-        PreviewCameraComponent->CurrentFocalLength > 0.f
-        ? PreviewCameraComponent->GetHorizontalFieldOfView()
-        : 50.f;
-    // Match clip planes (prevents weird horizon clipping)
-    PreviewSceneCapture->MaxViewDistanceOverride = 100000.f;
-    PreviewSceneCapture->bUseCustomProjectionMatrix = false;
-
-    PreviewSceneCapture->PostProcessSettings = PreviewCameraComponent->PostProcessSettings;
-    PreviewSceneCapture->PostProcessBlendWeight = PreviewCameraComponent->PostProcessBlendWeight;
-
-    PreviewSceneCapture->PrimitiveRenderMode =
-        ESceneCapturePrimitiveRenderMode::PRM_RenderScenePrimitives;
-
-    PreviewSceneCapture->ShowFlags = FEngineShowFlags(ESFIM_Game);
-    PreviewSceneCapture->ShowFlags.SetModeWidgets(false);
-    PreviewSceneCapture->ShowFlags.SetSelection(false);
-    PreviewSceneCapture->ShowFlags.SetSelectionOutline(false);
-    PreviewSceneCapture->ShowFlags.SetGrid(false);
-    PreviewSceneCapture->ShowFlags.SetBounds(false);
-    PreviewSceneCapture->ShowFlags.SetPivot(false);
-
-    PreviewSceneCapture->bCaptureEveryFrame = false;
-    PreviewSceneCapture->bCaptureOnMovement = false;
-
-    // --------------------------------------------------
-    // FORCE MATCH REAL CAMERA (CRITICAL FIX)
-    // --------------------------------------------------
-
-    PreviewSceneCapture->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
-
-    PreviewSceneCapture->SetWorldLocation(
-        InSourceCamera->GetActorLocation()
-    );
-
-    PreviewSceneCapture->SetWorldRotation(
-        InSourceCamera->GetActorRotation()
-    );
-
-    // --------------------------------------------------
-    // Final capture
-    // --------------------------------------------------
-
-    /*PreviewSceneCapture->CaptureScene();*/
-
-    UE_LOG(LogTemp, Warning, TEXT("Preview synced AFTER camera transform"));
-    UE_LOG(LogTemp, Warning, TEXT("REAL CAM LOC: %s"),
-        *InSourceCamera->GetActorLocation().ToString());
-
-    UE_LOG(LogTemp, Warning, TEXT("CAPTURE LOC: %s"),
-        *PreviewSceneCapture->GetComponentLocation().ToString());
-
-    UE_LOG(LogTemp, Warning, TEXT("Preview matched to REAL camera"));
-    UE_LOG(LogTemp, Warning, TEXT("AspectRatio: %f"), AspectRatio);
-    UE_LOG(LogTemp, Warning, TEXT("FOV: %f"), PreviewCameraComponent->FieldOfView);
-}
 
 void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
 {
+    const FGASMarker* Marker =
+        CurrentScript.Markers.FindByPredicate(
+            [&](const FGASMarker& M)
+            {
+                return M.Id == Intent.MarkerId;
+            }
+        );
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("[BLOCKING CHECK] Intent.MarkerId=%s MarkerFound=%s"),
+        *Intent.MarkerId,
+        Marker ? TEXT("YES") : TEXT("NO")
+    );
+
+    if (!Marker || !Marker->IsBlocking())
+    {
+        return;
+    }
+
     if (!GEditor) return;
 
     UWorld* World = GEditor->GetEditorWorldContext().World();
@@ -1593,18 +1461,17 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
     // --------------------------------------------------
     // Resolve camera
     // --------------------------------------------------
-    ACineCameraActor* Cam = Intent.CameraActor.Get();
+    AGAS_ShotCameraActor* Cam = Intent.CameraActor;
+
+    UE_LOG(LogTemp, Error,
+        TEXT("[CAMERA] REAL CAMERA = %s"),
+        *GetNameSafe(Cam));
+
     if (!Cam) return;
 
     if (!IsValid(Cam))
     {
         UE_LOG(LogTemp, Error, TEXT("[GAS CameraPreview] Invalid camera actor. Skipping preview update."));
-        return;
-    }
-
-    if (Cam->GetWorld() != World)
-    {
-        UE_LOG(LogTemp, Error, TEXT("[GAS CameraPreview] Camera belongs to different world. Skipping preview update."));
         return;
     }
 
@@ -1616,86 +1483,61 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
         return;
     }
 
-    // --------------------------------------------------
-    // 🔥 USE SAVED CAMERA IF AVAILABLE (THIS IS THE FIX)
-    // --------------------------------------------------
-    if (bRestoreSavedCameraThisFrame)
+    AGAS_StandInActor* TargetActor = nullptr;
+
+    for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
     {
-        Cam->SetActorLocationAndRotation(
-            Intent.CameraLocation,
-            Intent.CameraRotation
-        );
-
-        if (UCineCameraComponent* Cine = Cam->GetCineCameraComponent())
+        if (It->GetActorLabel().Contains(Intent.SubjectId))
         {
-            Cine->SetCurrentFocalLength(Intent.CameraFocalLength);
+            TargetActor = *It;
+            break;
         }
-
-        UE_LOG(LogTemp, Warning, TEXT("APPLIED FROM SHOT INTENT: %s"),
-            *Intent.CameraLocation.ToString());
-
-        bRestoreSavedCameraThisFrame = false;
     }
-    else
+
+    FVector TargetLocation = FVector(0, 0, 100);
+
+    if (TargetActor)
     {
-        // --------------------------------------------------
-        // FALLBACK (ONLY if no saved camera yet)
-        // --------------------------------------------------
-        AGAS_StandInActor* TargetActor = nullptr;
-
-        for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
-        {
-            if (It->GetActorLabel().Contains(Intent.SubjectId))
-            {
-                TargetActor = *It;
-                break;
-            }
-        }
-
-        FVector TargetLocation = FVector(0, 0, 100);
-
-        if (TargetActor)
-        {
-            TargetLocation = TargetActor->GetActorLocation();
-            TargetLocation.Z += 140.f;
-        }
-
-        float Distance = GetShotDistance(Intent.ShotType);
-        float HeightOffset = GetShotHeightOffset(Intent.ShotType);
-
-        FVector CharacterForward = FVector(1.f, 0.f, 0.f);
-
-        if (TargetActor)
-        {
-            UArrowComponent* Eyeline = TargetActor->FindComponentByClass<UArrowComponent>();
-
-            if (Eyeline)
-            {
-                CharacterForward = Eyeline->GetForwardVector();
-            }
-            else
-            {
-                CharacterForward = TargetActor->GetActorForwardVector();
-            }
-        }
-
-        FVector CameraDirection = CharacterForward;
-
-        FVector CameraLocation =
-            TargetLocation
-            + (CameraDirection * Distance)
-            + FVector(0.f, 0.f, HeightOffset);
-
-        FVector LookAtTarget = TargetLocation + FVector(0.f, 0.f, HeightOffset);
-
-        FRotator LookAtRotation =
-            (LookAtTarget - CameraLocation).Rotation();
-
-        Cam->SetActorLocation(CameraLocation);
-        Cam->SetActorRotation(LookAtRotation);
-
-        UE_LOG(LogTemp, Warning, TEXT("FALLBACK CAMERA USED"));
+        TargetLocation = TargetActor->GetActorLocation();
+        TargetLocation.Z += 140.f;
     }
+
+    float Distance = GetShotDistance(Intent.ShotType);
+    float HeightOffset = GetShotHeightOffset(Intent.ShotType);
+
+    FVector CharacterForward = FVector(1.f, 0.f, 0.f);
+
+    if (TargetActor)
+    {
+        UArrowComponent* Eyeline =
+            TargetActor->FindComponentByClass<UArrowComponent>();
+
+        if (Eyeline)
+        {
+            CharacterForward = Eyeline->GetForwardVector();
+        }
+        else
+        {
+            CharacterForward = TargetActor->GetActorForwardVector();
+        }
+    }
+
+    FVector CameraDirection = CharacterForward;
+
+    FVector CameraLocation =
+        TargetLocation
+        + (CameraDirection * Distance)
+        + FVector(0.f, 0.f, HeightOffset);
+
+    FVector LookAtTarget =
+        TargetLocation
+        + FVector(0.f, 0.f, HeightOffset);
+
+    FRotator LookAtRotation =
+        (LookAtTarget - CameraLocation).Rotation();
+
+    Cam->SetActorLocation(CameraLocation);
+    Cam->SetActorRotation(LookAtRotation);
 
     // --------------------------------------------------
     // Preview handled by SGAS_ShotIntentWindow only.
@@ -1703,154 +1545,6 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
     // This prevents stale cross-world SceneCapture crashes.
     // --------------------------------------------------
     return;
-}
-
-void SGAS_ScriptTab::SyncPreviewToRealCamera()
-{
-    ACineCameraActor* SourceCamera = PreviewSourceCamera.Get();
-    if (!SourceCamera || !PreviewCaptureComponent || !CameraPreviewRenderTarget)
-    {
-        return;
-    }
-
-    UCineCameraComponent* SourceCine =
-        SourceCamera->GetCineCameraComponent();
-
-    if (!SourceCine)
-    {
-        return;
-    }
-
-    // --------------------------------------------------
-    // FORCE ASPECT RATIO (FROM PROJECT SETTING)
-    // --------------------------------------------------
-    float AspectRatio = 16.0f / 9.0f;
-
-    if (ActiveProject)
-    {
-        const FString& RatioString = ActiveProject->ProjectSettings.AspectRatio;
-
-        if (RatioString.Contains(TEXT(":")))
-        {
-            FString Left, Right;
-            if (RatioString.Split(TEXT(":"), &Left, &Right))
-            {
-                AspectRatio = FCString::Atof(*Left) / FCString::Atof(*Right);
-            }
-        }
-    }
-
-    // Apply to filmback
-    if (SourceCine->Filmback.SensorHeight > 0.f)
-    {
-        SourceCine->Filmback.SensorWidth =
-            SourceCine->Filmback.SensorHeight * AspectRatio;
-    }
-
-    PreviewCaptureComponent->SetWorldLocation(SourceCamera->GetActorLocation());
-    PreviewCaptureComponent->SetWorldRotation(SourceCamera->GetActorRotation());
-
-    PreviewCaptureComponent->FOVAngle = SourceCine->FieldOfView;
-    PreviewCaptureComponent->OrthoWidth = 0.0f;
-    PreviewCaptureComponent->TextureTarget = CameraPreviewRenderTarget;
-    PreviewCaptureComponent->bUseCustomProjectionMatrix = false;
-
-    PreviewCaptureComponent->PostProcessSettings = SourceCine->PostProcessSettings;
-    PreviewCaptureComponent->PostProcessBlendWeight = SourceCine->PostProcessBlendWeight;
-
-    PreviewCaptureComponent->CaptureScene();
-}
-
-
-void SGAS_ScriptTab::ReleaseCameraPreview()
-{
-    UE_LOG(LogTemp, Warning,
-        TEXT("ReleaseCameraPreview CALLED"));
-
-    const bool bEngineShuttingDown =
-        GExitPurge ||
-        GIsRequestingExit ||
-        IsEngineExitRequested();
-
-    // --------------------------------------------------
-    // PreviewSceneCapture
-    // --------------------------------------------------
-
-    if (PreviewSceneCapture)
-    {
-        if (IsValid(PreviewSceneCapture))
-        {
-            PreviewSceneCapture->TextureTarget = nullptr;
-            PreviewSceneCapture->bCaptureEveryFrame = false;
-            PreviewSceneCapture->bCaptureOnMovement = false;
-
-            if (!bEngineShuttingDown &&
-                !PreviewSceneCapture->IsBeingDestroyed())
-            {
-                PreviewSceneCapture->DestroyComponent();
-            }
-        }
-
-        PreviewSceneCapture = nullptr;
-    }
-
-    // --------------------------------------------------
-    // PreviewCaptureComponent
-    // --------------------------------------------------
-
-    if (PreviewCaptureComponent)
-    {
-        if (IsValid(PreviewCaptureComponent))
-        {
-            PreviewCaptureComponent->TextureTarget = nullptr;
-            PreviewCaptureComponent->bCaptureEveryFrame = false;
-            PreviewCaptureComponent->bCaptureOnMovement = false;
-
-            if (!bEngineShuttingDown &&
-                !PreviewCaptureComponent->IsBeingDestroyed())
-            {
-                PreviewCaptureComponent->DestroyComponent();
-            }
-        }
-
-        PreviewCaptureComponent = nullptr;
-    }
-
-    // --------------------------------------------------
-    // Preview Camera Actor
-    // --------------------------------------------------
-
-    if (PreviewCameraActor)
-    {
-        if (IsValid(PreviewCameraActor))
-        {
-            if (!bEngineShuttingDown &&
-                !PreviewCameraActor->IsActorBeingDestroyed())
-            {
-                PreviewCameraActor->Destroy();
-            }
-        }
-
-        PreviewCameraActor = nullptr;
-    }
-
-    // --------------------------------------------------
-    // Remaining refs
-    // --------------------------------------------------
-
-    PreviewSourceCamera = nullptr;
-    PreviewCameraComponent = nullptr;
-
-    if (CameraPreviewRenderTarget &&
-        IsValid(CameraPreviewRenderTarget))
-    {
-        CameraPreviewRenderTarget = nullptr;
-    }
-
-    PreviewBrush.Reset();
-
-    UE_LOG(LogTemp, Warning,
-        TEXT("ReleaseCameraPreview FINISHED"));
 }
 
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
@@ -2627,9 +2321,42 @@ FReply SGAS_ScriptTab::OnSaveScript()
         if (World)
         {
             UE_LOG(LogTemp, Warning,
-                TEXT("Marking LEVEL dirty only"));
+                TEXT("Saving LEVEL package"));
 
             World->MarkPackageDirty();
+
+            UPackage* LevelPackage = World->PersistentLevel
+                ? World->PersistentLevel->GetOutermost()
+                : nullptr;
+
+            if (LevelPackage)
+            {
+                FString Filename =
+                    FPackageName::LongPackageNameToFilename(
+                        LevelPackage->GetName(),
+                        FPackageName::GetMapPackageExtension()
+                    );
+
+                FSavePackageArgs SaveArgs;
+                SaveArgs.TopLevelFlags = RF_Standalone;
+                SaveArgs.Error = GError;
+                SaveArgs.SaveFlags = SAVE_None;
+
+                //bool bSaved = UPackage::SavePackage(
+                //    LevelPackage,
+                //    nullptr,
+                //    *Filename,
+                //    SaveArgs
+                //);
+
+                UEditorLoadingAndSavingUtils::SaveDirtyPackages(
+                    true,
+                    true
+                );
+
+                UE_LOG(LogTemp, Warning,
+                    TEXT("LEVEL SAVE REQUESTED"));
+            }
         }
     }
 #endif
@@ -2683,12 +2410,6 @@ FReply SGAS_ScriptTab::OnToggleSceneNumbers()
 
 void SGAS_ScriptTab::PromptCreateNewProject()
 {
-    if (PreviewSourceCamera.IsValid())
-    {
-        ReleaseCameraPreview();
-    }
-
-    PreviewSourceCamera.Reset();
 
     TSharedPtr<SEditableTextBox> NameTextBox;
 
@@ -4122,7 +3843,30 @@ ULevelSequence* CreateOrLoadSceneMasterSequence(
     const FString FullPath =
         PackagePath / AssetName;
 
+    UPackage* ExistingPackage = FindPackage(nullptr, *FullPath);
+
+    if (ExistingPackage)
+    {
+        ExistingPackage->FullyLoad();
+
+        ULevelSequence* ExistingSequence =
+            FindObject<ULevelSequence>(ExistingPackage, *AssetName);
+
+        if (ExistingSequence && IsValid(ExistingSequence))
+        {
+            SceneBlock.MasterSequencePath = FullPath + TEXT(".") + AssetName;
+            return ExistingSequence;
+        }
+
+        UE_LOG(LogGASPrePro, Error,
+            TEXT("[SEQ] Existing package is partially loaded or invalid. Delete asset manually: %s"),
+            *FullPath);
+
+        return nullptr;
+    }
+
     UPackage* Package = CreatePackage(*FullPath);
+    Package->FullyLoad();
 
     ULevelSequence* NewSequence =
         NewObject<ULevelSequence>(
@@ -4172,8 +3916,15 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
         return;
     }
 
-    StopBlocking();
-    bPendingAutoOpenCastWindow = true;
+    // Only stop active blocking if switching scenes
+    if (bBlockingActive &&
+        ActiveBlockingSceneId.ToString() != SceneId)
+    {
+        StopBlocking();
+    }
+
+    // Only auto-open cast window for NEW blocking scenes
+    bPendingAutoOpenCastWindow = false;
 
     FGASBlock* SceneBlock = nullptr;
 
@@ -4191,10 +3942,53 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
         return;
     }
 
+    if (SceneHasBlockingShots(SceneId))
+    {
+        UE_LOG(
+            LogGASPrePro,
+            Warning,
+            TEXT("Blocking shots already exist for scene: %s"),
+            *SceneId
+        );
+    }
+
+    UE_LOG(LogTemp, Error,
+        TEXT("[BLOCKING PATH] ExistingPath='%s'"),
+        *SceneBlock->BlockingLevelPath);
+
     if (!SceneBlock->BlockingLevelPath.IsEmpty())
     {
-        // Load blocking map
-        FEditorFileUtils::LoadMap(SceneBlock->BlockingLevelPath, false, true);
+        UE_LOG(LogTemp, Error,
+            TEXT("[BLOCKING PATH] EXISTING BLOCKING PATH BRANCH"));
+
+        // -----------------------------------------------------
+        // Only load map if NOT already open
+        // -----------------------------------------------------
+        UWorld* ExistingWorld =
+            GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+
+        const FString CurrentMap =
+            ExistingWorld
+            ? ExistingWorld->GetOutermost()->GetName()
+            : FString();
+
+        if (!CurrentMap.Equals(SceneBlock->BlockingLevelPath))
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("[BLOCKING] Loading map: %s"),
+                *SceneBlock->BlockingLevelPath);
+
+            FEditorFileUtils::LoadMap(
+                SceneBlock->BlockingLevelPath,
+                false,
+                true
+            );
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("[BLOCKING] Map already open — skipping reload"));
+        }
 
         UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
 
@@ -4204,71 +3998,22 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
         }
 
         // -----------------------------------------------------
-        // Spawn characters for this scene
+        // Existing blocking level:
+        // DO NOT respawn missing cast.
+        // Only refresh actors already present in the saved level.
         // -----------------------------------------------------
-
         if (World)
         {
-            for (FString CharacterName : SceneBlock->CharactersInScene)
-            {
-                CharacterName = CharacterName.ToUpper();
 
-                AGAS_StandInActor* ExistingActor = nullptr;
 
-                for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
-                {
-                    AGAS_StandInActor* Actor = *It;
-
-                    if (Actor && Actor->GAS_CharacterId == CharacterName)
-                    {
-                        ExistingActor = Actor;
-                        break;
-                    }
-                }
-
-                if (!ExistingActor)
-                {
-                    FVector SpawnLocation = FVector::ZeroVector;
-
-                    FActorSpawnParameters Params;
-                    Params.OverrideLevel = World->PersistentLevel;
-                    Params.SpawnCollisionHandlingOverride =
-                        ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-                    ExistingActor =
-                        World->SpawnActor<AGAS_StandInActor>(
-                            AGAS_StandInActor::StaticClass(),
-                            SpawnLocation,
-                            FRotator::ZeroRotator,
-                            Params
-                        );
-
-                    if (ExistingActor)
-                    {
-                        ExistingActor->GAS_CharacterId = CharacterName;
-                        ExistingActor->SetActorLabel(CharacterName);
-                    }
-                }
-
-                if (ExistingActor)
-                {
-                    ExistingActor->RefreshMeshFromScript(&CurrentScript);
-                }
-            }
-        }
-
-        // -----------------------------------------------------
-        // Force mesh refresh for ALL stand-ins
-        // -----------------------------------------------------
-
-        if (World)
-        {
             for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
             {
                 AGAS_StandInActor* Actor = *It;
 
                 if (!Actor)
+                {
                     continue;
+                }
 
                 Actor->RefreshMeshFromScript(&CurrentScript);
             }
@@ -4279,6 +4024,9 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
 
         GASBlockingAccess::SetBlockingActive(true);
         GASBlockingAccess::SetActiveSceneId(ActiveBlockingSceneId);
+
+        RehydrateShotCamerasForScene(SceneId);
+        BindToExistingShotCameras();
 
         // -----------------------------------------------------
         // Reopen Master Sequence
@@ -4377,8 +4125,13 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
         return;
     }
 
+    bPendingAutoOpenCastWindow = true;
+
     // Otherwise show set browser
     OpenSetSelectionWindow(SceneId);
+
+    UE_LOG(LogTemp, Error,
+        TEXT("[BLOCKING PATH] NEW BLOCKING SCENE BRANCH"));
 }
 
 void SGAS_ScriptTab::OpenSetSelectionWindow(const FString& SceneId)
@@ -4508,6 +4261,14 @@ bool SGAS_ScriptTab::CreateBlockingLevelForScene(
 
     // Persist path
     SceneBlock.BlockingLevelPath = FullAssetPath;
+
+    UE_LOG(LogTemp, Error,
+        TEXT("[BLOCKING SAVE] Scene=%s SavedPath=%s"),
+        *SceneBlock.Id,
+        *SceneBlock.BlockingLevelPath);
+
+    MarkScriptDirty();
+    EnsureScriptSaved();
 
     // Open map
     UEditorLoadingAndSavingUtils::LoadMap(FullAssetPath);
@@ -5049,6 +4810,8 @@ void SGAS_ScriptTab::StopBlocking()
         SaveSequenceAsset(GActiveBlockingSequence);
     }
 
+    BoundShotCameraSet.Empty();
+
     GASBlockingAccess::SetBlockingActive(false);
 
     bBlockingActive = false;
@@ -5126,6 +4889,8 @@ void SGAS_ScriptTab::ResumePendingBlocking()
 
     FString SceneId = PendingBlockingSceneId;
     PendingBlockingSceneId.Empty();
+
+    PromoteNonBlockingShotsToBlocking(SceneId);
 
     OnStartBlockingScene(SceneId);
 }
@@ -5864,7 +5629,26 @@ void SGAS_ScriptTab::RebuildShotList()
                                                     FExecuteAction::CreateLambda(
                                                         [this, SceneId = Scene.SceneId]()
                                                         {
-                                                            this->OnStartBlockingScene(SceneId);
+                                                            FSlateApplication::Get().DismissAllMenus();
+
+                                                            TWeakPtr<SGAS_ScriptTab> WeakThis = SharedThis(this);
+
+                                                            FTSTicker::GetCoreTicker().AddTicker(
+                                                                FTickerDelegate::CreateLambda(
+                                                                    [WeakThis, SceneId](float)
+                                                                    {
+                                                                        if (!WeakThis.IsValid())
+                                                                        {
+                                                                            return false;
+                                                                        }
+
+                                                                        WeakThis.Pin()->PromoteNonBlockingShotsToBlocking(SceneId);
+                                                                        WeakThis.Pin()->OnStartBlockingScene(SceneId);
+
+                                                                        return false;
+                                                                    }
+                                                                )
+                                                            );
                                                         }
                                                     )
                                                 )
@@ -5896,6 +5680,8 @@ void SGAS_ScriptTab::RebuildShotList()
                                                     FExecuteAction::CreateLambda(
                                                         [this, SceneId = Scene.SceneId]()
                                                         {
+                                                            this->PromoteNonBlockingShotsToBlocking(SceneId);
+
                                                             this->OnStartBlockingScene(SceneId);
                                                         }
                                                     )
@@ -6566,7 +6352,7 @@ void SGAS_ScriptTab::ConfigurePreviewCameraFilmback(UCineCameraComponent* InCame
 
 FVector2D SGAS_ScriptTab::GetPreviewWidgetSize(float InWidth) const
 {
-    return FVector2D(InWidth, InWidth / PreviewAspect);
+    return FVector2D(InWidth, InWidth / (16.0f / 9.0f));
 }
 
 
@@ -6595,7 +6381,37 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
     }
 
     // ------------------------------------------------------------
-    // Blocking flow auto-open cast window (one shot only)
+    // Pending shot mode resume
+    // ------------------------------------------------------------
+    if (!PendingShotModeLevelPath.IsEmpty() &&
+        Filename.Contains(PendingShotModeLevelPath))
+    {
+        UE_LOG(LogGASPrePro, Warning, TEXT("[ShotMode] Map loaded, resuming"));
+
+        const FString SceneId = PendingShotModeSceneId;
+
+        PendingShotModeSceneId.Empty();
+        PendingShotModeLevelPath.Empty();
+
+        if (!SceneId.IsEmpty())
+        {
+            bIsResumingShotMode = true;
+            EnterShotMarkingMode(SceneId);
+            bIsResumingShotMode = false;
+
+            RehydrateShotCamerasForScene(SceneId);
+        }
+
+        PendingShotIntentMarkerId.Empty();
+        PendingShotIntentSceneId.Empty();
+
+        ClosePendingActionWindow();
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // Blocking flow auto-open cast window
+    // ONLY for true blocking startup flow
     // ------------------------------------------------------------
     if (bBlockingActive && bPendingAutoOpenCastWindow)
     {
@@ -6613,42 +6429,7 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
         return;
     }
 
-    // ------------------------------------------------------------
-    // Pending shot mode resume (unchanged)
-    // ------------------------------------------------------------
-    if (PendingShotModeLevelPath.IsEmpty())
-    {
-        ClosePendingActionWindow();
-        return;
-    }
-
-    if (!Filename.Contains(PendingShotModeLevelPath))
-    {
-        ClosePendingActionWindow();
-        return;
-    }
-
-    UE_LOG(LogGASPrePro, Warning, TEXT("[ShotMode] Map loaded, resuming"));
-
-    const FString SceneId = PendingShotModeSceneId;
-
-    PendingShotModeSceneId.Empty();
-    PendingShotModeLevelPath.Empty();
-
-    if (SceneId.IsEmpty())
-    {
-        return;
-    }
-
-    bIsResumingShotMode = true;
-    EnterShotMarkingMode(SceneId);
-    bIsResumingShotMode = false;
-
-    PendingShotIntentMarkerId.Empty();
-    PendingShotIntentSceneId.Empty();
-
     ClosePendingActionWindow();
-
 }
 
 FString SGAS_ScriptTab::GetBlockingLevelPath(const FString& SceneId) const
@@ -6774,6 +6555,7 @@ void SGAS_ScriptTab::EnterShotMarkingMode(const FString& SceneId)
 
         PendingShotModeSceneId = SceneId;
         PendingShotModeLevelPath = BlockingPath;
+        bPendingAutoOpenCastWindow = false;
 
         ShowPendingActionWindow(TEXT("Opening blocking scene..."));
         OpenBlockingLevel(BlockingPath);
@@ -6788,6 +6570,9 @@ void SGAS_ScriptTab::EnterShotMarkingMode(const FString& SceneId)
     // Do NOT touch preview or sequencer here yet
     // --------------------------------------------------
     ActiveCameraModeSceneId = SceneId;
+
+    RehydrateShotCamerasForScene(SceneId);
+    BindToExistingShotCameras();
 
     bShotAddArmed = true;
     bIsShotRangeDragging = false;
@@ -6812,20 +6597,6 @@ SGAS_ScriptTab::~SGAS_ScriptTab()
         FEditorDelegates::OnMapOpened.Remove(OnMapOpenedHandle);
         OnMapOpenedHandle.Reset();
     }
-
-    if (GExitPurge || GIsRequestingExit || IsEngineExitRequested())
-    {
-        PreviewSceneCapture = nullptr;
-        PreviewCaptureComponent = nullptr;
-        PreviewSourceCamera = nullptr;
-        PreviewCameraActor = nullptr;
-        PreviewCameraComponent = nullptr;
-        CameraPreviewRenderTarget = nullptr;
-        PreviewBrush.Reset();
-        return;
-    }
-
-    ReleaseCameraPreview();
 }
 
 
@@ -6849,55 +6620,38 @@ void SGAS_ScriptTab::SetActiveBlockingShot(const FGuid& ShotId)
         return;
     }
 
+    FGASMarker* FoundMarker = CurrentScript.Markers.FindByPredicate(
+        [&](const FGASMarker& Marker)
+        {
+            return Marker.MarkerGuid == ShotId;
+        }
+    );
+
+    if (!FoundMarker)
+    {
+        return;
+    }
+
+    if (!FoundMarker->IsBlocking())
+    {
+        return;
+    }
+
     ActiveBlockingShotId = ShotId;
 
     UE_LOG(LogGASPrePro, Warning,
         TEXT("SetActiveBlockingShot: %s"),
         *ActiveBlockingShotId.ToString());
 
-    // --------------------------------------------------
-    // FIND AND ASSIGN PREVIEW CAMERA
-    // --------------------------------------------------
-#if WITH_EDITOR
-    if (GEditor)
-    {
-        UWorld* World = GEditor->GetEditorWorldContext().World();
-        if (World)
-        {
-            for (TActorIterator<AGAS_ShotCameraActor> It(World); It; ++It)
-            {
-                AGAS_ShotCameraActor* Cam = *It;
-                if (!IsValid(Cam)) continue;
-
-                if (Cam->ShotGuid == ShotId)
-                {
-                    PreviewCameraComponent = Cam->CineCamera;
-
-                    UE_LOG(LogTemp, Warning,
-                        TEXT("Preview Camera Assigned → %s"),
-                        *Cam->GetName());
-
-                    break;
-                }
-            }
-        }
-    }
-#endif
-
-    if (!Script.IsValid())
-    {
-        return;
-    }
-
-    FGASShotIntent* Shot = Script->ShotIntents.Find(ShotId.ToString());
+    FGASShotIntent* Shot = CurrentScript.ShotIntents.Find(FoundMarker->Id);
     if (!Shot)
     {
         return;
     }
 
-    if (Shot->CameraActor.IsValid())
+    if (IsValid(Shot->CameraActor))
     {
-        ACineCameraActor* Cam = Shot->CameraActor.Get();
+        AGAS_ShotCameraActor* Cam = Shot->CameraActor;
 
         if (Cam)
         {
@@ -6908,9 +6662,11 @@ void SGAS_ScriptTab::SetActiveBlockingShot(const FGuid& ShotId)
                     Shot->CameraRotation
                 );
 
-                if (UCineCameraComponent* Cine = Cam->GetCineCameraComponent())
+                if (Cam->CineCamera)
                 {
-                    Cine->SetCurrentFocalLength(Shot->CameraFocalLength);
+                    Cam->CineCamera->SetCurrentFocalLength(
+                        Shot->CameraFocalLength
+                    );
                 }
 
                 UE_LOG(LogTemp, Warning, TEXT("FINAL CAMERA APPLIED (SetActive): %s"),
@@ -6922,9 +6678,6 @@ void SGAS_ScriptTab::SetActiveBlockingShot(const FGuid& ShotId)
             }
         }
     }
-
-
-
 }
 
 FGuid SGAS_ScriptTab::GetActiveBlockingShot() const
@@ -6939,7 +6692,13 @@ void SGAS_ScriptTab::NotifyShotCameraBound(const FGuid& ShotId)
         if (Marker.MarkerType == EGASMarkerType::ShotMarker &&
             Marker.MarkerGuid == ShotId)
         {
+            if (!Marker.IsBlocking())
+            {
+                return;
+            }
+
             Marker.PromoteToCameraPlaced();
+
             MarkScriptDirty();
             OnSaveScript();
 
@@ -6956,36 +6715,49 @@ void SGAS_ScriptTab::NotifyShotCameraBound(const FGuid& ShotId)
 
 void SGAS_ScriptTab::BindToExistingShotCameras()
 {
-
     if (!GEditor)
     {
         return;
     }
-    BoundShotCameras.Empty();
 
     UWorld* World = GEditor->GetEditorWorldContext().World();
+
     if (!World)
     {
         return;
     }
 
+
+
+    int32 BindCount = 0;
+
     for (TActorIterator<AGAS_ShotCameraActor> It(World); It; ++It)
     {
         AGAS_ShotCameraActor* Cam = *It;
+
         if (!IsValid(Cam))
         {
             continue;
         }
 
-        // Prevent double-binding
-        if (BoundShotCameras.Contains(Cam))
+        if (BoundShotCameraSet.Contains(Cam))
         {
             continue;
         }
 
-        Cam->OnShotCameraMoved.AddSP(this, &SGAS_ScriptTab::HandleShotCameraMoved);
-        BoundShotCameras.Add(Cam);
+        Cam->OnShotCameraMoved.RemoveAll(this);
+
+        Cam->OnShotCameraMoved.AddSP(
+            this,
+            &SGAS_ScriptTab::HandleShotCameraMoved
+        );
+
+        BoundShotCameraSet.Add(Cam);
+
+        ++BindCount;
+
     }
+
 }
 
 void SGAS_ScriptTab::HandleShotCameraMoved(const FString& MarkerId, const FTransform& NewTransform)
@@ -7008,6 +6780,11 @@ void SGAS_ScriptTab::HandleShotCameraMoved(const FString& MarkerId, const FTrans
     if (!Found)
     {
         UE_LOG(LogGASPrePro, Warning, TEXT("HandleShotCameraMoved: Marker not found: %s"), *MarkerId);
+        return;
+    }
+
+    if (!Found->IsBlocking())
+    {
         return;
     }
 
@@ -7042,11 +6819,19 @@ void SGAS_ScriptTab::UpdateShotIntentCameraFromPreview(
     Shot->CameraRotation = Rotation;
     Shot->CameraFocalLength = FocalLength;
 
-    UE_LOG(LogTemp, Warning, TEXT("CAPTURED FINAL PREVIEW CAMERA: %s"), *Location.ToString());
 }
 
 void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)
 {
+    static bool bRehydrating = false;
+
+    if (bRehydrating)
+    {
+        return;
+    }
+
+    TGuardValue<bool> RehydrateGuard(bRehydrating, true);
+
     if (!GEditor)
     {
         return;
@@ -7078,8 +6863,15 @@ void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)
     // Spawn / snap cameras based on authoritative marker data
     for (const FGASMarker& Marker : CurrentScript.Markers)
     {
+
+
         // Only shot markers for this scene
         if (Marker.MarkerType != EGASMarkerType::ShotMarker)
+        {
+            continue;
+        }
+
+        if (!Marker.IsBlocking())
         {
             continue;
         }
@@ -7099,7 +6891,27 @@ void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)
         if (AGAS_ShotCameraActor** FoundCamPtr = ExistingByMarkerId.Find(MarkerId))
         {
             AGAS_ShotCameraActor* FoundCam = *FoundCamPtr;
-            FoundCam->SetActorTransform(Marker.CameraTransform);
+
+            if (IsValid(FoundCam))
+            {
+                FoundCam->SetActorTransform(Marker.CameraTransform);
+
+                if (FGASShotIntent* Intent =
+                    CurrentScript.ShotIntents.Find(MarkerId))
+                {
+                    Intent->CameraActor = FoundCam;
+
+                    UE_LOG(LogTemp, Error,
+                        TEXT("REBIND EXISTING CAMERA: %s"),
+                        *FoundCam->GetName());
+                }
+            }
+
+            continue;
+        }
+
+        if (ExistingByMarkerId.Contains(MarkerId))
+        {
             continue;
         }
 
@@ -7115,13 +6927,33 @@ void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)
 
         if (!IsValid(NewCam))
         {
-            UE_LOG(LogGASPrePro, Warning, TEXT("RehydrateShotCamerasForScene: Failed to spawn camera for marker %s"), *MarkerId);
+
             continue;
         }
 
         NewCam->MarkerId = MarkerId;
+
+        if (FGASShotIntent* Intent =
+            CurrentScript.ShotIntents.Find(MarkerId))
+        {
+            Intent->CameraActor = NewCam;
+
+            UE_LOG(LogTemp, Error,
+                TEXT("REBIND NEW CAMERA: %s"),
+                *NewCam->GetName());
+        }
+
+        NewCam->SetActorLabel(
+            FString::Printf(TEXT("GAS_ShotCamera_%s"), *Marker.GetShotLabel(CurrentScript.ShotNumberingPolicy))
+        );
+
+        NewCam->SetActorHiddenInGame(false);
+        NewCam->SetIsTemporarilyHiddenInEditor(false);
+
+
         ExistingByMarkerId.Add(MarkerId, NewCam);
     }
+
 }
 
 

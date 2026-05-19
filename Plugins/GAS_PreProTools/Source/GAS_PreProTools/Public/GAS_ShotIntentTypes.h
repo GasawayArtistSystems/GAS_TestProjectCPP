@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "CineCameraActor.h"
+#include "Actors/GAS_ShotCameraActor.h"
 #include "GAS_ShotIntentTypes.generated.h"
 
 // =====================================================
@@ -90,8 +91,8 @@ struct FGASShotIntent
 
     FString CharacterName;
 
-    UPROPERTY()
-    TSoftObjectPtr<ACineCameraActor> CameraActor;
+    UPROPERTY(Transient)
+    TObjectPtr<AGAS_ShotCameraActor> CameraActor = nullptr;
 
     UPROPERTY()
     FString CameraName;

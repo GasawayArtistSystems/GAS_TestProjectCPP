@@ -241,6 +241,8 @@ private:
         const FPointerEvent& MouseEvent
     ) override;
 
+    virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override;
+
     virtual FCursorReply OnCursorQuery(
         const FGeometry& MyGeometry,
         const FPointerEvent& CursorEvent
@@ -461,16 +463,6 @@ private:
 
     int32 ResolveParagraphForShot(float LocalY) const;
 
-    // --------------------------------------------------
-    // SHOT PREVIEW
-    // --------------------------------------------------
-
-    UTextureRenderTarget2D* ShotPreviewRenderTarget = nullptr;
-
-    ACineCameraActor* ShotPreviewCamera = nullptr;
-    USceneCaptureComponent2D* ShotPreviewCapture = nullptr;
-
-    TSharedPtr<SImage> ShotPreviewImage;
 
     TWeakPtr<class SGAS_ScriptTab> OwnerScriptTab;
 

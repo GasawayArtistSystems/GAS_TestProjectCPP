@@ -46,8 +46,8 @@ enum class EGASMarkerType : uint8
 UENUM(BlueprintType)
 enum class EGASShotOrigin : uint8
 {
-    Derived UMETA(DisplayName = "Derived"),   // auto / implicit
-    User    UMETA(DisplayName = "User")       // explicitly created by user
+    NonBlocking UMETA(DisplayName = "NonBlocking"),
+    Blocking    UMETA(DisplayName = "Blocking")
 };
 
 // ------------------------------------------------------------
@@ -181,8 +181,8 @@ struct FGASMarker
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASMarkerType MarkerType = EGASMarkerType::ShotMarker;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
-    EGASShotOrigin ShotOrigin = EGASShotOrigin::Derived;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    EGASShotOrigin ShotOrigin = EGASShotOrigin::NonBlocking;
 
     UPROPERTY()
     int32 ShotIndex = 0;
@@ -276,6 +276,16 @@ struct FGASMarker
         return Id == Other.Id;
     }
 
+    FORCEINLINE bool IsNonBlocking() const
+    {
+        return ShotOrigin == EGASShotOrigin::NonBlocking;
+    }
+
+    FORCEINLINE bool IsBlocking() const
+    {
+        return ShotOrigin == EGASShotOrigin::Blocking;
+    }
+
     // --------------------------------------------------
     // Camera Data (One camera per shot)
     // --------------------------------------------------
@@ -291,7 +301,10 @@ struct FGASMarker
         bHasCamera = true;
         CameraTransform = InTransform;
 
-        PromoteToCameraPlaced();
+        if (IsBlocking())
+        {
+            PromoteToCameraPlaced();
+        }
     }
 
 

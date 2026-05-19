@@ -161,10 +161,18 @@ public:
 
     void SetActiveBlockingShot(const FGuid& ShotId);
     FGuid GetActiveBlockingShot() const;
+
+
     void NotifyShotCameraBound(const FGuid& ShotId);
     void RequestDeleteShotMarker(const FString& MarkerId);
 
     void OnShotIntentChanged();
+    bool SceneHasNonBlockingShots(
+        const FString& SceneId
+    ) const;
+    bool SceneHasBlockingShots(
+        const FString& SceneId
+    ) const;
 
     void ClearShotSelectionAfterDelete()
     {
@@ -211,21 +219,8 @@ public:
     void HandleMapOpened(const FString& Filename, bool bAsTemplate);
 
     // --------------------------------------------------
-    // Preview / Camera
+    // Camera
     // --------------------------------------------------
-    const FSlateBrush* GetPreviewBrush() const
-    {
-        return PreviewBrush.IsValid() ? PreviewBrush.Get() : nullptr;
-    }
-
-    UTextureRenderTarget2D* GetCameraPreviewRenderTarget() const
-    {
-        return CameraPreviewRenderTarget;
-    }
-
-    void InitializeCameraPreview(ACineCameraActor* InSourceCamera);
-    void SyncPreviewToRealCamera();
-    void ReleaseCameraPreview();
     void UpdateCameraFromShotIntent(FGASShotIntent& Intent);
 
     void ApplyCameraToLastCreatedShot(
@@ -356,6 +351,10 @@ private:
     void ScrollToScene(const FGASShotDefinitionListRow& Scene);
     void ScrollToSceneBlock(const FString& BlockId);
 
+    void PromoteNonBlockingShotsToBlocking(
+        const FString& SceneId
+    );
+
     void OnStartBlockingScene(const FString& SceneId);
     void OnDeleteBlockingScene(const FString& SceneId);
     void OpenCastWindowForScene(const FString& SceneId);
@@ -381,7 +380,7 @@ private:
     void HandleShotCameraMoved(const FString& MarkerId, const FTransform& NewTransform);
     void RehydrateShotCamerasForScene(const FString& SceneBlockId);
 
-    TSet<TWeakObjectPtr<class AGAS_ShotCameraActor>> BoundShotCameras;
+    TSet<TWeakObjectPtr<class AGAS_ShotCameraActor>> BoundShotCameraSet;
 #endif
 
     // --------------------------------------------------
@@ -470,45 +469,4 @@ private:
     float ColLens = 0.10f;
     float ColCamera = 0.20f;
 
-    // --------------------------------------------------
-    // Shot Intent Preview State
-    // --------------------------------------------------
-    TSharedPtr<FString> SelectedShotIntentSubject;
-    TSharedPtr<FString> SelectedShotIntentType;
-
-    UWorld* PreviewWorld = nullptr;
-
-    UPROPERTY()
-    ACineCameraActor* ShotCamera = nullptr;
-
-    TWeakObjectPtr<ACineCameraActor> PreviewSourceCamera;
-
-    UPROPERTY(Transient)
-    USceneCaptureComponent2D* PreviewCaptureComponent = nullptr;
-
-    TSharedPtr<FSlateBrush> PreviewBrush;
-    TSharedPtr<FSlateBrush> CameraPreviewBrush;
-    TSharedPtr<SImage> ShotPreviewImage;
-
-    // --------------------------------------------------
-    // Camera Preview Render System
-    // --------------------------------------------------
-    static constexpr int32 PreviewRTWidth = 1280;
-    static constexpr int32 PreviewRTHeight = 720;
-    static constexpr float PreviewAspect = 16.0f / 9.0f;
-
-    UPROPERTY(Transient)
-    UTextureRenderTarget2D* CameraPreviewRenderTarget = nullptr;
-
-    UPROPERTY()
-    TObjectPtr<ACineCameraActor> PreviewCameraActor = nullptr;
-
-    UPROPERTY()
-    TObjectPtr<UCineCameraComponent> PreviewCameraComponent = nullptr;
-
-    UPROPERTY()
-    TObjectPtr<USceneCaptureComponent2D> PreviewSceneCapture = nullptr;
-
-    UPROPERTY()
-    UTextureRenderTarget2D* ShotPreviewRenderTarget = nullptr;
 };

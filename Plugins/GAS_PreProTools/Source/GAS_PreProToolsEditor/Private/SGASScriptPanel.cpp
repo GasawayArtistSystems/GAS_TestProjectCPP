@@ -20,6 +20,7 @@
 #include "GASPreProLog.h"
 #include "GAS_StandInActor.h"
 #include "SGAS_ShotIntentWindow.h"
+#include "Actors/GAS_ShotCameraActor.h"
 
 #include "Rendering/DrawElements.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
@@ -1827,6 +1828,16 @@ void SGASScriptPanel::CommitShotAtParagraph(
     // --------------------------------------------------
     bool bHasBlocking = false;
 
+    UE_LOG(
+        LogTemp,
+        Error,
+        TEXT("[BLOCKING DETECT] SceneBlockPtr=%s BlockingPath=%s"),
+        SceneBlockPtr ? TEXT("VALID") : TEXT("NULL"),
+        SceneBlockPtr
+        ? *SceneBlockPtr->BlockingLevelPath
+        : TEXT("NONE")
+    );
+
     if (SceneBlockPtr &&
         !SceneBlockPtr->BlockingLevelPath.IsEmpty())
     {
@@ -1834,6 +1845,13 @@ void SGASScriptPanel::CommitShotAtParagraph(
             FPackageName::DoesPackageExist(
                 SceneBlockPtr->BlockingLevelPath
             );
+
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("[BLOCKING DETECT] bHasBlocking=%d"),
+            bHasBlocking ? 1 : 0
+        );
     }
 
 
@@ -1848,7 +1866,18 @@ void SGASScriptPanel::CommitShotAtParagraph(
     NewMarker.BlockId = SceneBlockId;
     NewMarker.SceneShotIndex = InsertIndex;
     UE_LOG(LogTemp, Warning, TEXT("NEW MARKER SceneShotIndex: %d"), NewMarker.SceneShotIndex);
-    NewMarker.ShotOrigin = EGASShotOrigin::User;
+
+    FGASScript* Script = SourceScript;
+
+    UE_LOG(LogTemp, Error,
+        TEXT("[MARKER CREATE] Script Ptr=%p MarkerCount=%d"),
+        Script,
+        Script ? Script->Markers.Num() : -1);
+
+    NewMarker.ShotOrigin =
+        bHasBlocking
+        ? EGASShotOrigin::Blocking
+        : EGASShotOrigin::NonBlocking;
 
     // --------------------------------------------------
     // Resolve FINAL shot number (authoritative)
@@ -1991,11 +2020,6 @@ void SGASScriptPanel::CommitShotAtParagraph(
         );
     }
 
-    if (bHasBlocking)
-    {
-        NewMarker.BindCameraTransform(FTransform::Identity);
-    }
-
 
     // ------------------------------------------------------------
     // Add marker
@@ -2024,183 +2048,68 @@ void SGASScriptPanel::CommitShotAtParagraph(
         CreatedIntent->CameraName = TEXT("TEMP");
     }
 
-    if (CreatedIntent && bHasBlocking)
+    if (bHasBlocking && CreatedIntent)
     {
-        UWorld* World = nullptr;
-
-#if WITH_EDITOR
         if (GEditor)
         {
-            World = GEditor->GetEditorWorldContext().World();
-        }
-#endif
+            UWorld* World =
+                GEditor->GetEditorWorldContext().World();
 
-        if (World && World->WorldType == EWorldType::Editor)
-        {
-            FActorSpawnParameters Params;
-            Params.Name = MakeUniqueObjectName(
-                World,
-                ACineCameraActor::StaticClass(),
-                FName(*FString::Printf(TEXT("ShotCam_%s"), *NewMarker.Id))
-            );
-            Params.SpawnCollisionHandlingOverride =
-                ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-            ACineCameraActor* Cam =
-                World->SpawnActor<ACineCameraActor>(
-                    ACineCameraActor::StaticClass(),
-                    FTransform::Identity,
-                    Params
-                );
-
-            GLastCreatedCamera = Cam;
-
-            if (Cam)
+            if (World)
             {
-                if (!IsValid(Cam))
+                FActorSpawnParameters SpawnParams;
+                SpawnParams.SpawnCollisionHandlingOverride =
+                    ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+                AGAS_ShotCameraActor* Cam =
+                    World->SpawnActor<AGAS_ShotCameraActor>(
+                        AGAS_ShotCameraActor::StaticClass(),
+                        FVector::ZeroVector,
+                        FRotator::ZeroRotator,
+                        SpawnParams
+                    );
+
+                if (Cam)
                 {
-                    UE_LOG(LogGASPrePro, Error, TEXT("Shot camera invalid right after spawn"));
-                    return;
-                }
+                    Cam->MarkerId = NewMarker.Id;
+                    Cam->ShotGuid = FGuid(NewMarker.MarkerGuid);
 
-                GLastCreatedCamera = Cam;
-                CreatedIntent->CameraActor = Cam;
+                    Cam->SetActorLabel(
+                        FString::Printf(
+                            TEXT("GAS_ShotCamera_%s"),
+                            *NewMarker.GetShotLabel(SourceScript->ShotNumberingPolicy)
+                        )
+                    );
 
+                    CreatedIntent->CameraActor = Cam;
 
+                    UE_LOG(LogTemp, Error,
+                        TEXT("ASSIGNED CAMERA PTR: %s"),
+                        IsValid(CreatedIntent->CameraActor)
+                        ? *CreatedIntent->CameraActor->GetName()
+                        : TEXT("INVALID"));
 
-                CreatedIntent->CameraName = Cam->GetName();
+                    CreatedIntent->CameraLocation = Cam->GetActorLocation();
+                    CreatedIntent->CameraRotation = Cam->GetActorRotation();
 
-                // -------------------------------------------------
-                // Camera Framing (ShotIntent Driven)
-                // -------------------------------------------------
+                    if (Cam->CineCamera)
+                    {
+                        CreatedIntent->CameraFocalLength =
+                            Cam->CineCamera->CurrentFocalLength;
+                    }
 
-                // Resolve Subject
-                AGAS_StandInActor* TargetActor = nullptr;
-
-                if (!CreatedIntent->SubjectId.IsEmpty())
-                {
-                    TargetActor = FindStandInByCharacter(World, CreatedIntent->SubjectId);
-                }
-
-                // -------------------------------------------------
-                // DEBUG: Actor orientation
-                // -------------------------------------------------
-
-                if (TargetActor)
-                {
-                    UWorld* DebugWorld = TargetActor->GetWorld();
-                    const FVector Loc = TargetActor->GetActorLocation();
-                }
-
-                USkeletalMeshComponent* MeshComp = TargetActor
-                    ? TargetActor->FindComponentByClass<USkeletalMeshComponent>()
-                    : nullptr;
-
-                // Target location (mesh if available)
-                FVector TargetLocation = FVector::ZeroVector;
-
-                if (MeshComp)
-                {
-                    TargetLocation = MeshComp->GetComponentLocation();
-                    TargetLocation.Z += 140.f; // eye level
-                }
-                else if (TargetActor)
-                {
-                    TargetLocation = TargetActor->GetActorLocation();
-                }
-                else
-                {
-                    TargetLocation = FVector(0.f, 0.f, 100.f);
-                }
-
-                // -------------------------------------------------
-                // Camera Solve (ABSOLUTE WORLD TEST)
-                // -------------------------------------------------
-
-                const float Distance = 400.f;
-
-                // -------------------------------------------------
-                // Camera Solve (actor-facing forward)
-                // -------------------------------------------------
-
-                FVector Forward = TargetActor
-                    ? TargetActor->GetActorForwardVector()
-                    : FVector::ForwardVector;
-
-                FVector CameraLocation =
-                    TargetLocation + (Forward * Distance);
-
-                // DEBUG
-                DrawDebugSphere(
-                    World,
-                    CameraLocation,
-                    25.f,
-                    12,
-                    FColor::Yellow,
-                    false,
-                    10.f
-                );
-
-                // DEBUG
-                DrawDebugSphere(
-                    World,
-                    CameraLocation,
-                    25.f,
-                    12,
-                    FColor::Red,
-                    false,
-                    10.f
-                );
-
-                DrawDebugSphere(
-                    World,
-                    CameraLocation,
-                    25.f,
-                    12,
-                    FColor::Red,
-                    false,
-                    10.f
-                );
-
-                UE_LOG(LogTemp, Warning, TEXT("Camera: %s"), *CameraLocation.ToString());
-                UE_LOG(LogTemp, Warning, TEXT("Target: %s"), *TargetLocation.ToString());
-
-                // Look at actor
-                FVector Direction = (TargetLocation - CameraLocation).GetSafeNormal();
-                FRotator LookAtRotation = Direction.Rotation();
-
-                // -------------------------------------------------
-                // Apply
-                // -------------------------------------------------
-                Cam->SetActorLocation(CameraLocation);
-                Cam->SetActorRotation(LookAtRotation);
-
-                if (OwnerScriptTab.IsValid())
-                {
-                    TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
-                    UE_LOG(LogTemp, Warning, TEXT("FINAL CAM LOC BEFORE PREVIEW: %s"),
-                        *Cam->GetActorLocation().ToString());
-                    // TEMP CRASH ISOLATION
-                    // Tab->InitializeCameraPreview(Cam);
-                }
-
-#if WITH_EDITOR
-                FString ShotLabel = FString::Printf(
-                    TEXT("ShotCam_%s"),
-                    *NewMarker.GetShotLabel(SourceScript->ShotNumberingPolicy)
-                );
-
-                Cam->SetActorLabel(ShotLabel, true);
-#endif
-
-                UE_LOG(LogGASPrePro, Warning, TEXT("Shot Camera Assigned: %s"), *Cam->GetName());
-
-
-
-                if (OwnerScriptTab.IsValid())
-                {
-                    // TEMP CRASH ISOLATION
-                    // OwnerScriptTab.Pin()->InitializeCameraPreview(Cam);
+                    if (FGASMarker* StoredMarker =
+                        SourceScript->Markers.FindByPredicate(
+                            [&](const FGASMarker& M)
+                            {
+                                return M.Id == NewMarker.Id;
+                            }
+                        ))
+                    {
+                        StoredMarker->BindCameraTransform(
+                            Cam->GetActorTransform()
+                        );
+                    }
                 }
             }
         }
@@ -4257,6 +4166,13 @@ FReply SGASScriptPanel::OnMouseWheel(
 }
 
 
+void SGASScriptPanel::OnMouseLeave(const FPointerEvent& MouseEvent)
+{
+    HoveredShotMarkerId.Empty();
+
+    SCompoundWidget::OnMouseLeave(MouseEvent);
+}
+
 FCursorReply SGASScriptPanel::OnCursorQuery(
     const FGeometry& MyGeometry,
     const FPointerEvent& CursorEvent
@@ -4783,147 +4699,12 @@ void SGASScriptPanel::OnEnterShotMarkingMode(const FString& SceneId)
     }
 }
 
-
-void SGAS_ScriptTab::UpdateShotIntentPreview()
-{
-    if (!PreviewWorld || !ShotCamera) return;
-
-    // ------------------------------------------------------------
-    // 1. Resolve Subject → StandInActor
-    // ------------------------------------------------------------
-    AGAS_StandInActor* TargetStandIn = nullptr;
-
-    for (TActorIterator<AGAS_StandInActor> It(PreviewWorld); It; ++It)
-    {
-        AGAS_StandInActor* Actor = Cast<AGAS_StandInActor>(*It);
-
-        if (Actor && SelectedShotIntentSubject.IsValid() && Actor->GAS_CharacterId == *SelectedShotIntentSubject)
-        {
-            TargetStandIn = Actor;
-            break;
-        }
-    }
-
-    if (!TargetStandIn) return;
-
-    // ------------------------------------------------------------
-    // 2. Compute CU Transform
-    // ------------------------------------------------------------
-    const FVector TargetLocation = TargetStandIn->GetActorLocation();
-    const FVector UpOffset = FVector(0.f, 0.f, 160.f); // head height approx
-    const FVector FocusPoint = TargetLocation + UpOffset;
-
-    const float Distance = 120.f;
-
-    const FVector CameraLocation =
-        FocusPoint
-        - TargetStandIn->GetActorForwardVector() * Distance
-        + FVector(0.f, 0.f, 10.f);
-
-    const FRotator CameraRotation =
-        (FocusPoint - CameraLocation).Rotation();
-
-    // ------------------------------------------------------------
-    // 3. Apply to ShotCamera (SNAP)
-    // ------------------------------------------------------------
-    ShotCamera->SetActorLocation(CameraLocation);
-    ShotCamera->SetActorRotation(CameraRotation);
-
-    // ------------------------------------------------------------
-    // 4. Force SceneCapture Update
-    // ------------------------------------------------------------
-    if (PreviewSceneCapture)
-    {
-        PreviewSceneCapture->SetWorldLocationAndRotation(
-            CameraLocation,
-            CameraRotation
-        );
-
-        PreviewSceneCapture->CaptureScene();
-    }
-}
-
 void SGASScriptPanel::UpdateShotPreviewCamera(
     const FString& CharacterId,
     EGASShotType ShotType,
-    ACineCameraActor* TargetCamera
-)
+    ACineCameraActor* TargetCamera)
 {
-    if (!GEditor || CharacterId.IsEmpty())
-        return;
-
-    UWorld* World = GEditor->GetEditorWorldContext().World();
-    if (!World)
-        return;
-
-    AGAS_StandInActor* Actor =
-        FindStandInByCharacter(World, CharacterId);
-
-    if (!Actor)
-        return;
-
-    float Distance = 200.f;
-
-    switch (ShotType)
-    {
-    case EGASShotType::ECU: Distance = 60.f; break;
-    case EGASShotType::CU:  Distance = 100.f; break;
-    case EGASShotType::MCU: Distance = 140.f; break;
-    case EGASShotType::MS:  Distance = 200.f; break;
-    case EGASShotType::MLS: Distance = 300.f; break;
-    case EGASShotType::WS:  Distance = 500.f; break;
-    case EGASShotType::EWS: Distance = 800.f; break;
-    }
-
-    FVector TargetLocation = Actor->GetActorLocation();
-
-    // Try to get head height from mesh
-    if (USkeletalMeshComponent* Mesh = Actor->FindComponentByClass<USkeletalMeshComponent>())
-    {
-        FBox Bounds = Mesh->Bounds.GetBox();
-
-        // Approximate head height (top of bounds)
-        TargetLocation.Z = Bounds.Max.Z;
-    }
-
-    FVector CameraLocation =
-        TargetLocation + FVector(Distance, 0.f, 0.f);
-
-    FRotator LookAtRotation =
-        (TargetLocation - CameraLocation).Rotation();
-
-    // -------------------------------------------------
-    // Apply to REAL camera
-    // -------------------------------------------------
-    if (TargetCamera)
-    {
-        TargetCamera->SetActorLocation(CameraLocation);
-        TargetCamera->SetActorRotation(LookAtRotation);
-
-        if (UCineCameraComponent* CineComp =
-            TargetCamera->GetCineCameraComponent())
-        {
-            const float SensorWidth = 36.0f;
-            const float SensorHeight = SensorWidth / 2.39f;
-
-            CineComp->Filmback.SensorWidth = SensorWidth;
-            CineComp->Filmback.SensorHeight = SensorHeight;
-
-            CineComp->bConstrainAspectRatio = true;
-
-            CineComp->SetFieldOfView(50.f);
-        }
-    }
-
-    // -------------------------------------------------
-    // Apply to PREVIEW (must match real camera)
-    // -------------------------------------------------
-    if (ShotPreviewCapture)
-    {
-        ShotPreviewCapture->CaptureScene();
-    }
-
-
+    ActiveShotPreviewCamera = TargetCamera;
 }
 
 FString SGASScriptPanel::GetSelectedBlockId() const
@@ -5080,6 +4861,8 @@ void SGASScriptPanel::OpenShotIntentPopup(
     //    return;
     //}
 
+    HoveredShotMarkerId.Empty();
+
     // -------------------------------------------------
     // CREATE WINDOW
     // -------------------------------------------------
@@ -5126,39 +4909,33 @@ void SGASScriptPanel::OpenShotIntentPopup(
                     *UEnum::GetValueAsString(ShotType)
                 );
 
-                UpdateShotPreviewCamera(
-                    SubjectId,
-                    ShotType,
-                    Intent->CameraActor.Get()
-                );
-
-                if (ACineCameraActor* Cam = Intent->CameraActor.Get())
+                if (AGAS_ShotCameraActor* Cam = Intent->CameraActor)
                 {
                     Cam->SetActorTransform(PreviewTransform);
 
                     Intent->CameraLocation = Cam->GetActorLocation();
                     Intent->CameraRotation = Cam->GetActorRotation();
 
-                    if (UCineCameraComponent* Cine = Cam->GetCineCameraComponent())
+                    if (Cam->CineCamera)
                     {
                         // keep what you already have
-                        Intent->CameraFocalLength = Cine->CurrentFocalLength;
+                        Intent->CameraFocalLength = Cam->CineCamera->CurrentFocalLength;
 
-                        Cine->FocusSettings.FocusMethod = ECameraFocusMethod::Disable;
-                        Cine->CurrentAperture = 8.0f;
+                        Cam->CineCamera->FocusSettings.FocusMethod = ECameraFocusMethod::Disable;
+                        Cam->CineCamera->CurrentAperture = 8.0f;
 
                         // 🔥 MATCH PREVIEW EXPOSURE (USE AUTO, NOT MANUAL)
-                        Cine->PostProcessSettings.bOverride_AutoExposureMethod = true;
-                        Cine->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Histogram;
+                        Cam->CineCamera->PostProcessSettings.bOverride_AutoExposureMethod = true;
+                        Cam->CineCamera->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Histogram;
 
-                        Cine->PostProcessSettings.bOverride_AutoExposureBias = true;
-                        Cine->PostProcessSettings.AutoExposureBias = 0.25f;
+                        Cam->CineCamera->PostProcessSettings.bOverride_AutoExposureBias = true;
+                        Cam->CineCamera->PostProcessSettings.AutoExposureBias = 0.25f;
 
                         // Allow dynamic range (preview-like)
-                        Cine->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
-                        Cine->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
-                        Cine->PostProcessSettings.AutoExposureMinBrightness = 0.03f;
-                        Cine->PostProcessSettings.AutoExposureMaxBrightness = 2.0f;
+                        Cam->CineCamera->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
+                        Cam->CineCamera->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
+                        Cam->CineCamera->PostProcessSettings.AutoExposureMinBrightness = 0.03f;
+                        Cam->CineCamera->PostProcessSettings.AutoExposureMaxBrightness = 2.0f;
                     }
 
                     UE_LOG(LogTemp, Warning, TEXT("APPLIED PREVIEW TRANSFORM AFTER CONFIRM: %s"),
