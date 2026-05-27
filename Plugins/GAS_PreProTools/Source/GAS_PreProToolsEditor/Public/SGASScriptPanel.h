@@ -331,6 +331,10 @@ private:
     TSharedPtr<SWidget> ShotTooltipWidget;
     TSharedPtr<SWindow> ShotHoverTooltipWindow;
     FString ShotHoverTooltipShotId;
+    FString ShotHoverPendingShotId;
+    FTSTicker::FDelegateHandle ShotHoverTickerHandle;
+    float ShotHoverDelayAccum = 0.f;
+
 
     // =========================================================
     // Edit Pipeline
@@ -370,6 +374,7 @@ private:
     bool bAddMode = false;
 
     void OpenDeleteBlockDialog(int32 BlockIndex);
+    void OpenEditSceneNumberDialog(int32 BlockIndex);
     void DeleteBlock(int32 BlockIndex);
 
 

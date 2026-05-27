@@ -78,12 +78,21 @@
 #include "EditorSubsystem.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "LevelSequence.h"
+#include "ISequencer.h"
 #include "ISequencerModule.h"
 #include "LevelSequenceActor.h"
 #include "LevelSequencePlayer.h"
+#include "LevelSequenceEditorBlueprintLibrary.h"
+#include "ILevelSequenceEditorToolkit.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "CineCameraActor.h"
 #include "CineCameraComponent.h"
+
+#include "MovieScene.h"
+#include "Tracks/MovieSceneSubTrack.h"
+#include "Tracks/MovieSceneCameraCutTrack.h"
+#include "Sections/MovieSceneSubSection.h"
+#include "Sections/MovieSceneCameraCutSection.h"
 
 ACineCameraActor* GLastCreatedCamera = nullptr;
 
@@ -536,7 +545,674 @@ static void SaveSequenceAsset(ULevelSequence* Sequence)
     );
 }
 
+
+
 static ULevelSequence* GActiveBlockingSequence = nullptr;
+
+ULevelSequence* SGAS_ScriptTab::GetOrCreateSceneSequence(
+    const FGASBlock& SceneBlock
+)
+{
+    if (!ActiveProject)
+    {
+        return nullptr;
+    }
+
+    FString CleanSceneName = SceneBlock.Text;
+
+    CleanSceneName.ReplaceInline(TEXT("."), TEXT(""));
+    CleanSceneName.ReplaceInline(TEXT("-"), TEXT("_"));
+    CleanSceneName.ReplaceInline(TEXT(" "), TEXT("_"));
+    CleanSceneName.ReplaceInline(TEXT("/"), TEXT("_"));
+
+    CleanSceneName = CleanSceneName.Left(48);
+
+    const FString ProjectName =
+        ActiveProject->ProjectName;
+
+    const FString AssetName =
+        FString::Printf(
+            TEXT("SC_%s"),
+            *CleanSceneName
+        );
+
+    const FString PackagePath =
+        FString::Printf(
+            TEXT("/Game/PrePro/Projects/%s/Sequences/Scenes/%s"),
+            *ProjectName,
+            *AssetName
+        );
+
+    // ------------------------------------------------------------
+    // LOAD EXISTING
+    // ------------------------------------------------------------
+
+    ULevelSequence* Existing =
+        LoadObject<ULevelSequence>(
+            nullptr,
+            *PackagePath
+        );
+
+    if (Existing)
+    {
+        return Existing;
+    }
+
+    // ------------------------------------------------------------
+    // CREATE NEW
+    // ------------------------------------------------------------
+
+    UPackage* Package =
+        CreatePackage(*PackagePath);
+
+    if (!Package)
+    {
+        return nullptr;
+    }
+
+    ULevelSequence* NewSequence =
+        NewObject<ULevelSequence>(
+            Package,
+            *AssetName,
+            RF_Public | RF_Standalone
+        );
+
+    if (!NewSequence)
+    {
+        return nullptr;
+    }
+
+    NewSequence->Initialize();
+
+    UMovieScene* MovieScene =
+        NewSequence->GetMovieScene();
+
+    if (MovieScene)
+    {
+        FFrameRate SequenceRate(24, 1);
+
+        if (ActiveProject)
+        {
+            switch (ActiveProject->ProjectSettings.FrameRate)
+            {
+            case EGASProjectFrameRate::FPS_23_976:
+                SequenceRate = FFrameRate(24000, 1001);
+                break;
+
+            case EGASProjectFrameRate::FPS_24:
+                SequenceRate = FFrameRate(24, 1);
+                break;
+
+            case EGASProjectFrameRate::FPS_25:
+                SequenceRate = FFrameRate(25, 1);
+                break;
+
+            case EGASProjectFrameRate::FPS_29_97:
+                SequenceRate = FFrameRate(30000, 1001);
+                break;
+
+            case EGASProjectFrameRate::FPS_30:
+                SequenceRate = FFrameRate(30, 1);
+                break;
+            }
+
+            MovieScene->SetDisplayRate(SequenceRate);
+            MovieScene->SetTickResolutionDirectly(SequenceRate);
+        }
+    }
+
+    FAssetRegistryModule::AssetCreated(NewSequence);
+
+    SaveSequenceAsset(NewSequence);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("Created Scene Sequence: %s"),
+        *AssetName);
+
+    return NewSequence;
+}
+
+void SGAS_ScriptTab::CreateOrUpdateMasterSequence()
+{
+    if (!ActiveProject)
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("CreateOrUpdateMasterSequence: No ActiveProject"));
+        return;
+    }
+
+    const FString ProjectName =
+        ActiveProject->ProjectName;
+
+    const FString MasterPackagePath =
+        FString::Printf(
+            TEXT("/Game/PrePro/Projects/%s/Sequences/MASTER_%s"),
+            *ProjectName,
+            *ProjectName
+        );
+
+    ULevelSequence* MasterSequence =
+        LoadObject<ULevelSequence>(
+            nullptr,
+            *MasterPackagePath
+        );
+
+    // ------------------------------------------------------------
+    // CREATE MASTER IF MISSING
+    // ------------------------------------------------------------
+
+    if (!MasterSequence)
+    {
+        FString AssetName;
+        FString PackagePath;
+
+        MasterPackagePath.Split(
+            TEXT("/"),
+            &PackagePath,
+            &AssetName,
+            ESearchCase::IgnoreCase,
+            ESearchDir::FromEnd
+        );
+
+        UPackage* Package =
+            CreatePackage(*MasterPackagePath);
+
+        MasterSequence =
+            NewObject<ULevelSequence>(
+                Package,
+                *AssetName,
+                RF_Public | RF_Standalone
+            );
+
+        MasterSequence->Initialize();
+
+        FAssetRegistryModule::AssetCreated(
+            MasterSequence
+        );
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("Created MASTER sequence"));
+    }
+
+    if (!MasterSequence)
+    {
+        return;
+    }
+
+    UMovieScene* MovieScene =
+        MasterSequence->GetMovieScene();
+
+    FFrameRate SequenceRate(24, 1);
+
+    if (ActiveProject)
+    {
+        switch (ActiveProject->ProjectSettings.FrameRate)
+        {
+        case EGASProjectFrameRate::FPS_23_976:
+            SequenceRate = FFrameRate(24000, 1001);
+            break;
+
+        case EGASProjectFrameRate::FPS_24:
+            SequenceRate = FFrameRate(24, 1);
+            break;
+
+        case EGASProjectFrameRate::FPS_25:
+            SequenceRate = FFrameRate(25, 1);
+            break;
+
+        case EGASProjectFrameRate::FPS_29_97:
+            SequenceRate = FFrameRate(30000, 1001);
+            break;
+
+        case EGASProjectFrameRate::FPS_30:
+            SequenceRate = FFrameRate(30, 1);
+            break;
+        }
+    }
+
+    MovieScene->SetDisplayRate(SequenceRate);
+    MovieScene->SetTickResolutionDirectly(SequenceRate);
+
+    if (!MovieScene)
+    {
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // FIND / CREATE SUBTRACK
+    // ------------------------------------------------------------
+
+    UMovieSceneSubTrack* SubTrack = nullptr;
+
+    for (UMovieSceneTrack* Track : MovieScene->GetTracks())
+    {
+        SubTrack = Cast<UMovieSceneSubTrack>(Track);
+
+        if (SubTrack)
+        {
+            break;
+        }
+    }
+
+    if (!SubTrack)
+    {
+        SubTrack =
+            NewObject<UMovieSceneSubTrack>(
+                MovieScene,
+                NAME_None,
+                RF_Transactional
+            );
+
+        MovieScene->AddGivenTrack(SubTrack);
+    }
+
+    if (!SubTrack)
+    {
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // CLEAR EXISTING
+    // ------------------------------------------------------------
+
+    SubTrack->Modify();
+    MovieScene->Modify();
+    MasterSequence->Modify();
+
+    SubTrack->RemoveAllAnimationData();
+
+    // ------------------------------------------------------------
+    // BUILD SCENE ROWS (authoritative eighths from layout)
+    // ------------------------------------------------------------
+
+    constexpr float SecondsPerEighth = 7.5f;
+
+    TArray<FGASShotListSceneRow> SceneRows;
+
+    BuildShotListFromScriptV2(
+        CurrentScript,
+        CurrentScript.SceneNumbering,
+        ScriptPanel->GetRenderedParagraphs(),
+        SceneRows
+    );
+
+    // ------------------------------------------------------------
+    // ADD SCENE SUBSEQUENCES
+    // ------------------------------------------------------------
+
+    int32 CurrentFrame = 0;
+
+    const FFrameRate TickResolution =
+        MovieScene->GetTickResolution();
+
+    const float FPS =
+        TickResolution.AsDecimal();
+
+    for (const FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Type != EGASBlockType::SceneHeading)
+        {
+            continue;
+        }
+
+        ULevelSequence* SceneSequence =
+            GetOrCreateSceneSequence(Block);
+
+        if (!SceneSequence)
+        {
+            continue;
+        }
+
+        // Look up real eighths for this scene
+        float SceneEighths = 4.0f; // fallback: half a page
+
+        const FGASShotListSceneRow* FoundScene = SceneRows.FindByPredicate(
+            [&Block](const FGASShotListSceneRow& Row)
+            {
+                return Row.SceneId == Block.Id;
+            }
+        );
+
+        if (FoundScene && FoundScene->LengthEighths > 0)
+        {
+            SceneEighths = (float)FoundScene->LengthEighths;
+        }
+
+        const int32 DurationFrames =
+            FMath::RoundToInt(
+                (SceneEighths * SecondsPerEighth) * FPS
+            );
+
+        UMovieSceneSubSection* SubSection =
+            SubTrack->AddSequence(
+                SceneSequence,
+                CurrentFrame,
+                DurationFrames
+            );
+
+        if (!SubSection)
+        {
+            continue;
+        }
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("MASTER ADD SECTION: %s"),
+            *SceneSequence->GetName());
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("SECTION RANGE: %d -> %d  (%.1f eighths)"),
+            CurrentFrame,
+            CurrentFrame + DurationFrames,
+            SceneEighths
+        );
+
+        // Add camera cuts to this scene sequence
+        AddCameraTracksToSceneSequence(SceneSequence, Block, SceneRows);
+
+        CurrentFrame += DurationFrames + 1;
+    }
+
+    // ------------------------------------------------------------
+    // FINALIZE
+    // ------------------------------------------------------------
+
+    MovieScene->SetPlaybackRange(
+        0,
+        CurrentFrame
+    );
+
+    MovieScene->SetWorkingRange(
+        0.0,
+        (double)CurrentFrame / FPS
+    );
+
+    MovieScene->SetViewRange(
+        0.0,
+        (double)CurrentFrame / FPS
+    );
+
+    MovieScene->MarkAsChanged();
+
+    FPropertyChangedEvent DummyEvent(nullptr);
+
+    MovieScene->PostEditChangeProperty(
+        DummyEvent
+    );
+
+    MasterSequence->MarkPackageDirty();
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("TOTAL MASTER FRAMES: %d"),
+        CurrentFrame
+    );
+
+    SaveSequenceAsset(MasterSequence);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("MASTER sequence updated"));
+}
+
+
+void SGAS_ScriptTab::AddCameraTracksToSceneSequence(
+    ULevelSequence* SceneSequence,
+    const FGASBlock& SceneBlock,
+    const TArray<FGASShotListSceneRow>& SceneRows
+)
+{
+    if (!SceneSequence || !ActiveProject)
+        return;
+
+    UMovieScene* MovieScene = SceneSequence->GetMovieScene();
+    if (!MovieScene)
+        return;
+
+    const float FPS = MovieScene->GetTickResolution().AsDecimal();
+    constexpr float SecondsPerEighth = 7.5f;
+
+    // ------------------------------------------------------------
+    // Find this scene's total frame count
+    // ------------------------------------------------------------
+    float SceneEighths = 4.f;
+
+    const FGASShotListSceneRow* FoundScene =
+        SceneRows.FindByPredicate(
+            [&](const FGASShotListSceneRow& Row)
+            {
+                return Row.SceneId == SceneBlock.Id;
+            }
+        );
+
+    if (FoundScene && FoundScene->LengthEighths > 0)
+        SceneEighths = (float)FoundScene->LengthEighths;
+
+    const int32 TotalSceneFrames =
+        FMath::RoundToInt(SceneEighths * SecondsPerEighth * FPS);
+
+    // ------------------------------------------------------------
+    // Find / create camera cut track
+    // ------------------------------------------------------------
+    UMovieSceneCameraCutTrack* CutTrack = nullptr;
+
+    for (UMovieSceneTrack* Track : MovieScene->GetTracks())
+    {
+        CutTrack = Cast<UMovieSceneCameraCutTrack>(Track);
+        if (CutTrack)
+            break;
+    }
+
+    if (!CutTrack)
+    {
+        CutTrack = Cast<UMovieSceneCameraCutTrack>(
+            MovieScene->AddTrack(
+                UMovieSceneCameraCutTrack::StaticClass()
+            )
+        );
+    }
+
+    if (!CutTrack)
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("[CameraCuts] Failed to create CameraCutTrack for %s"),
+            *SceneBlock.Text);
+        return;
+    }
+
+    CutTrack->Modify();
+    CutTrack->RemoveAllAnimationData();
+
+    // ------------------------------------------------------------
+    // Collect shots for this scene
+    // ------------------------------------------------------------
+    TArray<const FGASMarker*> SceneShots;
+
+    for (const FGASMarker& Marker : CurrentScript.Markers)
+    {
+        if (Marker.MarkerType == EGASMarkerType::ShotMarker &&
+            Marker.BlockId == SceneBlock.Id)
+        {
+            SceneShots.Add(&Marker);
+        }
+    }
+
+    // Sort by script position
+    SceneShots.Sort(
+        [](const FGASMarker& A, const FGASMarker& B)
+        {
+            return A.ShotLineStartY < B.ShotLineStartY;
+        }
+    );
+
+    if (SceneShots.Num() == 0)
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[CameraCuts] No shots for scene: %s"),
+            *SceneBlock.Text);
+        return;
+    }
+
+    // Get scene Y range from rendered paragraphs
+    float SceneStartY = 0.f;
+    float SceneEndY = 0.f;
+
+    if (ScriptPanel.IsValid())
+    {
+        const TArray<FRenderedParagraph>& Rendered =
+            ScriptPanel->GetRenderedParagraphs();
+
+        // Find scene heading Y
+        for (const FRenderedParagraph& P : Rendered)
+        {
+            if (P.BlockId == SceneBlock.Id)
+            {
+                SceneStartY = P.TopY;
+                break;
+            }
+        }
+
+        // Find next scene heading Y (or end of script)
+        bool bFoundScene = false;
+        for (const FRenderedParagraph& P : Rendered)
+        {
+            if (P.BlockId == SceneBlock.Id)
+            {
+                bFoundScene = true;
+                continue;
+            }
+
+            if (bFoundScene &&
+                P.BlockType == EGASBlockType::SceneHeading)
+            {
+                SceneEndY = P.TopY;
+                break;
+            }
+        }
+
+        // Fallback: use last paragraph
+        if (SceneEndY <= SceneStartY && Rendered.Num() > 0)
+        {
+            const FRenderedParagraph& Last = Rendered.Last();
+            SceneEndY = Last.TopY + Last.Height;
+        }
+    }
+
+    const float SceneYSpan = FMath::Max(1.f, SceneEndY - SceneStartY);
+
+    // ------------------------------------------------------------
+    // Add camera cut section for each shot
+    // ------------------------------------------------------------
+    for (const FGASMarker* Shot : SceneShots)
+    {
+        const FGASShotIntent* Intent =
+            CurrentScript.ShotIntents.Find(Shot->Id);
+
+        if (!Intent || !IsValid(Intent->CameraActor))
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("[CameraCuts] No camera for shot %s — skipping"),
+                *Shot->Id);
+            continue;
+        }
+
+        // Calculate frames directly from eighths
+        const int32 ShotEighths =
+            GASShotListEighths::ComputeShotEighths_Up(
+                Shot->ShotLineStartY,
+                Shot->ShotLineEndY,
+                ScriptFormat::EighthHeight
+            );
+
+        const float ShotSeconds =
+            FMath::Max(1, ShotEighths) * SecondsPerEighth;
+
+        // Start frame from script position ratio
+        const float NormStart =
+            (Shot->ShotLineStartY - SceneStartY) / SceneYSpan;
+
+        const int32 StartFrame =
+            FMath::RoundToInt(NormStart * TotalSceneFrames);
+
+        const int32 DurationFrames =
+            FMath::Max(1, FMath::RoundToInt(ShotSeconds * FPS));
+
+        const int32 EndFrame = StartFrame + DurationFrames;
+
+        // Check if already bound
+        FGuid CameraGuid;
+
+        for (int32 PossIdx = 0; PossIdx < MovieScene->GetPossessableCount(); ++PossIdx)
+        {
+            const FMovieScenePossessable& Existing =
+                MovieScene->GetPossessable(PossIdx);
+
+            if (Existing.GetName() == Intent->CameraActor->GetName())
+            {
+                CameraGuid = Existing.GetGuid();
+                break;
+            }
+        }
+
+        if (!CameraGuid.IsValid())
+        {
+            CameraGuid = MovieScene->AddPossessable(
+                Intent->CameraActor->GetName(),
+                Intent->CameraActor->GetClass()
+            );
+
+            SceneSequence->BindPossessableObject(
+                CameraGuid,
+                *Intent->CameraActor,
+                Intent->CameraActor->GetWorld()
+            );
+        }
+
+        if (!CameraGuid.IsValid())
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("[CameraCuts] Could not bind camera for shot %s"),
+                *Shot->Id);
+            continue;
+        }
+
+        // Add cut section
+        UMovieSceneCameraCutSection* CutSection =
+            Cast<UMovieSceneCameraCutSection>(
+                CutTrack->CreateNewSection()
+            );
+
+        if (CutSection)
+        {
+            CutTrack->AddSection(*CutSection);
+        }
+
+        if (!CutSection)
+            continue;
+
+        CutSection->SetRange(
+            TRange<FFrameNumber>(
+                FFrameNumber(StartFrame),
+                FFrameNumber(EndFrame)
+            )
+        );
+
+        CutSection->SetCameraGuid(CameraGuid);
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("[CameraCuts] Added cut: Shot=%s Camera=%s Frames=%d-%d"),
+            *Shot->Id,
+            *Intent->CameraActor->GetName(),
+            StartFrame,
+            EndFrame
+        );
+    }
+
+    MovieScene->MarkAsChanged();
+    FPropertyChangedEvent DummyEvent(nullptr);
+    MovieScene->PostEditChangeProperty(DummyEvent);
+    SceneSequence->MarkPackageDirty();
+
+    SaveSequenceAsset(SceneSequence);
+}
+
 
 static bool DuplicateSetIntoBlockingLevel(
     const FString& SetLevelPath,
@@ -1234,6 +1910,8 @@ void SGAS_ScriptTab::RequestDeleteShotMarker(const FString& MarkerId)
 
 void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
 {
+    ResetShotModeState();
+
     FScopedSlowTask SlowTask(
         0.f,
         FText::FromString(TEXT("Deleting Shot"))
@@ -1269,18 +1947,18 @@ void SGAS_ScriptTab::DeleteShotMarkerNow(const FString& MarkerId)
             {
                 if (AGAS_ShotCameraActor* Camera = CameraPtr.Get())
                 {
-                    Camera->SetActorHiddenInGame(true);
-                    Camera->SetIsTemporarilyHiddenInEditor(true);
-
                     UE_LOG(LogGASPrePro, Warning,
-                        TEXT("[DeleteShot] Camera hidden instead of destroyed: %s"),
+                        TEXT("[DeleteShot] Destroying camera actor: %s"),
                         *Camera->GetName());
+
+                    Camera->Destroy();
                 }
             }
             else
             {
                 UE_LOG(LogGASPrePro, Warning,
-                    TEXT("[DeleteShot] Camera pointer invalid, skipping actor destroy"));
+                    TEXT("[DeleteShot] No camera actor found for marker: %s"),
+                    *MarkerId);
             }
         }
     }
@@ -1432,6 +2110,10 @@ void SGAS_ScriptTab::ApplyCameraToLastCreatedShot(
 
 void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
 {
+    // REAL CAMERA ONLY.
+    // Do not call this for preview-only shot intent editing.
+    // This function may spawn/bind a real AGAS_ShotCameraActor.
+
     const FGASMarker* Marker =
         CurrentScript.Markers.FindByPredicate(
             [&](const FGASMarker& M)
@@ -1463,11 +2145,94 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
     // --------------------------------------------------
     AGAS_ShotCameraActor* Cam = Intent.CameraActor;
 
+
+    if (!IsValid(Cam))
+    {
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride =
+            ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+        FString CameraLabel = TEXT("ShotCam");
+
+        if (Marker)
+        {
+            CameraLabel =
+                FString::Printf(
+                    TEXT("SHOT_%s"),
+                    *Marker->GetShotLabel(
+                        CurrentScript.ProjectSettings.ShotNumberingPolicy
+                    )
+                );
+        }
+
+        ULevel* TargetLevel = World->PersistentLevel;
+
+        SpawnParams.OverrideLevel = TargetLevel;
+
+        SpawnParams.Name = MakeUniqueObjectName(
+            TargetLevel,
+            AGAS_ShotCameraActor::StaticClass(),
+            FName(*CameraLabel)
+        );
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("CREATE CAMERA | Marker=%s | CameraLabel=%s"),
+            *Intent.MarkerId,
+            *CameraLabel
+        );
+
+        Cam = World->SpawnActor<AGAS_ShotCameraActor>(
+            AGAS_ShotCameraActor::StaticClass(),
+            FVector::ZeroVector,
+            FRotator::ZeroRotator,
+            SpawnParams
+        );
+
+        if (!IsValid(Cam))
+        {
+            UE_LOG(LogTemp, Error,
+                TEXT("[GAS CameraPreview] Failed to create blocking camera for MarkerId=%s"),
+                *Intent.MarkerId);
+
+            return;
+        }
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("SPAWNED CAMERA LABEL = %s"),
+            *Cam->GetActorLabel()
+        );
+
+        Cam->MarkerId = Intent.MarkerId;
+        Cam->ShotGuid = FGuid(Marker->MarkerGuid);
+
+#if WITH_EDITOR
+        Cam->SetActorLabel(
+            CameraLabel,
+            true
+        );
+#endif
+
+        Intent.CameraActor = Cam;
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("[GAS CameraPreview] Created blocking camera for promoted shot: %s"),
+            *GetNameSafe(Cam));
+
+        if (FGASMarker* MutableMarker =
+            CurrentScript.Markers.FindByPredicate(
+                [&](FGASMarker& M)
+                {
+                    return M.Id == Intent.MarkerId;
+                }))
+        {
+            MutableMarker->bHasCamera = true;
+            MutableMarker->CameraTransform = Cam->GetActorTransform();
+        }
+    }
+
     UE_LOG(LogTemp, Error,
         TEXT("[CAMERA] REAL CAMERA = %s"),
         *GetNameSafe(Cam));
-
-    if (!Cam) return;
 
     if (!IsValid(Cam))
     {
@@ -1475,11 +2240,56 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
         return;
     }
 
+    FVector PreviewLocation = FVector::ZeroVector;
+    FRotator PreviewRotation = FRotator::ZeroRotator;
+    float PreviewFocalLength = 50.f;
+
+    BuildShotPreviewTransform(
+        Intent,
+        PreviewLocation,
+        PreviewRotation,
+        PreviewFocalLength
+    );
+
+    Cam->SetActorLocation(PreviewLocation);
+    Cam->SetActorRotation(PreviewRotation);
+
+    if (Cam && Cam->CineCamera)
+    {
+        Cam->CineCamera->SetCurrentFocalLength(
+            PreviewFocalLength
+        );
+    }
+
+    // --------------------------------------------------
+    // Preview handled by SGAS_ShotIntentWindow only.
+    // Do NOT initialize SGAS_ScriptTab preview here.
+    // This prevents stale cross-world SceneCapture crashes.
+    // --------------------------------------------------
+    return;
+}
+
+void SGAS_ScriptTab::BuildShotPreviewTransform(
+    const FGASShotIntent& Intent,
+    FVector& OutLocation,
+    FRotator& OutRotation,
+    float& OutFocalLength
+)
+{
+    if (!GEditor)
+    {
+        return;
+    }
+
+    UWorld* World = GEditor->GetEditorWorldContext().World();
+
+    if (!World)
+    {
+        return;
+    }
+
     if (Intent.SubjectId == TEXT("(No Subject)"))
     {
-        UE_LOG(LogTemp, Warning,
-            TEXT("[GAS CameraPreview] No Subject selected. Skipping camera framing."));
-
         return;
     }
 
@@ -1524,7 +2334,7 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
 
     FVector CameraDirection = CharacterForward;
 
-    FVector CameraLocation =
+    OutLocation =
         TargetLocation
         + (CameraDirection * Distance)
         + FVector(0.f, 0.f, HeightOffset);
@@ -1533,18 +2343,40 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
         TargetLocation
         + FVector(0.f, 0.f, HeightOffset);
 
-    FRotator LookAtRotation =
-        (LookAtTarget - CameraLocation).Rotation();
+    OutRotation =
+        (LookAtTarget - OutLocation).Rotation();
 
-    Cam->SetActorLocation(CameraLocation);
-    Cam->SetActorRotation(LookAtRotation);
+    OutFocalLength = 50.f;
+}
 
-    // --------------------------------------------------
-    // Preview handled by SGAS_ShotIntentWindow only.
-    // Do NOT initialize SGAS_ScriptTab preview here.
-    // This prevents stale cross-world SceneCapture crashes.
-    // --------------------------------------------------
-    return;
+
+void SGAS_ScriptTab::RestoreCamerasAfterUndo()
+{
+    for (auto& KVP : CurrentScript.ShotIntents)
+    {
+        FGASShotIntent& Intent = KVP.Value;
+
+        if (!IsValid(Intent.CameraActor))
+        {
+            // Only respawn if the marker is a blocking shot
+            const FGASMarker* Marker =
+                CurrentScript.Markers.FindByPredicate(
+                    [&](const FGASMarker& M)
+                    {
+                        return M.Id == Intent.MarkerId;
+                    }
+                );
+
+            if (Marker && Marker->IsBlocking())
+            {
+                UE_LOG(LogGASPrePro, Warning,
+                    TEXT("[Undo] Respawning camera for marker: %s"),
+                    *Intent.MarkerId);
+
+                UpdateCameraFromShotIntent(Intent);
+            }
+        }
+    }
 }
 
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
@@ -1846,7 +2678,63 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                         .Padding(FMargin(0.f, 1.f))
                                 ]
 
+                                // --- Open Master Sequence -------------------------------
+                                + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(0, 8, 0, 0)
+                                [
+                                    SNew(SBox)
+                                        .WidthOverride(48.f)
+                                        .HeightOverride(48.f)
+                                        [
+                                            SNew(SButton)
+                                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                                .HAlign(HAlign_Center)
+                                                .VAlign(VAlign_Center)
+                                                .IsEnabled_Lambda([this]()
+                                                    {
+                                                        return ActiveProject != nullptr;
+                                                    })
+                                                .ToolTipText(FText::FromString("Open Master Sequence"))
+                                                .OnClicked_Lambda([this]()
+                                                    {
+                                                        if (!ActiveProject)
+                                                            return FReply::Handled();
 
+                                                        const FString MasterPackagePath =
+                                                            FString::Printf(
+                                                                TEXT("/Game/PrePro/Projects/%s/Sequences/MASTER_%s"),
+                                                                *ActiveProject->ProjectName,
+                                                                *ActiveProject->ProjectName
+                                                            );
+
+                                                        ULevelSequence* MasterSequence =
+                                                            LoadObject<ULevelSequence>(
+                                                                nullptr,
+                                                                *MasterPackagePath
+                                                            );
+
+                                                        if (MasterSequence)
+                                                        {
+                                                            ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(
+                                                                MasterSequence
+                                                            );
+                                                        }
+                                                        else
+                                                        {
+                                                            UE_LOG(LogTemp, Warning,
+                                                                TEXT("Open Master Sequence: not found at %s"),
+                                                                *MasterPackagePath);
+                                                        }
+
+                                                        return FReply::Handled();
+                                                    })
+                                                [
+                                                    SNew(SImage)
+                                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SequencerIcon"))
+                                                ]
+                                        ]
+                                ]
                             // --- Import Script --------------------------------------
                             + SVerticalBox::Slot()
                                 .AutoHeight()
@@ -1919,6 +2807,81 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                         ]
 
                                 ]
+                            // --- Generate Scene Markers ----------------------------
+                            + SVerticalBox::Slot()
+                                .AutoHeight()
+                                .Padding(0, 8, 0, 0)
+                                [
+                                    SNew(SButton)
+                                        .ButtonStyle(
+                                            &FGAS_PreProToolsStyle::Get()
+                                            .GetWidgetStyle<FButtonStyle>(
+                                                "GAS.ToolButton"
+                                            )
+                                        )
+                                        .HAlign(HAlign_Center)
+                                        .VAlign(VAlign_Center)
+
+                                        .IsEnabled_Lambda([this]()
+                                            {
+                                                return CurrentScript.Blocks.Num() > 0
+                                                    && !CurrentScript.bSceneMarkersGenerated;
+                                            })
+
+                                        .ToolTipText_Lambda([this]()
+                                            {
+                                                if (CurrentScript.Blocks.Num() == 0)
+                                                {
+                                                    return FText::FromString(
+                                                        "No script loaded."
+                                                    );
+                                                }
+
+                                                if (!CurrentScript.bSceneMarkersGenerated)
+                                                {
+                                                    return FText::FromString(
+                                                        "Generate scene markers from script timing."
+                                                    );
+                                                }
+
+                                                return FText::FromString(
+                                                    "Scene markers already generated."
+                                                );
+                                            })
+
+                                        .ButtonColorAndOpacity_Lambda([this]()
+                                            {
+                                                if (CurrentScript.bSceneMarkersGenerated)
+                                                {
+                                                    return FLinearColor(
+                                                        0.15f,
+                                                        0.15f,
+                                                        0.15f,
+                                                        1.0f
+                                                    );
+                                                }
+
+                                                return FLinearColor::White;
+                                            })
+
+                                        .OnClicked_Lambda([this]()
+                                            {
+                                                BuildSceneMarkersFromScriptTiming();
+
+                                                CurrentScript.bSceneMarkersGenerated = true;
+
+                                                return FReply::Handled();
+                                            })
+
+                                        [
+                                            SNew(SImage)
+                                                .Image(
+                                                    FGAS_PreProToolsStyle::Get()
+                                                    .GetBrush("GAS.SceneMarkerIcon")
+                                                )
+                                        ]
+                                ]
+
 
                             
                             // --- Clear Script ---------------------------------------
@@ -2046,6 +3009,17 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                 [this]()
                 {
                     UE_LOG(LogGASPrePro, Warning, TEXT("[ShotListV2] Rebuild requested from ScriptPanel"));
+
+                    const TArray<FRenderedParagraph>& Rendered = ScriptPanel->GetRenderedParagraphs();
+                    for (const FRenderedParagraph& P : Rendered)
+                    {
+                        if (P.bStartsPage)
+                        {
+                            UE_LOG(LogTemp, Warning, TEXT("[PB CHECK] Page=%d BlockId=%s TopY=%.1f"),
+                                P.PageNumber, *P.BlockId, P.TopY);
+                        }
+                    }
+
                     RebuildShotList();
                 }
             );
@@ -2290,9 +3264,34 @@ FReply SGAS_ScriptTab::OnImportScript()
         );
         RebuildShotList();
 
+        // ------------------------------------------------------------
+        // AUTO CREATE MASTER SEQUENCE
+        // ------------------------------------------------------------
+        if (ActiveProject &&
+            ActiveProject->ProjectSettings.bAutoCreateMasterSequence)
+        {
+            UE_LOG(LogGASPrePro, Warning,
+                TEXT("[AutoMaster] Starting auto master sequence pipeline..."));
 
+            // Step 1 — Generate page breaks if none exist
+            OnGeneratePageBreaks();
+
+            // Step 2 — Rebuild layout so eighths are accurate
+            if (ScriptPanel.IsValid())
+            {
+                ScriptPanel->RebuildLayout();
+            }
+
+            // Step 3 — Create/update master sequence with scene subsequences
+            CreateOrUpdateMasterSequence();
+
+            // Step 4 — Place scene markers on the master timeline
+            BuildSceneMarkersFromScriptTiming();
+
+            UE_LOG(LogGASPrePro, Warning,
+                TEXT("[AutoMaster] Pipeline complete."));
+        }
     }
-
     return FReply::Handled();
 }
 
@@ -2306,6 +3305,11 @@ FReply SGAS_ScriptTab::OnSaveScript()
     UE_LOG(LogTemp, Warning, TEXT("=== SAVE START ==="));
 
     SaveScriptToJson();
+    if (ActiveProject &&
+        ActiveProject->ProjectSettings.bAutoCreateMasterSequence)
+    {
+        CreateOrUpdateMasterSequence();
+    }
 
     if (GActiveBlockingSequence)
     {
@@ -3633,29 +4637,39 @@ void SGAS_ScriptTab::RebuildCastUI()
         return;
     }
 
-    for (FGASCastMember& Member : CastList)
+    for (int32 MemberIndex = 0; MemberIndex < CastList.Num(); ++MemberIndex)
     {
+        const FString MemberName = CastList[MemberIndex].Name;
+
         CastListContainer->AddSlot()
             .AutoHeight()
             .Padding(2.f)
             [
                 SNew(SCheckBox)
-                    .IsChecked_Lambda([&Member]()
+                    .IsChecked_Lambda([this, MemberIndex]()
                         {
-                            return Member.bEnabled
+                            if (!CastList.IsValidIndex(MemberIndex))
+                            {
+                                return ECheckBoxState::Unchecked;
+                            }
+
+                            return CastList[MemberIndex].bEnabled
                                 ? ECheckBoxState::Checked
                                 : ECheckBoxState::Unchecked;
                         })
-                    .OnCheckStateChanged_Lambda([&Member](ECheckBoxState State)
+                    .OnCheckStateChanged_Lambda([this, MemberIndex](ECheckBoxState State)
                         {
-                            Member.bEnabled = (State == ECheckBoxState::Checked);
+                            if (!CastList.IsValidIndex(MemberIndex))
+                            {
+                                return;
+                            }
+
+                            CastList[MemberIndex].bEnabled =
+                                (State == ECheckBoxState::Checked);
                         })
                     [
                         SNew(STextBlock)
-                            .Text_Lambda([&Member]()
-                                {
-                                    return FText::FromString(Member.Name);
-                                })
+                            .Text(FText::FromString(MemberName))
                     ]
             ];
     }
@@ -4239,87 +5253,93 @@ bool SGAS_ScriptTab::CreateBlockingLevelForScene(
 
     const FString FullAssetPath = FolderPath + MapName;
 
-    // ------------------------------------------------------------
-    // Create new empty map properly
-    // ------------------------------------------------------------
-    UWorld* NewWorld = UEditorLoadingAndSavingUtils::NewBlankMap(false);
-
-    if (!NewWorld)
-    {
-        UE_LOG(LogGASPrePro, Error, TEXT("Blocking: Failed to create blank map."));
-        return false;
-    }
-
-    // Save it to desired path
-    if (!UEditorLoadingAndSavingUtils::SaveMap(NewWorld, FullAssetPath))
-    {
-        UE_LOG(LogGASPrePro, Error, TEXT("Blocking: Failed to save blank map."));
-        return false;
-    }
-
-
-
-    // Persist path
+    // Persist path immediately before deferring
     SceneBlock.BlockingLevelPath = FullAssetPath;
 
     UE_LOG(LogTemp, Error,
-        TEXT("[BLOCKING SAVE] Scene=%s SavedPath=%s"),
-        *SceneBlock.Id,
-        *SceneBlock.BlockingLevelPath);
+        TEXT("[BLOCKING PATH] NEW BLOCKING SCENE BRANCH"));
 
     MarkScriptDirty();
     EnsureScriptSaved();
 
-    // Open map
-    UEditorLoadingAndSavingUtils::LoadMap(FullAssetPath);
+    // Activate blocking state before async
+    bBlockingActive = true;
+    ActiveBlockingSceneId = FGuid(SceneBlock.Id);
+    GASBlockingAccess::SetBlockingActive(true);
+    GASBlockingAccess::SetActiveSceneId(ActiveBlockingSceneId);
 
-    // -------------------------------------------------
-    // DELAY → ensure world is fully initialized
-    // -------------------------------------------------
-    FTimerHandle TimerHandle;
-
+    // Defer map creation by one frame to let current world fully clean up
+    FTimerHandle CreateTimerHandle;
     GEditor->GetTimerManager()->SetTimer(
-        TimerHandle,
-        FTimerDelegate::CreateLambda([this, SceneBlock]()
+        CreateTimerHandle,
+        FTimerDelegate::CreateLambda([this, FullAssetPath, SceneId = SceneBlock.Id, SelectedSet]()
             {
-                UWorld* World = GEditor->GetEditorWorldContext().World();
+                UWorld* NewWorld = UEditorLoadingAndSavingUtils::NewBlankMap(false);
 
-                if (!World)
+                if (!NewWorld)
                 {
-                    UE_LOG(LogGASPrePro, Error, TEXT("Blocking: World still null after load."));
+                    UE_LOG(LogGASPrePro, Error, TEXT("Blocking: Failed to create blank map."));
                     return;
                 }
 
-                FGASStageLightingUtils::SetupDefaultStageLighting(World);
-
-                UE_LOG(LogGASPrePro, Warning, TEXT("Blocking: Lighting initialized."));
-
-                FinalizeBlockingLevel(World);
-
-                // ------------------------------------------------------------
-                // 🔥 FORCE SAVE AFTER SETUP
-                // ------------------------------------------------------------
-                FString LoadedMapName = World->GetOutermost()->GetName();
-
-                if (!UEditorLoadingAndSavingUtils::SaveMap(World, LoadedMapName))
+                if (!UEditorLoadingAndSavingUtils::SaveMap(NewWorld, FullAssetPath))
                 {
-                    UE_LOG(LogGASPrePro, Error, TEXT("Blocking: FAILED TO SAVE AFTER INIT"));
+                    UE_LOG(LogGASPrePro, Error, TEXT("Blocking: Failed to save blank map."));
+                    return;
                 }
-                else
-                {
-                    UE_LOG(LogGASPrePro, Warning, TEXT("Blocking: Saved AFTER initialization"));
-                }
+
+                UE_LOG(LogTemp, Error,
+                    TEXT("[BLOCKING SAVE] Scene=%s SavedPath=%s"),
+                    *SceneId,
+                    *FullAssetPath);
+
+                UEditorLoadingAndSavingUtils::LoadMap(FullAssetPath);
+
+                FTimerHandle InitTimerHandle;
+                GEditor->GetTimerManager()->SetTimer(
+                    InitTimerHandle,
+                    FTimerDelegate::CreateLambda([this, SelectedSet]()
+                        {
+                            UWorld* World = GEditor->GetEditorWorldContext().World();
+                            if (!World) return;
+
+                            FGASStageLightingUtils::SetupDefaultStageLighting(World);
+                            UE_LOG(LogGASPrePro, Warning, TEXT("Blocking: Lighting initialized."));
+                            FinalizeBlockingLevel(World);
+
+                            // Duplicate set into blocking level
+                            if (!DuplicateSetIntoBlockingLevel(SelectedSet.LevelPath, World))
+                            {
+                                UE_LOG(LogGASPrePro, Error, TEXT("Blocking: Set duplication failed"));
+                            }
+
+                            // Spawn cast
+                            FGASBlock* SceneBlockPtr = GetSceneBlockById(
+                                ActiveBlockingSceneId.ToString()
+                            );
+                            if (SceneBlockPtr)
+                            {
+                                SpawnSceneCast(SceneBlockPtr);
+                            }
+
+                            // Save
+                            FString LoadedMapName = World->GetOutermost()->GetName();
+                            if (!UEditorLoadingAndSavingUtils::SaveMap(World, LoadedMapName))
+                            {
+                                UE_LOG(LogGASPrePro, Error, TEXT("Blocking: FAILED TO SAVE AFTER INIT"));
+                            }
+                            else
+                            {
+                                UE_LOG(LogGASPrePro, Warning, TEXT("Blocking: Saved AFTER initialization"));
+                            }
+                        }),
+                    0.1f,
+                    false
+                );
             }),
-        0.1f,
+        0.05f,
         false
     );
-
-    // Activate blocking
-    bBlockingActive = true;
-    ActiveBlockingSceneId = FGuid(SceneBlock.Id);
-
-    GASBlockingAccess::SetBlockingActive(true);
-    GASBlockingAccess::SetActiveSceneId(ActiveBlockingSceneId);
 
     return true;
 }
@@ -4803,6 +5823,8 @@ void SGAS_ScriptTab::StopBlocking()
     if (!bBlockingActive)
         return;
 
+    ResetShotModeState();
+
     UE_LOG(LogGASPrePro, Warning, TEXT("[BLOCKING] Stopping blocking mode"));
 
     if (GActiveBlockingSequence)
@@ -4950,61 +5972,12 @@ void SGAS_ScriptTab::AssignSetToPendingScene(FName SelectedSetId)
         return;
     }
 
+    // Store the assigned set ID on the block
+    SceneBlock->AssignedSetId = SelectedSetId;
+
     // Persist script change
     MarkScriptDirty();
     SaveScriptToJson();
-
-    // -----------------------------------------------------
-    // Load blocking level
-    // -----------------------------------------------------
-    if (!bIsSaving)
-    {
-        UEditorLoadingAndSavingUtils::LoadMap(SceneBlock->BlockingLevelPath);
-    }
-
-    UE_LOG(LogGASPrePro, Warning, TEXT("BlockingLevelPath = %s"), *SceneBlock->BlockingLevelPath);
-
-    UWorld* BlockingWorld = GEditor->GetEditorWorldContext().World();
-    if (!BlockingWorld)
-    {
-        UE_LOG(LogGASPrePro, Error, TEXT("AssignSetToPendingScene: BlockingWorld NULL"));
-        return;
-    }
-
-    // -----------------------------------------------------
-    // Duplicate set into blocking map
-    // -----------------------------------------------------
-    if (!DuplicateSetIntoBlockingLevel(Found->LevelPath, BlockingWorld))
-    {
-        UE_LOG(LogGASPrePro, Error, TEXT("AssignSetToPendingScene: Duplication failed"));
-        return;
-    }
-
-    //// -----------------------------------------------------
-    //// Spawn cast BEFORE saving
-    //// -----------------------------------------------------
-    SpawnSceneCast(SceneBlock);
-
-    // -----------------------------------------------------
-    // Mark dirty + save
-    // -----------------------------------------------------
-    BlockingWorld->MarkPackageDirty();
-
-    FString Filename = FPackageName::LongPackageNameToFilename(
-        SceneBlock->BlockingLevelPath,
-        FPackageName::GetMapPackageExtension()
-    );
-
-    FSavePackageArgs SaveArgs;
-    SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-    SaveArgs.SaveFlags = SAVE_NoError;
-
-    UPackage* Package = BlockingWorld->GetOutermost();
-
-
-    UPackage::SavePackage(Package, BlockingWorld, *Filename, SaveArgs);
-
-    UE_LOG(LogGASPrePro, Warning, TEXT("AssignSetToPendingScene: Set + Cast baked into blocking map"));
 
     // -----------------------------------------------------
     // Ensure Scene Master Sequence (Rehearsal Timeline)
@@ -5162,14 +6135,11 @@ void SGAS_ScriptTab::OnScriptParagraphClicked(int32 BlockIndex)
 
 FReply SGAS_ScriptTab::OnClearScriptClicked()
 {
-    // 🔴 Reset toolbar shot state (controls icon tint)
-    bShotAddArmed = false;
+    ResetShotModeState();
 
-    // 🔴 Reset panel interaction state
     if (ScriptPanel.IsValid())
     {
         ScriptPanel->ResetEditorModes();
-        ScriptPanel->SetShotAddArmed(false);
     }
 
     ClearScript();
@@ -5568,12 +6538,11 @@ void SGAS_ScriptTab::RebuildShotList()
                                 })
                             [
                                 SNew(STextBlock)
-                                    .Text_Lambda([this, Scene]()
-                                        {
-                                            return ExpandedScenes.Contains(Scene.SceneId)
-                                                ? FText::FromString(TEXT("▼"))
-                                                : FText::FromString(TEXT("▶"));
-                                        })
+                                    .Text(
+                                        ExpandedScenes.Contains(Scene.SceneId)
+                                        ? FText::FromString(TEXT("▼"))
+                                        : FText::FromString(TEXT("▶"))
+                                    )
                             ]
                     ]
 
@@ -5729,12 +6698,20 @@ void SGAS_ScriptTab::RebuildShotList()
                                         return FReply::Handled();
                                     }
 
-                                    // Left click → scroll to scene
+                                    // Left click → scroll to scene + sync sequencer
                                     if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
                                     {
                                         if (ScriptPanel.IsValid())
                                         {
                                             ScriptPanel->ScrollToBlockId(Scene.SceneId);
+                                        }
+                                        for (const FGASBlock& Block : CurrentScript.Blocks)
+                                        {
+                                            if (Block.Id == Scene.SceneId)
+                                            {
+                                                SyncSequencerToScene(Block.Text);
+                                                break;
+                                            }
                                         }
                                         return FReply::Handled();
                                     }
@@ -5776,14 +6753,22 @@ void SGAS_ScriptTab::RebuildShotList()
                                                 {
                                                     if (Block.Id == SceneId)
                                                     {
-                                                        if (!Block.BlockingLevelPath.IsEmpty())
+                                                        if (!Block.AssignedSetId.IsNone())
                                                         {
-                                                            return FText::FromString(TEXT("✔"));
+                                                            // Look up display name from set discovery cache
+                                                            for (const FGASSetDescriptor& Set : FGASSetDiscovery::GetAvailableSets())
+                                                            {
+                                                                if (Set.SetId == Block.AssignedSetId)
+                                                                {
+                                                                    return Set.DisplayName;
+                                                                }
+                                                            }
+                                                            // Fallback to ID if not found in cache
+                                                            return FText::FromName(Block.AssignedSetId);
                                                         }
                                                         break;
                                                     }
                                                 }
-
                                                 return FText::GetEmpty();
                                             })
                                         .ColorAndOpacity(FLinearColor(0.2f, 0.8f, 0.2f, 1.f))
@@ -6518,8 +7503,24 @@ FString SGAS_ScriptTab::GetSequencePath(const FString& SceneId) const
     return FString();
 }
 
+void SGAS_ScriptTab::ResetShotModeState()
+{
+    // NOTE: bShotAddArmed is intentionally NOT reset here.
+    // Shot marking mode stays armed until the user clicks the icon again.
+    bIsShotRangeDragging = false;
+    bAllowShotHoverPreview = true;  // re-enable hover for next shot
+    bIsEditingShot = false;
+    ActiveCameraModeSceneId.Empty();
+    ShotRangeStartParagraph = INDEX_NONE;
+    Invalidate(EInvalidateWidget::LayoutAndVolatility);
+    UE_LOG(LogGASPrePro, Warning,
+        TEXT("[ShotMode] RESET (armed state preserved)"));
+}
+
 void SGAS_ScriptTab::EnterShotMarkingMode(const FString& SceneId)
 {
+    ResetShotModeState();
+
     if (SceneId.IsEmpty())
     {
         UE_LOG(LogGASPrePro, Warning, TEXT("[ShotMode] Empty SceneId"));
@@ -6571,7 +7572,7 @@ void SGAS_ScriptTab::EnterShotMarkingMode(const FString& SceneId)
     // --------------------------------------------------
     ActiveCameraModeSceneId = SceneId;
 
-    RehydrateShotCamerasForScene(SceneId);
+    //RehydrateShotCamerasForScene(SceneId);
     BindToExistingShotCameras();
 
     bShotAddArmed = true;
@@ -6727,7 +7728,10 @@ void SGAS_ScriptTab::BindToExistingShotCameras()
         return;
     }
 
-
+    // --------------------------------------------------
+    // Reset authoritative bound set each entry
+    // --------------------------------------------------
+    BoundShotCameraSet.Empty();
 
     int32 BindCount = 0;
 
@@ -6740,15 +7744,13 @@ void SGAS_ScriptTab::BindToExistingShotCameras()
             continue;
         }
 
-        if (BoundShotCameraSet.Contains(Cam))
-        {
-            continue;
-        }
-
+        // --------------------------------------------------
+        // Prevent duplicate delegate binding
+        // --------------------------------------------------
         Cam->OnShotCameraMoved.RemoveAll(this);
 
         Cam->OnShotCameraMoved.AddSP(
-            this,
+            SharedThis(this),
             &SGAS_ScriptTab::HandleShotCameraMoved
         );
 
@@ -6756,8 +7758,14 @@ void SGAS_ScriptTab::BindToExistingShotCameras()
 
         ++BindCount;
 
+        UE_LOG(LogTemp, Warning,
+            TEXT("BOUND SHOT CAMERA: %s"),
+            *GetNameSafe(Cam));
     }
 
+    UE_LOG(LogTemp, Warning,
+        TEXT("BindToExistingShotCameras COMPLETE | Count=%d"),
+        BindCount);
 }
 
 void SGAS_ScriptTab::HandleShotCameraMoved(const FString& MarkerId, const FTransform& NewTransform)
@@ -6944,7 +7952,10 @@ void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)
         }
 
         NewCam->SetActorLabel(
-            FString::Printf(TEXT("GAS_ShotCamera_%s"), *Marker.GetShotLabel(CurrentScript.ShotNumberingPolicy))
+            FString::Printf(
+                TEXT("SHOT_%s"),
+                *Marker.GetShotLabel(CurrentScript.ShotNumberingPolicy)
+            )
         );
 
         NewCam->SetActorHiddenInGame(false);
@@ -6958,3 +7969,260 @@ void SGAS_ScriptTab::RehydrateShotCamerasForScene(const FString& SceneBlockId)
 
 
 #endif
+
+// --------------------------------------------------
+// SCRIPT MARKERS
+// --------------------------------------------------
+
+void SGAS_ScriptTab::BuildSceneMarkersFromScriptTiming()
+{
+    if (!ActiveProject)
+    {
+        return;
+    }
+
+    const FString ProjectName =
+        ActiveProject->ProjectName;
+
+    const FString SequencePath =
+        FString::Printf(
+            TEXT("/Game/PrePro/Projects/%s/Sequences/MASTER_%s"),
+            *ProjectName,
+            *ProjectName
+        );
+
+    ULevelSequence* Sequence =
+        LoadObject<ULevelSequence>(
+            nullptr,
+            *SequencePath
+        );
+
+    if (!Sequence)
+    {
+        UE_LOG(LogTemp, Error,
+            TEXT("BuildSceneMarkersFromScriptTiming: MASTER sequence missing"));
+        return;
+    }
+
+    UMovieScene* MovieScene =
+        Sequence->GetMovieScene();
+
+    if (!MovieScene)
+    {
+        return;
+    }
+
+    MovieScene->Modify();
+    MovieScene->DeleteMarkedFrames();
+
+    // ------------------------------------------------------------
+    // BUILD SCENE ROWS (authoritative eighths from layout)
+    // ------------------------------------------------------------
+
+    constexpr float SecondsPerEighth = 7.5f;
+
+    TArray<FGASShotListSceneRow> SceneRows;
+
+    BuildShotListFromScriptV2(
+        CurrentScript,
+        CurrentScript.SceneNumbering,
+        ScriptPanel->GetRenderedParagraphs(),
+        SceneRows
+    );
+
+    // ------------------------------------------------------------
+    // PLACE MARKERS
+    // ------------------------------------------------------------
+
+    int32 CurrentFrame = 0;
+
+    const FFrameRate TickResolution =
+        MovieScene->GetTickResolution();
+
+    const float FPS =
+        TickResolution.AsDecimal();
+
+    for (const FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Type != EGASBlockType::SceneHeading)
+        {
+            continue;
+        }
+
+        // Look up authoritative eighths from layout
+        float SceneEighths = 1.0f; // fallback: 1 eighth
+
+        const FGASShotListSceneRow* FoundScene = SceneRows.FindByPredicate(
+            [&Block](const FGASShotListSceneRow& Row)
+            {
+                return Row.SceneId == Block.Id;
+            }
+        );
+
+        if (FoundScene && FoundScene->LengthEighths > 0)
+        {
+            SceneEighths = (float)FoundScene->LengthEighths;
+        }
+
+        const float SceneSeconds =
+            SceneEighths * SecondsPerEighth;
+
+        const int32 SceneFrames =
+            FMath::RoundToInt(
+                SceneSeconds * FPS
+            );
+
+        FMovieSceneMarkedFrame Marker;
+
+        Marker.FrameNumber =
+            MovieScene->GetTickResolution()
+            .AsFrameNumber(
+                CurrentFrame / FPS
+            );
+
+        Marker.Label =
+            FString::Printf(
+                TEXT("%s"),
+                *Block.Text
+            );
+
+        MovieScene->AddMarkedFrame(Marker);
+
+        UE_LOG(LogTemp, Warning,
+            TEXT("SCENE MARKER: %s at frame %d  (%.1f eighths)"),
+            *Marker.Label,
+            CurrentFrame,
+            SceneEighths
+        );
+
+        CurrentFrame += SceneFrames;
+    }
+
+    // ------------------------------------------------------------
+    // FINALIZE
+    // ------------------------------------------------------------
+
+    MovieScene->SetPlaybackRange(
+        0,
+        CurrentFrame
+    );
+
+    MovieScene->SetWorkingRange(
+        0.0,
+        (double)CurrentFrame / FPS
+    );
+
+    MovieScene->SetViewRange(
+        0.0,
+        (double)CurrentFrame / FPS
+    );
+
+    MovieScene->MarkAsChanged();
+
+    FPropertyChangedEvent DummyEvent(nullptr);
+
+    MovieScene->PostEditChangeProperty(
+        DummyEvent
+    );
+
+    Sequence->MarkPackageDirty();
+
+    SaveSequenceAsset(Sequence);
+
+    UE_LOG(LogTemp, Warning,
+        TEXT("Scene markers generated."));
+}
+
+void SGAS_ScriptTab::SyncSequencerToScene(const FString& SceneMarkerLabel)
+{
+    if (SceneMarkerLabel.IsEmpty() || !ActiveProject)
+        return;
+
+    const FString MasterPackagePath =
+        FString::Printf(
+            TEXT("/Game/PrePro/Projects/%s/Sequences/MASTER_%s"),
+            *ActiveProject->ProjectName,
+            *ActiveProject->ProjectName
+        );
+
+    ULevelSequence* MasterSequence =
+        LoadObject<ULevelSequence>(nullptr, *MasterPackagePath);
+
+    if (!MasterSequence)
+    {
+        UE_LOG(LogTemp, Error, TEXT("SyncSequencerToScene: Could not load MASTER sequence at %s"), *MasterPackagePath);
+        return;
+    }
+
+    UMovieScene* MovieScene = MasterSequence->GetMovieScene();
+    if (!MovieScene)
+        return;
+
+    // Log all markers so we can see what's there
+    for (const FMovieSceneMarkedFrame& Marker : MovieScene->GetMarkedFrames())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("MARKER: '%s' at frame %d"), *Marker.Label, Marker.FrameNumber.Value);
+    }
+
+    for (const FMovieSceneMarkedFrame& Marker : MovieScene->GetMarkedFrames())
+    {
+        if (!Marker.Label.Equals(SceneMarkerLabel, ESearchCase::IgnoreCase))
+            continue;
+
+        UE_LOG(LogTemp, Warning, TEXT("SyncSequencerToScene: FOUND '%s' at frame %d"), *SceneMarkerLabel, Marker.FrameNumber.Value);
+
+        // Get sequencer via ISequencerModule
+        ISequencerModule& SequencerModule =
+            FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
+
+        TSharedPtr<ISequencer> Sequencer;
+
+        // Open the master sequence first
+        ULevelSequenceEditorBlueprintLibrary::OpenLevelSequence(MasterSequence);
+
+        IAssetEditorInstance* EditorInstance =
+            GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()
+            ->FindEditorForAsset(MasterSequence, true);
+
+        if (!EditorInstance)
+        {
+            UE_LOG(LogTemp, Error, TEXT("SyncSequencerToScene: No editor instance"));
+            return;
+        }
+
+        ILevelSequenceEditorToolkit* Toolkit =
+            static_cast<ILevelSequenceEditorToolkit*>(EditorInstance);
+
+        if (!Toolkit)
+        {
+            UE_LOG(LogTemp, Error, TEXT("SyncSequencerToScene: Toolkit cast failed"));
+            return;
+        }
+
+        Sequencer = Toolkit->GetSequencer();
+
+        if (!Sequencer.IsValid())
+        {
+            UE_LOG(LogTemp, Error, TEXT("SyncSequencerToScene: Sequencer invalid"));
+            return;
+        }
+
+        UE_LOG(LogTemp, Warning, TEXT("SyncSequencerToScene: Got sequencer, jumping to frame %d"), Marker.FrameNumber.Value);
+
+        UE_LOG(LogTemp, Warning, TEXT("SyncSequencerToScene: Looking for '%s'"), *SceneMarkerLabel);
+
+        const FFrameTime TargetTime =
+            FFrameRate::TransformTime(
+                FFrameTime(Marker.FrameNumber),
+                MovieScene->GetTickResolution(),
+                Sequencer->GetFocusedTickResolution()
+            );
+
+        Sequencer->SetGlobalTime(TargetTime);
+        Sequencer->ForceEvaluate();
+
+        return;
+    }
+
+    UE_LOG(LogTemp, Error, TEXT("SyncSequencerToScene: No marker found matching '%s'"), *SceneMarkerLabel);
+}

@@ -21,7 +21,10 @@ public:
     void Construct(const FArguments& InArgs);
 
 private:
-
     TWeakPtr<SGAS_ScriptTab> OwnerScriptTab;
     FOnSetSelected OnSetSelected;
+
+    TSharedPtr<SVerticalBox> SetListContainer;
+    void RebuildSetList();
+    void OpenCreateSetDialog();
 };

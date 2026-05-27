@@ -108,6 +108,24 @@ void FGAS_PreProToolsStyle::Initialize()
         )
     );
 
+    // Register SceneFlagIcon_40.png as a brush
+    StyleInstance->Set(
+        "GAS.SceneMarkerIcon",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("SceneFlagIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
+    StyleInstance->Set(
+        "GAS.SequencerIcon",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("SequencerIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
+
     // Register ClearIcon_40.png as a brush
     StyleInstance->Set(
         "GAS.ClearIcon",

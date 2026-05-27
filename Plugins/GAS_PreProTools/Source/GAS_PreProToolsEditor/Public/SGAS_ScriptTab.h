@@ -34,6 +34,7 @@ class STextBlock;
 class SVerticalBox;
 class SWindow;
 class SScrollBox;
+class ULevelSequence;
 
 struct FGASBlock;
 struct FGASImportNumberingOptions;
@@ -121,6 +122,8 @@ public:
         return CurrentScript;
     }
 
+    void BuildSceneMarkersFromScriptTiming();
+    void SyncSequencerToScene(const FString& SceneMarkerLabel);
 
     // --------------------------------------------------
     // Tool Window / UI State
@@ -174,6 +177,15 @@ public:
         const FString& SceneId
     ) const;
 
+    void BuildShotPreviewTransform(
+        const FGASShotIntent& Intent,
+        FVector& OutLocation,
+        FRotator& OutRotation,
+        float& OutFocalLength
+    );
+
+    void RestoreCamerasAfterUndo();
+
     void ClearShotSelectionAfterDelete()
     {
         ActiveShotMarkerId.Empty();
@@ -217,6 +229,17 @@ public:
     void OpenBlockingLevelIfNeeded(const FString& SceneId);
     void OpenBlockingLevel(const FString& LevelPath);
     void HandleMapOpened(const FString& Filename, bool bAsTemplate);
+
+    void CreateOrUpdateMasterSequence();
+    void AddCameraTracksToSceneSequence(
+        ULevelSequence* SceneSequence,
+        const FGASBlock& SceneBlock,
+        const TArray<FGASShotListSceneRow>& SceneRows
+    );
+
+    ULevelSequence* GetOrCreateSceneSequence(
+        const FGASBlock& SceneBlock
+    );
 
     // --------------------------------------------------
     // Camera
@@ -267,6 +290,11 @@ public:
     FText GetNewProjectAspectText() const;
 
     void SaveScriptToJson();
+
+    void ResetShotModeState();
+
+    TWeakPtr<SWindow> ActiveShotIntentWindow;
+    FString ActiveEditingMarkerId;
 
 private:
 

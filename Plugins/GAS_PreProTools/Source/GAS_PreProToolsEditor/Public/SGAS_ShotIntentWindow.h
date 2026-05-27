@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "Containers/Ticker.h"
 #include "ScriptModel.h"
 #include "SGAS_ScriptTab.h"
 
@@ -104,6 +105,12 @@ private:
     FReply OnTiltUp();
     FReply OnTiltDown();
 
+    FTSTicker::FDelegateHandle PreviewRefreshTickerHandle;
+    bool bPreviewRefreshQueued = false;
 
+    void QueuePreviewRefresh();
+    bool HandleQueuedPreviewRefresh(float DeltaTime);
 
+    TArray<TSharedPtr<EGASLensIntent>> LensOptions;
+    TSharedPtr<EGASLensIntent> SelectedLens;
 };

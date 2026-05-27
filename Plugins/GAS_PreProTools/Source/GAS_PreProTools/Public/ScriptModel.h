@@ -590,6 +590,12 @@ struct GAS_PREPROTOOLS_API FGASScript
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     TMap<FString, FGASShotIntent> ShotIntents;
 
+    // ------------------------------------------------------------
+    // Sequencer Scene Markers
+    // ------------------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bSceneMarkersGenerated = false;
+
 
     // ------------------------------------------------------------
     // Character Registry (authoritative, stable IDs)
