@@ -558,23 +558,29 @@ ULevelSequence* SGAS_ScriptTab::GetOrCreateSceneSequence(
         return nullptr;
     }
 
-    FString CleanSceneName = SceneBlock.Text;
+    // Use scene number as the authoritative name — not heading text
+    const TMap<FString, FString> SceneNumberMap =
+        FGASSceneNumberResolver::ResolveSceneNumbers(
+            CurrentScript.Blocks,
+            CurrentScript.SceneNumbering
+        );
 
-    CleanSceneName.ReplaceInline(TEXT("."), TEXT(""));
-    CleanSceneName.ReplaceInline(TEXT("-"), TEXT("_"));
-    CleanSceneName.ReplaceInline(TEXT(" "), TEXT("_"));
-    CleanSceneName.ReplaceInline(TEXT("/"), TEXT("_"));
+    FString SceneNumber = SceneNumberMap.FindRef(SceneBlock.Id);
 
-    CleanSceneName = CleanSceneName.Left(48);
+    if (SceneNumber.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("GetOrCreateSceneSequence: No scene number for block %s"),
+            *SceneBlock.Id);
+        SceneNumber = SceneBlock.Id.Left(8);
+    }
 
-    const FString ProjectName =
-        ActiveProject->ProjectName;
+    SceneNumber.ReplaceInline(TEXT(" "), TEXT("_"));
+
+    const FString ProjectName = ActiveProject->ProjectName;
 
     const FString AssetName =
-        FString::Printf(
-            TEXT("SC_%s"),
-            *CleanSceneName
-        );
+        FString::Printf(TEXT("SC_%s"), *SceneNumber);
 
     const FString PackagePath =
         FString::Printf(
@@ -582,6 +588,7 @@ ULevelSequence* SGAS_ScriptTab::GetOrCreateSceneSequence(
             *ProjectName,
             *AssetName
         );
+
 
     // ------------------------------------------------------------
     // LOAD EXISTING
@@ -4798,7 +4805,8 @@ void SGAS_ScriptTab::GetEnabledCastNames(TArray<TSharedPtr<FString>>& OutNames) 
 // ===================================================================================
 
 ULevelSequence* CreateOrLoadSceneMasterSequence(
-    FGASBlock& SceneBlock
+    FGASBlock& SceneBlock,
+    SGAS_ScriptTab* ScriptTab
 )
 {
     // If already exists → load it
@@ -4821,101 +4829,29 @@ ULevelSequence* CreateOrLoadSceneMasterSequence(
                 UE_LOG(LogGASPrePro, Error, TEXT("Sequence invalid after load"));
                 return nullptr;
             }
-        }
 
-        return Seq;
+            return Seq;
+        }
     }
 
-
-    // ---------------------------------------------------
-    // Create new Level Sequence asset
-    // ---------------------------------------------------
-
-    FString AssetName = SceneBlock.BlockingLevelPath;
-
-    // Extract the map name from the path
-    AssetName = FPackageName::GetShortName(AssetName);
-
-    // Convert "_BLOCKING" → "_Master"
-    AssetName = AssetName.Replace(TEXT("_BLOCKING"), TEXT("_Master"));
-
-    // Derive project root from blocking level path
-    FString BlockingPath = SceneBlock.BlockingLevelPath;
-
-    // Strip everything after "/Blocking"
-    int32 BlockingIndex = INDEX_NONE;
-    if (BlockingPath.FindChar('/', BlockingIndex))
+    // Delegate to the authoritative scene sequence creator
+    // This ensures naming is always SC_010, SC_020 etc
+    if (!ScriptTab)
     {
-        BlockingIndex = BlockingPath.Find(TEXT("/Blocking"));
-    }
-
-    FString ProjectRoot = BlockingPath.Left(BlockingPath.Find(TEXT("/Blocking")));
-
-    // Final sequence folder
-    FString PackagePath = ProjectRoot / TEXT("Sequences");
-
-    const FString FullPath =
-        PackagePath / AssetName;
-
-    UPackage* ExistingPackage = FindPackage(nullptr, *FullPath);
-
-    if (ExistingPackage)
-    {
-        ExistingPackage->FullyLoad();
-
-        ULevelSequence* ExistingSequence =
-            FindObject<ULevelSequence>(ExistingPackage, *AssetName);
-
-        if (ExistingSequence && IsValid(ExistingSequence))
-        {
-            SceneBlock.MasterSequencePath = FullPath + TEXT(".") + AssetName;
-            return ExistingSequence;
-        }
-
-        UE_LOG(LogGASPrePro, Error,
-            TEXT("[SEQ] Existing package is partially loaded or invalid. Delete asset manually: %s"),
-            *FullPath);
-
+        UE_LOG(LogGASPrePro, Error, TEXT("CreateOrLoadSceneMasterSequence: ScriptTab null"));
         return nullptr;
     }
 
-    UPackage* Package = CreatePackage(*FullPath);
-    Package->FullyLoad();
+    ULevelSequence* Seq = ScriptTab->GetOrCreateSceneSequence(SceneBlock);
 
-    ULevelSequence* NewSequence =
-        NewObject<ULevelSequence>(
-            Package,
-            ULevelSequence::StaticClass(),
-            *AssetName,
-            RF_Public | RF_Standalone
-        );
+    if (Seq)
+    {
+        // Store path back onto the block so future calls load directly
+        const FString FullPath = Seq->GetOutermost()->GetName();
+        SceneBlock.MasterSequencePath = FullPath + TEXT(".") + Seq->GetName();
+    }
 
-    // Ensure MovieScene exists
-    NewSequence->Initialize();
-
-    FAssetRegistryModule::AssetCreated(NewSequence);
-    Package->MarkPackageDirty();
-
-    // Save
-    const FString Filename =
-        FPackageName::LongPackageNameToFilename(
-            FullPath,
-            FPackageName::GetAssetPackageExtension()
-        );
-
-    FSavePackageArgs SaveArgs;
-    SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-
-    UPackage::SavePackage(
-        Package,
-        NewSequence,
-        *Filename,
-        SaveArgs
-    );
-
-    SceneBlock.MasterSequencePath = FullPath + TEXT(".") + AssetName;
-
-    return NewSequence;
+    return Seq;
 }
 
 
@@ -5991,7 +5927,7 @@ void SGAS_ScriptTab::AssignSetToPendingScene(FName SelectedSetId)
     SequenceName = SequenceName.Replace(TEXT("_BLOCKING"), TEXT("_Master"));
 
     ULevelSequence* MasterSequence =
-        CreateOrLoadSceneMasterSequence(*SceneBlock);
+        CreateOrLoadSceneMasterSequence(*SceneBlock, this);
 
     if (!MasterSequence)
     {
