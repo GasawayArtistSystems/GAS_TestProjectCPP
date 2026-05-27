@@ -6,6 +6,7 @@
 #include "GASPreProLog.h"
 #include "GASBlockingAccess.h"
 #include "GAS_PreProToolsStyle.h"
+#include "GAS_MRQUtils.h"
 
 
 #include "Widgets/Layout/SBox.h"
@@ -253,6 +254,33 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                                 .Text(FText::FromString(TEXT("EXIT")))
                                                 .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
                                                 .ColorAndOpacity(FLinearColor(1.f, 0.25f, 0.25f, 1.f))
+                                        ]
+                                ]
+
+                            // --- Send to Render Queue ----------------------------
+                            + SHorizontalBox::Slot()
+                                .AutoWidth()
+                                .Padding(2.f, 0.f)
+                                .VAlign(VAlign_Center)
+                                [
+                                    SNew(SButton)
+                                        .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                        .HAlign(HAlign_Center)
+                                        .VAlign(VAlign_Center)
+                                        .ToolTipText(FText::FromString(TEXT("Send to Render Queue")))
+                                        .OnClicked_Lambda([this]()
+                                            {
+                                                if (ScriptTabWidget.IsValid())
+                                                {
+                                                    FGAS_MRQUtils::SendToRenderQueue(
+                                                        ScriptTabWidget->GetActiveProject()
+                                                    );
+                                                }
+                                                return FReply::Handled();
+                                            })
+                                        [
+                                            SNew(SImage)
+                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SequencerIcon"))
                                         ]
                                 ]
                         ]

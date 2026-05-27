@@ -41,7 +41,11 @@ public class GAS_PreProToolsEditor : ModuleRules
         "MovieScene",
         "MovieSceneTracks",
         "Sequencer",
-        "LevelSequenceEditor"
+        "LevelSequenceEditor",
+
+        // Movie Render Queue
+        "MovieRenderPipelineCore",
+        "MovieRenderPipelineEditor",
         });
 
         PublicIncludePaths.AddRange(new string[]

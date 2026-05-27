@@ -296,6 +296,11 @@ public:
     TWeakPtr<SWindow> ActiveShotIntentWindow;
     FString ActiveEditingMarkerId;
 
+    UGASPreProProject* GetActiveProject() const
+    {
+        return ActiveProject;
+    }
+
 private:
 
     // --------------------------------------------------
@@ -429,10 +434,7 @@ private:
     UPROPERTY()
     UGASPreProProject* ActiveProject = nullptr;
 
-    UGASPreProProject* GetActiveProject() const
-    {
-        return ActiveProject;
-    }
+
 
     bool bIsScriptDirty = false;
 
