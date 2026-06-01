@@ -71,5 +71,7 @@ private:
     TSharedPtr<SGAS_ScriptTab> ScriptTabWidget;
 
     TSharedPtr<SListView<TSharedPtr<FGASShotDefinitionListRow>>> ShotListView;
+
+    FReply OnSendToRenderQueue();
 };
 

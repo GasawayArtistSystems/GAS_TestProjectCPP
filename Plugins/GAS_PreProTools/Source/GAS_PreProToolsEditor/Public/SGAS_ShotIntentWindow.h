@@ -113,4 +113,10 @@ private:
 
     TArray<TSharedPtr<EGASLensIntent>> LensOptions;
     TSharedPtr<EGASLensIntent> SelectedLens;
+
+    TArray<TSharedPtr<EGASCameraBehavior>> CameraBehaviorOptions;
+    TSharedPtr<EGASCameraBehavior> SelectedCameraBehavior;
+
+    TArray<TSharedPtr<EGASCameraMount>> CameraMountOptions;
+    TSharedPtr<EGASCameraMount> SelectedCameraMount;
 };

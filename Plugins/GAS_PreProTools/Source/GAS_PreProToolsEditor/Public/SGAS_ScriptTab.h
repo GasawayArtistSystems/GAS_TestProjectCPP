@@ -101,6 +101,8 @@ public:
 
     void ClearScript();
     void EnsureScriptSaved();
+    void SaveScriptJsonOnly();
+
 
     bool CreateNewProject(
         const FString& ProjectName,
@@ -191,6 +193,11 @@ public:
         ActiveShotMarkerId.Empty();
     }
 
+    void OpenShotIntentForMarker(const FString& MarkerId, const FString& SceneBlockId);
+
+    FString PendingShotIntentMarkerId;
+    FString PendingShotIntentSceneId;
+
     // --------------------------------------------------
     // Cast / Scene Filtering
     // --------------------------------------------------
@@ -245,6 +252,7 @@ public:
     // Camera
     // --------------------------------------------------
     void UpdateCameraFromShotIntent(FGASShotIntent& Intent);
+    void UpdateCameraFromShotIntentById(const FString& MarkerId);
 
     void ApplyCameraToLastCreatedShot(
         const FString& MarkerId,
@@ -264,9 +272,6 @@ public:
 
     bool bIsEditingShot = false;
     bool bRestoreSavedCameraThisFrame = false;
-
-    FString PendingShotIntentMarkerId;
-    FString PendingShotIntentSceneId;
 
     // --------------------------------------------------
     // Public Shot-State Flags

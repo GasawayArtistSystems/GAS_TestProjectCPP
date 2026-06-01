@@ -280,7 +280,7 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                             })
                                         [
                                             SNew(SImage)
-                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SequencerIcon"))
+                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.TracksIcon"))
                                         ]
                                 ]
                         ]

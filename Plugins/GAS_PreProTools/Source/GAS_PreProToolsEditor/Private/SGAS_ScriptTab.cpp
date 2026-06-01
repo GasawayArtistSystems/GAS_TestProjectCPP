@@ -973,6 +973,25 @@ void SGAS_ScriptTab::AddCameraTracksToSceneSequence(
     if (!MovieScene)
         return;
 
+    // Skip if blocking level isn't currently loaded
+    if (!GEditor)
+        return;
+
+    UWorld* CurrentWorld = GEditor->GetEditorWorldContext().World();
+    if (!CurrentWorld)
+        return;
+
+    const FString CurrentMapName = CurrentWorld->GetMapName();
+    const FString ExpectedMapName = FPackageName::GetShortName(SceneBlock.BlockingLevelPath);
+
+    if (!ExpectedMapName.IsEmpty() && !CurrentMapName.Contains(ExpectedMapName))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("[CameraCuts] Skipping scene %s — blocking level not loaded"),
+            *SceneBlock.Text);
+        return;
+    }
+
     const float FPS = MovieScene->GetTickResolution().AsDecimal();
     constexpr float SecondsPerEighth = 7.5f;
 
@@ -1143,35 +1162,48 @@ void SGAS_ScriptTab::AddCameraTracksToSceneSequence(
 
         const int32 EndFrame = StartFrame + DurationFrames;
 
+        // Resolve soft pointer first
+        AActor* CamActor = Intent->CameraActor.Get();
+        if (!IsValid(CamActor))
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("[CameraCuts] No camera actor for shot %s — skipping"),
+                *Shot->Id);
+            continue;
+        }
+
         // Check if already bound
         FGuid CameraGuid;
-
         for (int32 PossIdx = 0; PossIdx < MovieScene->GetPossessableCount(); ++PossIdx)
         {
             const FMovieScenePossessable& Existing =
                 MovieScene->GetPossessable(PossIdx);
-
-            if (Existing.GetName() == Intent->CameraActor->GetName())
+            if (Existing.GetName() == CamActor->GetName())
             {
                 CameraGuid = Existing.GetGuid();
                 break;
             }
         }
-
         if (!CameraGuid.IsValid())
         {
+            if (!IsValid(CamActor) || !CamActor->GetWorld())
+            {
+                UE_LOG(LogTemp, Warning,
+                    TEXT("[CameraCuts] Camera world invalid, skipping"));
+                continue;
+            }
+
             CameraGuid = MovieScene->AddPossessable(
-                Intent->CameraActor->GetName(),
-                Intent->CameraActor->GetClass()
+                CamActor->GetName(),
+                CamActor->GetClass()
             );
 
             SceneSequence->BindPossessableObject(
                 CameraGuid,
-                *Intent->CameraActor,
-                Intent->CameraActor->GetWorld()
+                *CamActor,
+                CamActor->GetWorld()
             );
         }
-
         if (!CameraGuid.IsValid())
         {
             UE_LOG(LogTemp, Warning,
@@ -1206,7 +1238,7 @@ void SGAS_ScriptTab::AddCameraTracksToSceneSequence(
         UE_LOG(LogTemp, Warning,
             TEXT("[CameraCuts] Added cut: Shot=%s Camera=%s Frames=%d-%d"),
             *Shot->Id,
-            *Intent->CameraActor->GetName(),
+            *CamActor->GetName(),
             StartFrame,
             EndFrame
         );
@@ -2152,6 +2184,20 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
     // --------------------------------------------------
     AGAS_ShotCameraActor* Cam = Intent.CameraActor;
 
+    // Fallback: search level for existing camera with matching MarkerId
+    if (!IsValid(Cam))
+    {
+        for (TActorIterator<AGAS_ShotCameraActor> It(World); It; ++It)
+        {
+            if (It->MarkerId == Intent.MarkerId)
+            {
+                Cam = *It;
+                Intent.CameraActor = Cam;
+                Intent.BoundCameraMarkerId = Intent.MarkerId;
+                break;
+            }
+        }
+    }
 
     if (!IsValid(Cam))
     {
@@ -2258,15 +2304,32 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
         PreviewFocalLength
     );
 
+    if (!IsValid(Cam))
+    {
+        UE_LOG(LogTemp, Error, TEXT("[CAM UPDATE] Cam invalid before SetActorLocation"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("[CAM UPDATE] About to AddToRoot"));
+    Cam->AddToRoot();
+
+    UE_LOG(LogTemp, Warning, TEXT("[CAM UPDATE] About to SetActorLocation"));
     Cam->SetActorLocation(PreviewLocation);
+
+    UE_LOG(LogTemp, Warning, TEXT("[CAM UPDATE] About to SetActorRotation"));
     Cam->SetActorRotation(PreviewRotation);
 
-    if (Cam && Cam->CineCamera)
+    UE_LOG(LogTemp, Warning, TEXT("[CAM UPDATE] About to check CineCamera"));
+    if (IsValid(Cam) && IsValid(Cam->CineCamera))
     {
-        Cam->CineCamera->SetCurrentFocalLength(
-            PreviewFocalLength
-        );
+        UE_LOG(LogTemp, Warning, TEXT("[CAM UPDATE] About to SetCurrentFocalLength"));
+        Cam->CineCamera->SetCurrentFocalLength(PreviewFocalLength);
+        UE_LOG(LogTemp, Warning, TEXT("[CAM UPDATE] SetCurrentFocalLength done"));
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("[CAM UPDATE] About to RemoveFromRoot"));
+    Cam->RemoveFromRoot();
+    UE_LOG(LogTemp, Warning, TEXT("[CAM UPDATE] Done"));
 
     // --------------------------------------------------
     // Preview handled by SGAS_ShotIntentWindow only.
@@ -2274,6 +2337,19 @@ void SGAS_ScriptTab::UpdateCameraFromShotIntent(FGASShotIntent& Intent)
     // This prevents stale cross-world SceneCapture crashes.
     // --------------------------------------------------
     return;
+}
+
+void SGAS_ScriptTab::UpdateCameraFromShotIntentById(const FString& MarkerId)
+{
+    FGASShotIntent* Found = CurrentScript.ShotIntents.Find(MarkerId);
+    if (!Found) return;
+
+    // Copy by value — safe across potential map mutations
+    FGASShotIntent IntentCopy = *Found;
+    UpdateCameraFromShotIntent(IntentCopy);
+
+    // Write back
+    CurrentScript.ShotIntents.Add(MarkerId, IntentCopy);
 }
 
 void SGAS_ScriptTab::BuildShotPreviewTransform(
@@ -2304,6 +2380,7 @@ void SGAS_ScriptTab::BuildShotPreviewTransform(
 
     for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
     {
+        if (!IsValid(*It)) continue;
         if (It->GetActorLabel().Contains(Intent.SubjectId))
         {
             TargetActor = *It;
@@ -2384,6 +2461,67 @@ void SGAS_ScriptTab::RestoreCamerasAfterUndo()
             }
         }
     }
+}
+
+
+void SGAS_ScriptTab::OpenShotIntentForMarker(
+    const FString& MarkerId,
+    const FString& SceneBlockId)
+{
+
+    // Prevent opening multiple Shot Intent windows
+    if (bIsEditingShot)
+    {
+        UE_LOG(LogGASPrePro, Warning,
+            TEXT("Shot Intent already open — ignoring"));
+        return;
+    }
+    // Find the scene block
+    FGASBlock* SceneBlock = nullptr;
+    for (FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Id == SceneBlockId &&
+            Block.Type == EGASBlockType::SceneHeading)
+        {
+            SceneBlock = &Block;
+            break;
+        }
+    }
+
+    if (!SceneBlock)
+    {
+        // No scene block found — open non-blocking
+        if (ScriptPanel.IsValid())
+            ScriptPanel->OpenShotIntentPopup(MarkerId, SceneBlockId, false, false);
+        return;
+    }
+
+    const bool bHasBlocking = !SceneBlock->BlockingLevelPath.IsEmpty();
+
+    if (!bHasBlocking)
+    {
+        // No blocking level — open non-blocking immediately
+        if (ScriptPanel.IsValid())
+            ScriptPanel->OpenShotIntentPopup(MarkerId, SceneBlockId, false, false);
+        return;
+    }
+
+    // Blocking exists — is it already loaded?
+    if (IsBlockingLevelOpen(SceneBlock->BlockingLevelPath))
+    {
+        // Already loaded — open immediately with blocking
+        if (ScriptPanel.IsValid())
+            ScriptPanel->OpenShotIntentPopup(MarkerId, SceneBlockId, true, false);
+        return;
+    }
+
+    // Need to load the blocking level first
+    // Store pending intent so HandleMapOpened can resume
+    PendingShotIntentMarkerId = MarkerId;
+    PendingShotIntentSceneId = SceneBlockId;
+
+    ShowPendingActionWindow(TEXT("Opening blocking scene..."));
+    OpenBlockingLevel(SceneBlock->BlockingLevelPath);
 }
 
 void SGAS_ScriptTab::Construct(const FArguments& InArgs)
@@ -4547,6 +4685,14 @@ void SGAS_ScriptTab::EnsureScriptSaved()
     }
 
     OnSaveScript();
+}
+
+void SGAS_ScriptTab::SaveScriptJsonOnly()
+{
+    if (CurrentScript.Blocks.Num() == 0)
+        return;
+
+    SaveScriptToJson();
 }
 
 void SGAS_ScriptTab::MarkScriptDirty()
@@ -7298,6 +7444,48 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
             UpdatePendingActionWindow(TEXT("Deleting shot and camera..."));
             DeleteShotMarkerNow(MarkerId);
             return;
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Pending shot intent open after blocking level loads
+    // ------------------------------------------------------------
+    if (!PendingShotIntentMarkerId.IsEmpty())
+    {
+        if (Filename.Contains(
+            FPaths::GetBaseFilename(PendingShotIntentSceneId.IsEmpty()
+                ? TEXT("")
+                : GetBlockingLevelPath(PendingShotIntentSceneId))))
+        {
+            const FString IntentMarkerId = PendingShotIntentMarkerId;
+            const FString IntentSceneId = PendingShotIntentSceneId;
+
+            PendingShotIntentMarkerId.Empty();
+            PendingShotIntentSceneId.Empty();
+
+            ClosePendingActionWindow();
+
+            const FString CapturedMarkerId = IntentMarkerId;
+            const FString CapturedSceneId = IntentSceneId;
+
+            FTSTicker::GetCoreTicker().AddTicker(
+                FTickerDelegate::CreateLambda(
+                    [this, CapturedMarkerId, CapturedSceneId](float) -> bool
+                    {
+                        if (ScriptPanel.IsValid())
+                        {
+                            ScriptPanel->OpenShotIntentPopup(
+                                CapturedMarkerId,
+                                CapturedSceneId,
+                                true,
+                                false
+                            );
+                        }
+                        return false;
+                    }
+                ),
+                0.5f
+            );
         }
     }
 

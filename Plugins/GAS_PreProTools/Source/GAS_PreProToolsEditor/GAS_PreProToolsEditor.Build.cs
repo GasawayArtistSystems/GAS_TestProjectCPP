@@ -46,6 +46,7 @@ public class GAS_PreProToolsEditor : ModuleRules
         // Movie Render Queue
         "MovieRenderPipelineCore",
         "MovieRenderPipelineEditor",
+        "MovieRenderPipelineRenderPasses",
         });
 
         PublicIncludePaths.AddRange(new string[]

@@ -29,7 +29,20 @@ enum class EGASCameraBehavior : uint8
     Tilt        UMETA(DisplayName = "Tilt"),
     Push        UMETA(DisplayName = "Push In"),
     Pull        UMETA(DisplayName = "Pull Out"),
-    Handheld    UMETA(DisplayName = "Handheld")
+    Zoom        UMETA(DisplayName = "Zoom"),
+    Dutch       UMETA(DisplayName = "Dutch Tilt")
+};
+
+UENUM(BlueprintType)
+enum class EGASCameraMount : uint8
+{
+    LockedOff       UMETA(DisplayName = "Locked Off"),
+    Handheld        UMETA(DisplayName = "Handheld"),
+    Steadicam       UMETA(DisplayName = "Steadicam"),
+    Dolly           UMETA(DisplayName = "Dolly"),
+    JibCrane        UMETA(DisplayName = "Jib / Crane"),
+    Drone           UMETA(DisplayName = "Drone"),
+    Helicopter      UMETA(DisplayName = "Helicopter")
 };
 
 UENUM(BlueprintType)
@@ -86,6 +99,9 @@ struct FGASShotIntent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASCameraBehavior CameraBehavior = EGASCameraBehavior::Static;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    EGASCameraMount CameraMount = EGASCameraMount::LockedOff;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASFramingBias Framing = EGASFramingBias::Center;
 
@@ -93,6 +109,9 @@ struct FGASShotIntent
 
     UPROPERTY(Transient)
     TObjectPtr<AGAS_ShotCameraActor> CameraActor = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    FString BoundCameraMarkerId;
 
     UPROPERTY()
     FString CameraName;

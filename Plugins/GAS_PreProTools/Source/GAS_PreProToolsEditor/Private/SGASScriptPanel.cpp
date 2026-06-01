@@ -103,7 +103,8 @@ static TArray<TSharedPtr<EGASCameraBehavior>> CameraBehaviorOptions = {
     MakeShared<EGASCameraBehavior>(EGASCameraBehavior::Tilt),
     MakeShared<EGASCameraBehavior>(EGASCameraBehavior::Push),
     MakeShared<EGASCameraBehavior>(EGASCameraBehavior::Pull),
-    MakeShared<EGASCameraBehavior>(EGASCameraBehavior::Handheld)
+    MakeShared<EGASCameraBehavior>(EGASCameraBehavior::Zoom),
+    MakeShared<EGASCameraBehavior>(EGASCameraBehavior::Dutch)
 };
 
 static float LensToFOV(EGASLensIntent Lens)
@@ -3477,12 +3478,10 @@ FReply SGASScriptPanel::OnMouseButtonDoubleClick(
     HoveredShotMarkerId.Empty();
     bShotIntentPopupOpen = true;
 
-    OpenShotIntentPopup(
-        Marker->Id,
-        Marker->BlockId,
-        false,
-        false
-    );
+    if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+    {
+        Tab->OpenShotIntentForMarker(Marker->Id, Marker->BlockId);
+    }
 
     return FReply::Handled();
 }
@@ -5142,83 +5141,100 @@ void SGASScriptPanel::OpenShotIntentPopup(
         .OwnerWindow(Window)
         .OnConfirm_Lambda([this](FString MarkerId, EGASShotType ShotType, FString SubjectId, FTransform PreviewTransform)
             {
-                // 🔥 ADD THIS LINE
                 LastPreviewTransform = PreviewTransform;
 
                 if (!SourceScript)
                     return;
 
-                FGASShotIntent* Intent = SourceScript->ShotIntents.Find(MarkerId);
-                if (!Intent)
+                FGASShotIntent* Found = SourceScript->ShotIntents.Find(MarkerId);
+                if (!Found)
                 {
                     UE_LOG(LogTemp, Warning, TEXT("ShotIntent: NOT FOUND"));
                     return;
                 }
 
-                Intent->ShotType = ShotType;
-                Intent->SubjectId = SubjectId;
+                // Update intent data only — no world actor access here
+                Found->ShotType = ShotType;
+                Found->SubjectId = SubjectId;
 
-                // Sync to marker metadata so shot list builder can read it
+                // Sync to marker metadata
                 for (FGASMarker& Marker : SourceScript->Markers)
                 {
                     if (Marker.Id == MarkerId)
                     {
-                        Marker.Metadata.Add(
-                            TEXT("ShotType"),
-                            StaticEnum<EGASShotType>()->GetNameStringByValue((int64)ShotType)
-                        );
-                        Marker.Metadata.Add(
-                            TEXT("SubjectId"),
-                            SubjectId
-                        );
+                        Marker.Metadata.Add(TEXT("ShotType"),
+                            StaticEnum<EGASShotType>()->GetNameStringByValue((int64)ShotType));
+                        Marker.Metadata.Add(TEXT("SubjectId"), SubjectId);
                         break;
                     }
                 }
 
-                UE_LOG(LogTemp, Warning, TEXT("ShotIntent Updated: %s | %s"),
-                    *SubjectId,
-                    *UEnum::GetValueAsString(ShotType)
+                // Defer world actor access to next frame
+                FTSTicker::GetCoreTicker().AddTicker(
+                    FTickerDelegate::CreateLambda(
+                        [this, MarkerId, PreviewTransform](float) -> bool
+                        {
+                            if (!SourceScript) return false;
+
+                            FGASShotIntent* Intent = SourceScript->ShotIntents.Find(MarkerId);
+                            if (!Intent) return false;
+
+                            // Rehydrate camera from level
+                            if (!IsValid(Intent->CameraActor.Get()))
+                            {
+                                if (GEditor)
+                                {
+                                    UWorld* W = GEditor->GetEditorWorldContext().World();
+                                    if (W)
+                                    {
+                                        for (TActorIterator<AGAS_ShotCameraActor> It(W); It; ++It)
+                                        {
+                                            if (It->MarkerId == MarkerId)
+                                            {
+                                                Intent->CameraActor = *It;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            AGAS_ShotCameraActor* Cam = Intent->CameraActor.Get();
+                            if (IsValid(Cam))
+                            {
+                                Cam->SetActorTransform(PreviewTransform);
+                                Intent->CameraLocation = Cam->GetActorLocation();
+                                Intent->CameraRotation = Cam->GetActorRotation();
+
+                                UCineCameraComponent* CineCamera = Cam->CineCamera;
+                                if (IsValid(CineCamera) && CineCamera->IsRegistered())
+                                {
+                                    Intent->CameraFocalLength = CineCamera->CurrentFocalLength;
+                                    CineCamera->FocusSettings.FocusMethod = ECameraFocusMethod::Disable;
+                                    CineCamera->CurrentAperture = 8.0f;
+                                    CineCamera->PostProcessSettings.bOverride_AutoExposureMethod = true;
+                                    CineCamera->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Histogram;
+                                    CineCamera->PostProcessSettings.bOverride_AutoExposureBias = true;
+                                    CineCamera->PostProcessSettings.AutoExposureBias = 0.25f;
+                                    CineCamera->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
+                                    CineCamera->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
+                                    CineCamera->PostProcessSettings.AutoExposureMinBrightness = 0.03f;
+                                    CineCamera->PostProcessSettings.AutoExposureMaxBrightness = 2.0f;
+                                }
+                            }
+
+                            if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
+                            {
+                                Tab->SaveScriptJsonOnly();
+                            }
+
+                            return false; // run once
+                        }
+                    ),
+                    0.1f
                 );
-
-                if (AGAS_ShotCameraActor* Cam = Intent->CameraActor)
-                {
-                    Cam->SetActorTransform(PreviewTransform);
-
-                    Intent->CameraLocation = Cam->GetActorLocation();
-                    Intent->CameraRotation = Cam->GetActorRotation();
-
-                    if (Cam->CineCamera)
-                    {
-                        // keep what you already have
-                        Intent->CameraFocalLength = Cam->CineCamera->CurrentFocalLength;
-
-                        Cam->CineCamera->FocusSettings.FocusMethod = ECameraFocusMethod::Disable;
-                        Cam->CineCamera->CurrentAperture = 8.0f;
-
-                        // 🔥 MATCH PREVIEW EXPOSURE (USE AUTO, NOT MANUAL)
-                        Cam->CineCamera->PostProcessSettings.bOverride_AutoExposureMethod = true;
-                        Cam->CineCamera->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Histogram;
-
-                        Cam->CineCamera->PostProcessSettings.bOverride_AutoExposureBias = true;
-                        Cam->CineCamera->PostProcessSettings.AutoExposureBias = 0.25f;
-
-                        // Allow dynamic range (preview-like)
-                        Cam->CineCamera->PostProcessSettings.bOverride_AutoExposureMinBrightness = true;
-                        Cam->CineCamera->PostProcessSettings.bOverride_AutoExposureMaxBrightness = true;
-                        Cam->CineCamera->PostProcessSettings.AutoExposureMinBrightness = 0.03f;
-                        Cam->CineCamera->PostProcessSettings.AutoExposureMaxBrightness = 2.0f;
-                    }
-
-                    UE_LOG(LogTemp, Warning, TEXT("APPLIED PREVIEW TRANSFORM AFTER CONFIRM: %s"),
-                        *Intent->CameraLocation.ToString());
-                }
-
-                if (TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin())
-                {
-                    Tab->OnSaveScript();
-                }
             })
-    );
+            );
 
     Window->SetOnWindowClosed(
         FOnWindowClosed::CreateLambda(
