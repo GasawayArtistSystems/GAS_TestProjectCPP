@@ -39,6 +39,10 @@ void SGAS_BlockingCastWindow::Construct(const FArguments& InArgs)
     SceneId = InArgs._SceneId;
     Script = InArgs._Script;
     OnCastModified = InArgs._OnCastModified;
+    BlockingSequence = InArgs._BlockingSequence;
+
+    UE_LOG(LogTemp, Warning, TEXT("BlockingCastWindow: InArgs._BlockingSequence = %s"),
+        InArgs._BlockingSequence ? *InArgs._BlockingSequence->GetName() : TEXT("NULL"));
 
     UE_LOG(LogTemp, Warning, TEXT("BlockingCastWindow Construct START"));
 
@@ -57,7 +61,11 @@ void SGAS_BlockingCastWindow::Construct(const FArguments& InArgs)
 
     UE_LOG(LogTemp, Warning, TEXT("BlockingCastWindow: Script OK"));
 
-    BlockingSequence = GetActiveBlockingSequence();
+    // Use passed-in sequence if available, fall back to current
+    if (!BlockingSequence.IsValid())
+    {
+        BlockingSequence = GetActiveBlockingSequence();
+    }
 
     if (BlockingSequence.IsValid())
     {
@@ -654,6 +662,11 @@ FReply SGAS_BlockingCastWindow::OnAddClicked()
                         }
                         break;
                     }
+                }
+
+                if (!BlockingSequence.IsValid())
+                {
+                    BlockingSequence = GetActiveBlockingSequence();
                 }
 
                 ULevelSequence* Sequence = BlockingSequence.Get();

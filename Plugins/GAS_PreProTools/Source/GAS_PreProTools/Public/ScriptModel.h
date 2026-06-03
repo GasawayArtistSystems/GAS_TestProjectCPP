@@ -156,7 +156,12 @@ struct GAS_PREPROTOOLS_API FGASBlock
     UPROPERTY()
     FString MasterSequencePath;
 
+    // Sequence build status — used by shot list UI indicator
+    UPROPERTY()
+    bool bSequenceBuilt = false;
 
+    UPROPERTY()
+    int32 SequenceBuiltShotCount = 0;
 
     FGASBlock() {}
 };

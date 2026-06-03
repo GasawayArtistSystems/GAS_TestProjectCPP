@@ -55,6 +55,9 @@ struct FGASShotListShotRow
     UPROPERTY()
     FString Camera;
 
+    UPROPERTY()
+    bool bCameraMoves = false;
+
     // -----------------------------
     // Shot List overrides / user data
     // -----------------------------

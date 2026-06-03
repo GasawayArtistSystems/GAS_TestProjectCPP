@@ -913,8 +913,7 @@ void SGAS_ScriptTab::CreateOrUpdateMasterSequence()
             SceneEighths
         );
 
-        // Add camera cuts to this scene sequence
-        AddCameraTracksToSceneSequence(SceneSequence, Block, SceneRows);
+
 
         CurrentFrame += DurationFrames + 1;
     }
@@ -2836,9 +2835,9 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
                                                 .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
                                                 .HAlign(HAlign_Center)
                                                 .VAlign(VAlign_Center)
-                                                .IsEnabled_Lambda([this]()
+                                                .IsEnabled_Lambda([]()
                                                     {
-                                                        return ActiveProject != nullptr;
+                                                        return false;
                                                     })
                                                 .ToolTipText(FText::FromString("Open Master Sequence"))
                                                 .OnClicked_Lambda([this]()
@@ -3178,13 +3177,12 @@ void SGAS_ScriptTab::Construct(const FArguments& InArgs)
             ScriptPanel->OnScriptMutated.BindLambda([this]()
                 {
                     UE_LOG(LogGASPrePro, Warning, TEXT("SCRIPT TAB: Script mutated → marking dirty"));
-
                     MarkScriptDirty();
                     OnShotListNeedsRefresh.Broadcast();
-
                     if (ScriptPanel.IsValid())
                     {
                         ScriptPanel->RebuildLayout();
+                        RebuildShotList();
                     }
                 });
 
@@ -3427,10 +3425,7 @@ FReply SGAS_ScriptTab::OnImportScript()
                 ScriptPanel->RebuildLayout();
             }
 
-            // Step 3 — Create/update master sequence with scene subsequences
-            CreateOrUpdateMasterSequence();
-
-            // Step 4 — Place scene markers on the master timeline
+            // Step 3 — Place scene markers on the master timeline
             BuildSceneMarkersFromScriptTiming();
 
             UE_LOG(LogGASPrePro, Warning,
@@ -3450,17 +3445,8 @@ FReply SGAS_ScriptTab::OnSaveScript()
     UE_LOG(LogTemp, Warning, TEXT("=== SAVE START ==="));
 
     SaveScriptToJson();
-    if (ActiveProject &&
-        ActiveProject->ProjectSettings.bAutoCreateMasterSequence)
-    {
-        CreateOrUpdateMasterSequence();
-    }
 
-    if (GActiveBlockingSequence)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Saving Sequence"));
-        SaveSequenceAsset(GActiveBlockingSequence);
-    }
+
 
 #if WITH_EDITOR
     if (GEditor)
@@ -5138,40 +5124,23 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
         {
             GActiveBlockingSequence = MasterSequence;
 
-            UAssetEditorSubsystem* AssetEditorSubsystem =
-                GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-
-            if (AssetEditorSubsystem)
-            {
-                AssetEditorSubsystem->OpenEditorForAsset(MasterSequence);
-            }
-
-            // -----------------------------------------------------
             // Rebuild Sequencer bindings
-            // -----------------------------------------------------
-
             if (World)
             {
                 for (TActorIterator<AGAS_StandInActor> It(World); It; ++It)
                 {
                     AGAS_StandInActor* Actor = *It;
-
                     if (!Actor)
                         continue;
-
                     FString CharacterName = Actor->GAS_CharacterId.ToUpper();
-
                     if (!SceneBlock->CharactersInScene.Contains(CharacterName))
                         continue;
-
                     Actor->RefreshMeshFromScript(&CurrentScript);
-
                     UMovieScene3DTransformTrack* TransformTrack =
                         FGASSequencerBindingUtils::EnsureActorTransformTrack(
                             MasterSequence,
                             Actor
                         );
-
                     UE_LOG(
                         LogGASPrePro,
                         Warning,
@@ -5181,6 +5150,25 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
                     );
                 }
             }
+
+            // Open sequence AFTER level is confirmed loaded
+            const FString SeqPath = MasterSequence->GetPathName();
+            FTSTicker::GetCoreTicker().AddTicker(
+                FTickerDelegate::CreateLambda([this, SeqPath](float) -> bool
+                    {
+                        ULevelSequence* Seq =
+                            LoadObject<ULevelSequence>(nullptr, *SeqPath);
+                        if (Seq && GEditor)
+                        {
+                            UAssetEditorSubsystem* EdSub =
+                                GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+                            if (EdSub)
+                                EdSub->OpenEditorForAsset(Seq);
+                        }
+                        return false;
+                    }),
+                0.5f
+            );
         }
 
         // -----------------------------------------------------
@@ -5312,6 +5300,14 @@ bool SGAS_ScriptTab::CreateBlockingLevelForScene(
 
     FString NumberPart = FoundNumber ? *FoundNumber : TEXT("0");
 
+    // Zero-pad pure integers to 3 digits (e.g. "10" → "010"). 
+    // Alphanumeric scene numbers (e.g. "12A") are left as-is.
+    if (NumberPart.IsNumeric())
+    {
+        int32 NumVal = FCString::Atoi(*NumberPart);
+        NumberPart = FString::Printf(TEXT("%03d"), NumVal);
+    }
+
 
     // Sanitize heading text
     FString HeadingPart = SceneBlock.Text.ToUpper();
@@ -5328,6 +5324,7 @@ bool SGAS_ScriptTab::CreateBlockingLevelForScene(
 
     // Final name
     const FString MapName =
+        TEXT("SC_") +
         NumberPart +
         TEXT("_") +
         HeadingPart +
@@ -5798,8 +5795,14 @@ void SGAS_ScriptTab::SpawnSceneCast(FGASBlock* SceneBlock)
             StandIn->SetActorEnableCollision(true);
             StandIn->SetActorHiddenInGame(false);
 
-            // Binding is handled after Sequencer opens (AssignSetToPendingScene -> BindAllStandInsToSequence)
-
+            // Bind to sequence if available
+            if (GActiveBlockingSequence)
+            {
+                FGASSequencerBindingUtils::EnsureActorTransformTrack(
+                    GActiveBlockingSequence,
+                    StandIn
+                );
+            }
         }
 
         XOffset += 150.f;
@@ -5908,11 +5911,6 @@ void SGAS_ScriptTab::StopBlocking()
     ResetShotModeState();
 
     UE_LOG(LogGASPrePro, Warning, TEXT("[BLOCKING] Stopping blocking mode"));
-
-    if (GActiveBlockingSequence)
-    {
-        SaveSequenceAsset(GActiveBlockingSequence);
-    }
 
     BoundShotCameraSet.Empty();
 
@@ -6149,6 +6147,47 @@ void SGAS_ScriptTab::AssignSetToPendingScene(FName SelectedSetId)
     PendingBlockingSceneId.Empty();
 }
 
+static void MuteNonBlockingTracksForEditing(ULevelSequence* Seq, UWorld* World)
+{
+    if (!IsValid(Seq) || !World) return;
+
+    UMovieScene* MovieScene = Seq->GetMovieScene();
+    if (!MovieScene) return;
+
+    // Mute Camera Cuts track
+    UMovieSceneTrack* CameraCutTrack = MovieScene->GetCameraCutTrack();
+    if (CameraCutTrack)
+    {
+        CameraCutTrack->SetEvalDisabled(true);
+    }
+
+    // Remove any possessable binding that isn't a StandIn actor
+    TArray<FGuid> BindingsToRemove;
+
+    for (int32 i = 0; i < MovieScene->GetPossessableCount(); ++i)
+    {
+        const FMovieScenePossessable& Possessable = MovieScene->GetPossessable(i);
+
+        const UClass* PossessableClass = Possessable.GetPossessedObjectClass();
+
+        if (!PossessableClass)
+            continue;
+
+        if (!PossessableClass || !PossessableClass->IsChildOf(AGAS_StandInActor::StaticClass()))
+        {
+            BindingsToRemove.Add(Possessable.GetGuid());
+        }
+    }
+
+    for (const FGuid& Guid : BindingsToRemove)
+    {
+        Seq->UnbindPossessableObjects(Guid);
+        MovieScene->RemovePossessable(Guid);
+    }
+
+    Seq->MarkPackageDirty();
+}
+
 void SGAS_ScriptTab::FinalizeBlockingLevel(UWorld* World)
 {
     if (!World)
@@ -6167,7 +6206,50 @@ void SGAS_ScriptTab::FinalizeBlockingLevel(UWorld* World)
     {
         UE_LOG(LogGASPrePro, Warning, TEXT("Blocking: Saved AFTER initialization"));
     }
+
+    // Find the scene sequence via the active blocking scene
+    FGASBlock* SceneBlock = nullptr;
+    for (FGASBlock& Block : CurrentScript.Blocks)
+    {
+        if (Block.Id == ActiveBlockingSceneId.ToString())
+        {
+            SceneBlock = &Block;
+            break;
+        }
+    }
+
+    if (!SceneBlock || SceneBlock->MasterSequencePath.IsEmpty())
+    {
+        UE_LOG(LogGASPrePro, Warning, TEXT("[BLOCKING] No sequence path on SceneBlock"));
+        return;
+    }
+
+    ULevelSequence* Seq = LoadObject<ULevelSequence>(
+        nullptr, *SceneBlock->MasterSequencePath);
+
+    if (!IsValid(Seq))
+    {
+        UE_LOG(LogGASPrePro, Error, TEXT("[BLOCKING] Failed to load scene sequence: %s"),
+            *SceneBlock->MasterSequencePath);
+        return;
+    }
+
+    GActiveBlockingSequence = Seq;
+
+    UAssetEditorSubsystem* AssetEditorSubsystem =
+        GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+
+    if (AssetEditorSubsystem)
+    {
+        AssetEditorSubsystem->OpenEditorForAsset(Seq);
+    }
+
+    MuteNonBlockingTracksForEditing(Seq, World);
+
+    UE_LOG(LogGASPrePro, Warning, TEXT("[BLOCKING] Opened scene sequence: %s"),
+        *Seq->GetName());
 }
+
 
 // ============================================================================
 // HELPER FUNCTIONS - Numbering style
@@ -6541,7 +6623,7 @@ void SGAS_ScriptTab::RebuildShotList()
                         + SSplitter::Slot().Value(ColScene)
                         [
                             SNew(STextBlock)
-                                .Text(FText::FromString(TEXT("Scene")))
+                                .Text(FText::FromString(TEXT("SC#")))
                                 .Font(FAppStyle::Get().GetFontStyle("BoldFont"))
                         ]
 
@@ -6595,6 +6677,10 @@ void SGAS_ScriptTab::RebuildShotList()
 
     for (const FGASShotListSceneRow& Scene : SceneRowsV2)
     {
+        const FString CapturedSceneId = Scene.SceneId;
+        const int32 CapturedShotCount = Scene.Shots.Num();
+
+
         ShotListContainer->AddSlot()
             .AutoHeight()
             .Padding(4.f, 2.f)
@@ -6635,11 +6721,78 @@ void SGAS_ScriptTab::RebuildShotList()
                             .Text(FText::AsNumber(Scene.StartPage))
                     ]
 
-                    // Scene #
+                    // Scene # + Status Dot
                     + SSplitter::Slot().Value(ColScene)
                     [
-                        SNew(STextBlock)
-                            .Text(FText::FromString(Scene.SceneNumber))
+                        SNew(SHorizontalBox)
+
+                            // Status dot
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            .Padding(0.f, 0.f, 4.f, 0.f)
+                            [
+                                SNew(STextBlock)
+                                    .Text_Lambda([]()
+                                        {
+                                            return FText::FromString(TEXT("●"));
+                                        })
+                                    .ColorAndOpacity_Lambda([this, SceneId = Scene.SceneId, ShotCount = Scene.Shots.Num()]()
+                                        {
+                                            for (const FGASBlock& Block : CurrentScript.Blocks)
+                                            {
+                                                if (Block.Id == SceneId)
+                                                {
+                                                    if (!Block.bSequenceBuilt)
+                                                    {
+                                                        // Not built yet — red
+                                                        return FSlateColor(FLinearColor(1.f, 0.2f, 0.2f, 1.f));
+                                                    }
+                                                    if (Block.SequenceBuiltShotCount == ShotCount)
+                                                    {
+                                                        // Built and up to date — green
+                                                        return FSlateColor(FLinearColor(0.2f, 1.f, 0.2f, 1.f));
+                                                    }
+                                                    // Built but shot count changed — yellow
+                                                    return FSlateColor(FLinearColor(1.f, 0.85f, 0.1f, 1.f));
+                                                }
+                                            }
+                                            // Block not found — default red
+                                            return FSlateColor(FLinearColor(1.f, 0.2f, 0.2f, 1.f));
+                                        })
+                                    .ToolTipText_Lambda([this, SceneId = Scene.SceneId, ShotCount = Scene.Shots.Num()]()
+                                        {
+                                            for (const FGASBlock& Block : CurrentScript.Blocks)
+                                            {
+                                                if (Block.Id == SceneId)
+                                                {
+                                                    if (!Block.bSequenceBuilt)
+                                                    {
+                                                        return FText::FromString(TEXT("Sequence not built"));
+                                                    }
+                                                    if (Block.SequenceBuiltShotCount == ShotCount)
+                                                    {
+                                                        return FText::FromString(TEXT("Sequence built and up to date"));
+                                                    }
+                                                    return FText::FromString(FString::Printf(
+                                                        TEXT("Sequence built with %d shots — current count is %d"),
+                                                        Block.SequenceBuiltShotCount,
+                                                        ShotCount
+                                                    ));
+                                                }
+                                            }
+                                            return FText::FromString(TEXT("Sequence not built"));
+                                        })
+                            ]
+
+                        // Scene number text
+                        + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .VAlign(VAlign_Center)
+                            [
+                                SNew(STextBlock)
+                                    .Text(FText::FromString(Scene.SceneNumber))
+                            ]
                     ]
 
                     // Scene Heading (clickable)
@@ -6647,7 +6800,7 @@ void SGAS_ScriptTab::RebuildShotList()
                     [
                         SNew(SBorder)
                             .OnMouseButtonDown_Lambda(
-                                [this, Scene](const FGeometry&, const FPointerEvent& MouseEvent)
+                                [this, Scene, CapturedSceneId](const FGeometry&, const FPointerEvent& MouseEvent)
                                 {
                                     if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
                                     {
@@ -6678,7 +6831,7 @@ void SGAS_ScriptTab::RebuildShotList()
                                                 FSlateIcon(),
                                                 FUIAction(
                                                     FExecuteAction::CreateLambda(
-                                                        [this, SceneId = Scene.SceneId]()
+                                                        [this, SceneId = CapturedSceneId]()
                                                         {
                                                             FSlateApplication::Get().DismissAllMenus();
 
@@ -6713,9 +6866,168 @@ void SGAS_ScriptTab::RebuildShotList()
                                                 FSlateIcon(),
                                                 FUIAction(
                                                     FExecuteAction::CreateLambda(
-                                                        [this, SceneId = Scene.SceneId]()
+                                                        [this, SceneId = CapturedSceneId]()
                                                         {
                                                             EnterShotMarkingMode(SceneId);
+                                                        }
+                                                    )
+                                                )
+                                            );
+
+                                            MenuBuilder.AddMenuEntry(
+                                                FText::FromString(TEXT("Build Scene Sequence")),
+                                                FText::FromString(TEXT("Build camera sequence for this scene")),
+                                                FSlateIcon(),
+                                                FUIAction(
+                                                    FExecuteAction::CreateLambda(
+                                                        [this, SceneId = CapturedSceneId]()
+                                                        {
+                                                            FGASBlock* SceneBlock = nullptr;
+                                                            for (FGASBlock& Block : CurrentScript.Blocks)
+                                                            {
+                                                                if (Block.Id == SceneId &&
+                                                                    Block.Type == EGASBlockType::SceneHeading)
+                                                                {
+                                                                    SceneBlock = &Block;
+                                                                    break;
+                                                                }
+                                                            }
+
+                                                            if (!SceneBlock) return;
+                                                            // Warn if sequence already built
+                                                            if (SceneBlock->bSequenceBuilt)
+                                                            {
+                                                                const FText Title = FText::FromString(TEXT("Rebuild Scene Sequence?"));
+                                                                const FText Message = FText::FromString(TEXT("This scene already has a built sequence.\n\nRebuilding will overwrite any manual edits you made to the timeline.\n\nContinue?"));
+
+                                                                EAppReturnType::Type Result = FMessageDialog::Open(
+                                                                    EAppMsgType::YesNo,
+                                                                    Message,
+                                                                    &Title
+                                                                );
+
+                                                                if (Result != EAppReturnType::Yes)
+                                                                    return;
+                                                            }
+
+                                                            TArray<FRenderedParagraph> Rendered =
+                                                                ScriptPanel->GetRenderedParagraphs();
+
+                                                            TArray<FGASShotListSceneRow> SceneRows;
+                                                            BuildShotListFromScriptV2(
+                                                                CurrentScript,
+                                                                CurrentScript.SceneNumbering,
+                                                                Rendered,
+                                                                SceneRows
+                                                            );
+
+                                                            ULevelSequence* SceneSequence =
+                                                                GetOrCreateSceneSequence(*SceneBlock);
+
+                                                            if (!SceneSequence) return;
+
+                                                            AddCameraTracksToSceneSequence(
+                                                                SceneSequence,
+                                                                *SceneBlock,
+                                                                SceneRows
+                                                            );
+
+                                                            const FGASShotListSceneRow* FoundRow =
+                                                                SceneRows.FindByPredicate(
+                                                                    [&SceneId](const FGASShotListSceneRow& Row)
+                                                                    {
+                                                                        return Row.SceneId == SceneId;
+                                                                    }
+                                                                );
+
+                                                            SceneBlock->bSequenceBuilt = true;
+                                                            SceneBlock->SequenceBuiltShotCount =
+                                                                FoundRow ? FoundRow->Shots.Num() : 0;
+
+                                                            MarkScriptDirty();
+                                                            EnsureScriptSaved();
+                                                            RebuildShotList();
+                                                        }
+                                                    ),
+                                                    FCanExecuteAction::CreateLambda(
+                                                        [this, SceneId = CapturedSceneId]()
+                                                        {
+                                                            for (const FGASBlock& Block : CurrentScript.Blocks)
+                                                            {
+                                                                if (Block.Id == SceneId)
+                                                                {
+                                                                    return IsBlockingLevelOpen(Block.BlockingLevelPath);
+                                                                }
+                                                            }
+                                                            return false;
+                                                        }
+                                                    )
+                                                )
+                                            );
+
+                                            MenuBuilder.AddMenuSeparator();
+
+                                            MenuBuilder.AddMenuEntry(
+                                                FText::FromString(TEXT("Build All Sequences")),
+                                                FText::FromString(TEXT("Build sequences for all scenes with blocking currently loaded")),
+                                                FSlateIcon(),
+                                                FUIAction(
+                                                    FExecuteAction::CreateLambda(
+                                                        [this]()
+                                                        {
+                                                            TArray<FRenderedParagraph> Rendered =
+                                                                ScriptPanel->GetRenderedParagraphs();
+
+                                                            TArray<FGASShotListSceneRow> SceneRows;
+                                                            BuildShotListFromScriptV2(
+                                                                CurrentScript,
+                                                                CurrentScript.SceneNumbering,
+                                                                Rendered,
+                                                                SceneRows
+                                                            );
+
+                                                            int32 BuiltCount = 0;
+
+                                                            for (FGASBlock& Block : CurrentScript.Blocks)
+                                                            {
+                                                                if (Block.Type != EGASBlockType::SceneHeading)
+                                                                    continue;
+
+                                                                if (!IsBlockingLevelOpen(Block.BlockingLevelPath))
+                                                                    continue;
+
+                                                                ULevelSequence* SceneSequence =
+                                                                    GetOrCreateSceneSequence(Block);
+
+                                                                if (!SceneSequence) continue;
+
+                                                                AddCameraTracksToSceneSequence(
+                                                                    SceneSequence,
+                                                                    Block,
+                                                                    SceneRows
+                                                                );
+
+                                                                const FGASShotListSceneRow* FoundRow =
+                                                                    SceneRows.FindByPredicate(
+                                                                        [&Block](const FGASShotListSceneRow& Row)
+                                                                        {
+                                                                            return Row.SceneId == Block.Id;
+                                                                        }
+                                                                    );
+
+                                                                Block.bSequenceBuilt = true;
+                                                                Block.SequenceBuiltShotCount =
+                                                                    FoundRow ? FoundRow->Shots.Num() : 0;
+
+                                                                BuiltCount++;
+                                                            }
+
+                                                            if (BuiltCount > 0)
+                                                            {
+                                                                MarkScriptDirty();
+                                                                EnsureScriptSaved();
+                                                                RebuildShotList();
+                                                            }
                                                         }
                                                     )
                                                 )
@@ -6729,10 +7041,30 @@ void SGAS_ScriptTab::RebuildShotList()
                                                 FSlateIcon(),
                                                 FUIAction(
                                                     FExecuteAction::CreateLambda(
-                                                        [this, SceneId = Scene.SceneId]()
+                                                        [this, SceneId = CapturedSceneId]()
                                                         {
-                                                            this->PromoteNonBlockingShotsToBlocking(SceneId);
+                                                            // Warn if sequence already built
+                                                            for (const FGASBlock& Block : CurrentScript.Blocks)
+                                                            {
+                                                                if (Block.Id == SceneId && Block.bSequenceBuilt)
+                                                                {
+                                                                    const FText Title = FText::FromString(TEXT("Edit Blocking?"));
+                                                                    const FText Message = FText::FromString(TEXT("This scene has a built sequence.\n\nChanges to blocking may affect your shots and will mark the sequence as out of date.\n\nContinue?"));
 
+                                                                    EAppReturnType::Type Result = FMessageDialog::Open(
+                                                                        EAppMsgType::YesNo,
+                                                                        Message,
+                                                                        &Title
+                                                                    );
+
+                                                                    if (Result != EAppReturnType::Yes)
+                                                                        return;
+
+                                                                    break;
+                                                                }
+                                                            }
+
+                                                            this->PromoteNonBlockingShotsToBlocking(SceneId);
                                                             this->OnStartBlockingScene(SceneId);
                                                         }
                                                     )
@@ -6745,7 +7077,7 @@ void SGAS_ScriptTab::RebuildShotList()
                                                 FSlateIcon(),
                                                 FUIAction(
                                                     FExecuteAction::CreateLambda(
-                                                        [this, SceneId = Scene.SceneId]()
+                                                        [this, SceneId = CapturedSceneId]()
                                                         {
                                                             this->OpenCastWindowForScene(SceneId);
                                                         }
@@ -6759,7 +7091,7 @@ void SGAS_ScriptTab::RebuildShotList()
                                                 FSlateIcon(),
                                                 FUIAction(
                                                     FExecuteAction::CreateLambda(
-                                                        [this, SceneId = Scene.SceneId]()
+                                                        [this, SceneId = CapturedSceneId]()
                                                         {
                                                             this->OnDeleteBlockingScene(SceneId);
                                                         }
@@ -6896,6 +7228,13 @@ void SGAS_ScriptTab::RebuildShotList()
                     SNew(SSplitter)
                         .Orientation(Orient_Horizontal)
 
+                        // LOCK
+                        + SSplitter::Slot().Value(ColLock)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::GetEmpty())
+                        ]
+
                         // SHOT
                         + SSplitter::Slot().Value(ColScene)
                         [
@@ -6909,6 +7248,13 @@ void SGAS_ScriptTab::RebuildShotList()
                         [
                             SNew(STextBlock)
                                 .Text(FText::FromString(TEXT("TYPE")))
+                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
+                        ]
+                        // MOVE
+                        + SSplitter::Slot().Value(ColMove)
+                        [
+                            SNew(STextBlock)
+                                .Text(FText::FromString(TEXT("MOVE")))
                                 .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f))
                         ]
 
@@ -6963,15 +7309,70 @@ void SGAS_ScriptTab::RebuildShotList()
                     .AutoHeight()
                     .Padding(28.f, 2.f, 4.f, 2.f)
                     [
-                        SNew(SSplitter)
-                            .Orientation(Orient_Horizontal)
+                        SNew(SHorizontalBox)
 
-                            + SSplitter::Slot().Value(ColScene)
+                            // Lock toggle
+                            + SHorizontalBox::Slot()
+                            .MaxWidth(24.f)
+                            .AutoWidth()
+                            .VAlign(VAlign_Top)
+                            .Padding(0.f, 2.f)
+                            [
+                                SNew(SCheckBox)
+                                    .IsChecked_Lambda([this, ShotId = Shot.ShotId]()
+                                        {
+                                            for (const FGASMarker& Marker : CurrentScript.Markers)
+                                            {
+                                                FGuid MarkerIdAsGuid;
+                                                FGuid::Parse(Marker.Id, MarkerIdAsGuid);
+                                                if (MarkerIdAsGuid == ShotId)
+                                                {
+                                                    return Marker.SpatialState == EGASShotSpatialState::Locked
+                                                        ? ECheckBoxState::Checked
+                                                        : ECheckBoxState::Unchecked;
+                                                }
+                                            }
+                                            return ECheckBoxState::Unchecked;
+                                        })
+                                    .OnCheckStateChanged_Lambda([this, ShotId = Shot.ShotId](ECheckBoxState NewState)
+                                        {
+                                            for (FGASMarker& Marker : CurrentScript.Markers)
+                                            {
+                                                FGuid MarkerIdAsGuid;
+                                                FGuid::Parse(Marker.Id, MarkerIdAsGuid);
+                                                if (MarkerIdAsGuid == ShotId)
+                                                {
+
+                                                    if (NewState == ECheckBoxState::Checked)
+                                                        Marker.SetSpatialState(EGASShotSpatialState::Locked);
+                                                    else
+                                                        Marker.SetSpatialState(EGASShotSpatialState::CameraPlaced);
+
+                                                    MarkScriptDirty();
+                                                    RebuildShotList();
+                                                    break;
+                                                }
+                                            }
+                                        })
+                            ]
+
+                        // Shot number
+                        + SHorizontalBox::Slot()
+                            .MaxWidth(50.f)
+                            .AutoWidth()
+                            .VAlign(VAlign_Top)
+                            .Padding(4.f, 2.f)
                             [
                                 SNew(STextBlock)
                                     .Text(FText::FromString(Shot.ShotNumber))
                             ]
-                            + SSplitter::Slot().Value(ColType)
+
+                            // Type
+                            + SHorizontalBox::Slot()
+                            .MaxWidth(40.f)
+                            .AutoWidth()
+                            .VAlign(VAlign_Top)
+                            .Padding(4.f, 2.f)
                             [
                                 SNew(STextBlock)
                                     .Text(
@@ -6980,7 +7381,29 @@ void SGAS_ScriptTab::RebuildShotList()
                                         : FText::FromString(Shot.ShotType)
                                     )
                             ]
-                            + SSplitter::Slot().Value(ColLength)
+
+                        // Move
+                        + SHorizontalBox::Slot()
+                            .MaxWidth(36.f)
+                            .AutoWidth()
+                            .VAlign(VAlign_Top)
+                            .Padding(4.f, 2.f)
+                            [
+                                SNew(STextBlock)
+                                    .Text(Shot.bCameraMoves
+                                        ? FText::FromString(TEXT("✓"))
+                                        : FText::FromString(TEXT("—")))
+                                    .ColorAndOpacity(Shot.bCameraMoves
+                                        ? FLinearColor(0.2f, 1.f, 0.2f, 1.f)
+                                        : FLinearColor(0.4f, 0.4f, 0.4f, 1.f))
+                            ]
+
+                        // 1/8
+                        + SHorizontalBox::Slot()
+                            .MaxWidth(40.f)
+                            .AutoWidth()
+                            .VAlign(VAlign_Top)
+                            .Padding(4.f, 2.f)
                             [
                                 SNew(STextBlock)
                                     .Text(
@@ -6989,23 +7412,32 @@ void SGAS_ScriptTab::RebuildShotList()
                                         : FText::FromString(TEXT("—"))
                                     )
                             ]
-                            + SSplitter::Slot().Value(ColDes)
-                                [
-                                    SNew(SEditableTextBox)
-                                        .Text(FText::FromString(Shot.Description))
-                                        .OnTextCommitted_Lambda(
-                                            [this, Shot](const FText& NewText, ETextCommit::Type)
-                                            {
-                                                this->UpdateShotDescription(
-                                                    Shot.ShotId,
-                                                    NewText.ToString()
-                                                );
 
-                                            }
-                                        )
-                                ]
+                        // Description
+                        + SHorizontalBox::Slot()
+                            .FillWidth(1.5f)
+                            .Padding(4.f, 2.f)
+                            [
+                                SNew(SMultiLineEditableTextBox)
+                                    .Text(FText::FromString(Shot.Description))
+                                    .AutoWrapText(true)
+                                    .OnTextCommitted_Lambda(
+                                        [this, Shot](const FText& NewText, ETextCommit::Type)
+                                        {
+                                            this->UpdateShotDescription(
+                                                Shot.ShotId,
+                                                NewText.ToString()
+                                            );
+                                        }
+                                    )
+                            ]
 
-                            + SSplitter::Slot().Value(ColLens)
+                        // Lens
+                        + SHorizontalBox::Slot()
+                            .MaxWidth(50.f)
+                            .AutoWidth()
+                            .VAlign(VAlign_Top)
+                            .Padding(4.f, 2.f)
                             [
                                 SNew(STextBlock)
                                     .Text(
@@ -7015,15 +7447,27 @@ void SGAS_ScriptTab::RebuildShotList()
                                     )
                             ]
 
-                            + SSplitter::Slot().Value(ColCamera)
+                        // Camera
+                        + SHorizontalBox::Slot()
+                            .MaxWidth(80.f)
+                            .AutoWidth()
+                            .VAlign(VAlign_Top)
+                            .Padding(4.f, 2.f)
                             [
-                                SNew(STextBlock).Text(FText::FromString(Shot.Camera))
+                                SNew(STextBlock)
+                                    .Text(
+                                        Shot.Camera.IsEmpty()
+                                        ? FText::FromString(TEXT("—"))
+                                        : FText::FromString(Shot.Camera)
+                                    )
+                                    .WrapTextAt(78.f)
                             ]
 
-
-                            + SSplitter::Slot().Value(ColNotes)
+                        // Notes
+                        + SHorizontalBox::Slot()
+                            .FillWidth(1.f)
+                            .Padding(4.f, 2.f)
                             [
-
                                 SNew(SMultiLineEditableTextBox)
                                     .Text(FText::FromString(Shot.Notes))
                                     .AutoWrapText(true)
@@ -7527,12 +7971,38 @@ void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
         bPendingAutoOpenCastWindow = false;
 
         const FString SceneId = ActiveBlockingSceneId.ToString();
-
         ClosePendingActionWindow();
 
         if (!SceneId.IsEmpty())
         {
+            if (GActiveBlockingSequence)
+            {
+                MuteNonBlockingTracksForEditing(GActiveBlockingSequence, GEditor->GetEditorWorldContext().World());
+            }
+
             OpenCastWindowForScene(SceneId);
+        }
+
+        // Open scene sequence AFTER level is confirmed loaded
+        if (GActiveBlockingSequence)
+        {
+            const FString SeqPath = GActiveBlockingSequence->GetPathName();
+            FTSTicker::GetCoreTicker().AddTicker(
+                FTickerDelegate::CreateLambda([this, SeqPath](float) -> bool
+                    {
+                        ULevelSequence* Seq =
+                            LoadObject<ULevelSequence>(nullptr, *SeqPath);
+                        if (Seq && GEditor)
+                        {
+                            UAssetEditorSubsystem* EdSub =
+                                GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+                            if (EdSub)
+                                EdSub->OpenEditorForAsset(Seq);
+                        }
+                        return false;
+                    }),
+                0.5f
+            );
         }
 
         return;
@@ -7916,6 +8386,12 @@ void SGAS_ScriptTab::HandleShotCameraMoved(const FString& MarkerId, const FTrans
     }
 
     if (!Found->IsBlocking())
+    {
+        return;
+    }
+
+    // Respect shot lock — don't update camera if shot is locked
+    if (Found->SpatialState == EGASShotSpatialState::Locked)
     {
         return;
     }

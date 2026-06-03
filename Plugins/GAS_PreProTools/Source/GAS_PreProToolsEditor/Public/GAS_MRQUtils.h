@@ -2,6 +2,13 @@
 
 #include "CoreMinimal.h"
 
+UENUM()
+enum class EGASRenderFormat : uint8
+{
+    PNG,
+    EXR
+};
+
 class ULevelSequence;
 class UGASPreProProject;
 
@@ -34,7 +41,7 @@ public:
      * @param Project        The active GAS project asset
      * @return true if job was successfully created and window opened
      */
-    static bool SendToRenderQueue(UGASPreProProject* Project);
+    static bool SendToRenderQueue(UGASPreProProject* Project, EGASRenderFormat Format = EGASRenderFormat::PNG);
 
     /**
      * Derives the film-level master sequence path from project name.

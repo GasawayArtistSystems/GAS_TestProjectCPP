@@ -498,8 +498,10 @@ private:
     float ColSet = 0.50f;
     float ColNotes = 1.0f;
 
+    float ColLock = 0.06f;
     float ColShot = 0.10f;
     float ColType = 0.10f;
+    float ColMove = 0.08f;
     float ColDes = 0.60f;
     float ColLens = 0.10f;
     float ColCamera = 0.20f;

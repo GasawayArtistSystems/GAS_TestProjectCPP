@@ -2594,7 +2594,7 @@ int32 SGASScriptPanel::OnPaint(
                         (Shot->Color.B * 0.114f);
 
                     const FLinearColor TextColor =
-                        (Luminance > 0.6f)
+                        (Luminance > 0.5f)
                         ? FLinearColor::Black
                         : FLinearColor::White;
 
@@ -3741,61 +3741,6 @@ FReply SGASScriptPanel::OnMouseMove(
                 ShotHoverTickerHandle.Reset();
             }
 
-            if (!HoveredShotMarkerId.IsEmpty())
-            {
-                // Delay before showing tooltip
-                ShotHoverTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-                    FTickerDelegate::CreateLambda([this](float DeltaTime) -> bool
-                        {
-                            ShotHoverDelayAccum += DeltaTime;
-                            if (ShotHoverDelayAccum < 0.4f)
-                                return true; // keep ticking
-
-                            // Show tooltip now
-                            ShotHoverTickerHandle.Reset();
-
-                            if (ShotHoverPendingShotId.IsEmpty() || bShotIntentPopupOpen)
-                                return false;
-
-                            ShotHoverTooltipShotId = ShotHoverPendingShotId;
-
-                            if (ShotHoverTooltipWindow.IsValid())
-                            {
-                                ShotHoverTooltipWindow->RequestDestroyWindow();
-                                ShotHoverTooltipWindow.Reset();
-                            }
-
-                            ShotHoverTooltipWindow =
-                                SNew(SWindow)
-                                .SizingRule(ESizingRule::Autosized)
-                                .SupportsMaximize(false)
-                                .SupportsMinimize(false)
-                                .HasCloseButton(false)
-                                .IsTopmostWindow(true)
-                                .FocusWhenFirstShown(false);
-
-                            ShotHoverTooltipWindow->SetContent(
-                                SNew(SBorder)
-                                .Padding(FMargin(6.f, 2.f))
-                                .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-                                .BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.85f))
-                                [
-                                    SNew(STextBlock)
-                                        .Text(this, &SGASScriptPanel::GetHoveredShotTooltipText)
-                                        .Font(FAppStyle::GetFontStyle("SmallFont"))
-                                        .ColorAndOpacity(FLinearColor::White)
-                                ]
-                            );
-
-                            FSlateApplication::Get().AddWindow(
-                                ShotHoverTooltipWindow.ToSharedRef(),
-                                true
-                            );
-
-                            return false; // stop ticking
-                        })
-                );
-            }
         }
 
         // Reposition every move while hovering so it stays pill-anchored during scroll/drag

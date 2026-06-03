@@ -102,6 +102,9 @@ struct FGASShotIntent
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
     EGASCameraMount CameraMount = EGASCameraMount::LockedOff;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bCameraMoves = false;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="GAS")
     EGASFramingBias Framing = EGASFramingBias::Center;
 

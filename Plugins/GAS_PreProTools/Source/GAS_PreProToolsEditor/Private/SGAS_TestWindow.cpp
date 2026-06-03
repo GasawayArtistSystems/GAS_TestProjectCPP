@@ -270,18 +270,30 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                         .ToolTipText(FText::FromString(TEXT("Send to Render Queue")))
                                         .OnClicked_Lambda([this]()
                                             {
-                                                if (ScriptTabWidget.IsValid())
-                                                {
-                                                    FGAS_MRQUtils::SendToRenderQueue(
-                                                        ScriptTabWidget->GetActiveProject()
-                                                    );
-                                                }
+                                                if (!ScriptTabWidget.IsValid())
+                                                    return FReply::Handled();
+
+                                                // Ask director for output format
+                                                const FText Title = FText::FromString(TEXT("Choose Output Format"));
+                                                const FText Message = FText::FromString(TEXT("Select render output format:\n\nPNG — standard quality, smaller files\nEXR — maximum quality, larger files"));
+
+                                                EAppReturnType::Type Result = FMessageDialog::Open(
+                                                    EAppMsgType::YesNo,
+                                                    Message,
+                                                    &Title
+                                                );
+
+                                                EGASRenderFormat Format = (Result == EAppReturnType::Yes)
+                                                    ? EGASRenderFormat::PNG
+                                                    : EGASRenderFormat::EXR;
+
+                                                FGAS_MRQUtils::SendToRenderQueue(
+                                                    ScriptTabWidget->GetActiveProject(),
+                                                    Format
+                                                );
+
                                                 return FReply::Handled();
                                             })
-                                        [
-                                            SNew(SImage)
-                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.TracksIcon"))
-                                        ]
                                 ]
                         ]
 
