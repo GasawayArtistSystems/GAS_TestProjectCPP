@@ -291,7 +291,8 @@ private:
         int32 InsertIndex,
         float ShotStartScriptY,
         float ShotEndScriptY,
-        float CommitX
+        float CommitX,
+        bool bSkipBlockingCheck = false
     );
 
 

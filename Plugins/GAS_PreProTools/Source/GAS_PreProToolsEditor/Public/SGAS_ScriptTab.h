@@ -306,6 +306,11 @@ public:
         return ActiveProject;
     }
 
+    bool IsBlockingActive() const { return bBlockingActive; }
+    FGuid GetActiveBlockingSceneId() const { return ActiveBlockingSceneId; }
+    void PublicPromoteNonBlockingShotsToBlocking(const FString& SceneId) { PromoteNonBlockingShotsToBlocking(SceneId); }
+    void PublicOnStartBlockingScene(const FString& SceneId) { OnStartBlockingScene(SceneId); }
+
 private:
 
     // --------------------------------------------------
@@ -380,6 +385,7 @@ private:
     FString GetAuthoritativeScriptJsonPath() const;
     void LoadScriptFromJsonIfExists();
     
+    void OnMapChanged(uint32 MapChangeFlags);
 
     bool TickShotModeResume(float DeltaTime);
 

@@ -1770,7 +1770,8 @@ void SGASScriptPanel::CommitShotAtParagraph(
     int32 InsertIndex,
     float ShotStartLocalY,
     float ShotEndLocalY,
-    float CommitX
+    float CommitX,
+    bool bSkipBlockingCheck
 )
 {
 
@@ -1859,6 +1860,127 @@ void SGASScriptPanel::CommitShotAtParagraph(
             TEXT("[BLOCKING DETECT] bHasBlocking=%d"),
             bHasBlocking ? 1 : 0
         );
+    }
+
+    // --------------------------------------------------
+    // If scene has blocking but we're not currently blocking it
+    // → ask the user what they want to do
+    // --------------------------------------------------
+    TSharedPtr<SGAS_ScriptTab> TabPtr = OwnerScriptTab.Pin();
+
+    const bool bIsBlockingThisScene =
+        TabPtr.IsValid() &&
+        TabPtr->IsBlockingActive() &&
+        TabPtr->GetActiveBlockingSceneId() == FGuid(SceneBlockId);
+
+    if (bHasBlocking && !bIsBlockingThisScene && !bSkipBlockingCheck)
+    {
+        const FText Title = FText::FromString(TEXT("This scene has blocking."));
+        const FText Message = FText::FromString(
+            TEXT("This scene has a blocking level set up.\n\nHow do you want to add this shot?"));
+
+        TSharedRef<SWindow> PopupWindow = SNew(SWindow)
+            .Title(Title)
+            .ClientSize(FVector2D(400.f, 160.f))
+            .SupportsMaximize(false)
+            .SupportsMinimize(false)
+            .SizingRule(ESizingRule::FixedSize);
+
+        // Capture what we need
+        const FString CapturedSceneId = SceneBlockId;
+        const int32 CapturedSceneParaIndex = SceneParaIndexResolved;
+        const float CapturedStartY = ShotStartLocalY;
+        const float CapturedEndY = ShotEndLocalY;
+        const float CapturedX = CommitX;
+        const int32 CapturedInsertIndex = InsertIndex;
+        TWeakPtr<SGASScriptPanel> WeakPanel = SharedThis(this);
+        TSharedPtr<SWindow> PopupWindowPtr = PopupWindow;
+
+        PopupWindow->SetContent(
+            SNew(SBorder)
+            .Padding(16.f)
+            [
+                SNew(SVerticalBox)
+
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.f, 0.f, 0.f, 12.f)
+                    [
+                        SNew(STextBlock)
+                            .Text(Message)
+                            .AutoWrapText(true)
+                    ]
+
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(SHorizontalBox)
+
+                            + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .Padding(0.f, 0.f, 8.f, 0.f)
+                            [
+                                SNew(SButton)
+                                    .Text(FText::FromString(TEXT("Edit Blocking")))
+                                    .OnClicked_Lambda([WeakPanel, CapturedSceneId, PopupWindowPtr]()
+                                        {
+                                            PopupWindowPtr->RequestDestroyWindow();
+                                            if (WeakPanel.IsValid() && WeakPanel.Pin()->OwnerScriptTab.IsValid())
+                                            {
+                                                TSharedPtr<SGAS_ScriptTab> T = WeakPanel.Pin()->OwnerScriptTab.Pin();
+                                                T->PublicPromoteNonBlockingShotsToBlocking(CapturedSceneId);
+                                                T->PublicOnStartBlockingScene(CapturedSceneId);
+                                            }
+                                            return FReply::Handled();
+                                        })
+                            ]
+
+                        + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            .Padding(0.f, 0.f, 8.f, 0.f)
+                            [
+                                SNew(SButton)
+                                    .Text(FText::FromString(TEXT("Add Anyway")))
+                                    .OnClicked_Lambda([WeakPanel, CapturedSceneParaIndex, CapturedInsertIndex, CapturedStartY, CapturedEndY, CapturedX, PopupWindowPtr]()
+                                        {
+                                            PopupWindowPtr->RequestDestroyWindow();
+                                            if (WeakPanel.IsValid())
+                                            {
+                                                WeakPanel.Pin()->CommitShotAtParagraph(
+                                                    CapturedSceneParaIndex,
+                                                    CapturedInsertIndex,
+                                                    CapturedStartY,
+                                                    CapturedEndY,
+                                                    CapturedX,
+                                                    true  // skip the check
+                                                );
+                                            }
+                                            return FReply::Handled();
+                                        })
+                            ]
+
+                        + SHorizontalBox::Slot()
+                            .AutoWidth()
+                            [
+                                SNew(SButton)
+                                    .Text(FText::FromString(TEXT("Cancel")))
+                                    .OnClicked_Lambda([PopupWindowPtr]()
+                                        {
+                                            PopupWindowPtr->RequestDestroyWindow();
+                                            return FReply::Handled();
+                                        })
+                            ]
+                    ]
+            ]
+        );
+
+        TSharedPtr<SWindow> ParentWindow = FSlateApplication::Get().GetActiveTopLevelWindow();
+        if (ParentWindow.IsValid())
+            FSlateApplication::Get().AddWindowAsNativeChild(PopupWindow, ParentWindow.ToSharedRef());
+        else
+            FSlateApplication::Get().AddWindow(PopupWindow);
+
+        return; // bail — don't create the marker yet
     }
 
 
@@ -2821,46 +2943,20 @@ int32 SGASScriptPanel::OnPaint(
     // ------------------------------------------------------------
     TSharedPtr<SGAS_ScriptTab> Tab = OwnerScriptTab.Pin();
     const bool bShotModeActive = Tab.IsValid() && Tab->bShotAddArmed;
-
     if (bShotModeActive && ShotGhostY >= 0.f)
     {
-        const float IconY = ShotGhostY - ScrollOffsetY;
-
-        const FVector2D IconPos(
-            10.f,          // left gutter
-            IconY - 10.f   // center icon on cursor
-        );
-
-        // Camera icon
-        FSlateDrawElement::MakeBox(
-            OutDrawElements,
-            LayerId + 20,
-            AllottedGeometry.ToPaintGeometry(
-                IconPos,
-                FVector2D(20.f, 20.f)
-            ),
-            FGAS_PreProToolsStyle::Get().GetBrush("GAS.CameraIcon"),
-            ESlateDrawEffect::None,
-            FLinearColor(0.25f, 0.6f, 1.f, 0.9f)
-        );
-
         // --------------------------------------------------------
         // Live shot line preview (while LMB held) DONE
         // --------------------------------------------------------
         if (bIsShotRangeDragging && ShotGhostY >= 0.f)
         {
             const float LineX = ShotRangeStartX;
-
             const float StartY = ShotRangeStartY - ScrollOffsetY;
             const float EndY = ShotGhostY;
-
             const float TopY =
                 FMath::Min(StartY, EndY);
-
             const float BottomY =
                 FMath::Max(StartY, EndY);
-
-
             FSlateDrawElement::MakeBox(
                 OutDrawElements,
                 LayerId + 19,

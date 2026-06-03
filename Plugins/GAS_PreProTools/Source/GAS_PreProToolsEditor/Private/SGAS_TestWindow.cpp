@@ -12,6 +12,7 @@
 
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SSeparator.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboButton.h"
@@ -93,6 +94,28 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                         ]
                                 ]
                         ]
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(0.f)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                .HAlign(HAlign_Center)
+                                .VAlign(VAlign_Center)
+                                .ToolTipText(FText::FromString(TEXT("Save Script")))
+                                .OnClicked_Lambda([this]()
+                                    {
+                                        if (ScriptTabWidget.IsValid())
+                                        {
+                                            ScriptTabWidget->OnSaveScript();
+                                        }
+                                        return FReply::Handled();
+                                    })
+                                [
+                                    SNew(SImage)
+                                        .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SaveIcon"))
+                                ]
+                        ]
 
                     + SHorizontalBox::Slot()
                         .AutoWidth()
@@ -154,6 +177,94 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                 [
                                     SNew(SImage)
                                         .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.LensIcon_40"))
+                                ]
+                        ]
+                    // --- Vertical Separator ---
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(8.f, 4.f)
+                        .VAlign(VAlign_Fill)
+                        [
+                            SNew(SSeparator)
+                                .Orientation(Orient_Vertical)
+                                .Thickness(1.f)
+                        ]
+
+                        // --- Script Tab ---
+                        + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Center)
+                        .Padding(4.f, 0.f)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                .OnClicked_Lambda([this]()
+                                    {
+                                        SetActiveTab(EGASMainTab::Script);
+                                        return FReply::Handled();
+                                    })
+                                [
+                                    SNew(STextBlock)
+                                        .Text(FText::FromString(TEXT("Script")))
+                                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+                                        .ColorAndOpacity_Lambda([this]()
+                                            {
+                                                return ActiveTab == EGASMainTab::Script
+                                                    ? FLinearColor(1.f, 0.8f, 0.2f, 1.f)
+                                                    : FLinearColor(0.7f, 0.7f, 0.7f, 1.f);
+                                            })
+                                ]
+                        ]
+
+                    // --- Shot List Tab ---
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Center)
+                        .Padding(4.f, 0.f)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                .OnClicked_Lambda([this]()
+                                    {
+                                        SetActiveTab(EGASMainTab::ShotList);
+                                        return FReply::Handled();
+                                    })
+                                [
+                                    SNew(STextBlock)
+                                        .Text(FText::FromString(TEXT("Shot List")))
+                                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+                                        .ColorAndOpacity_Lambda([this]()
+                                            {
+                                                return ActiveTab == EGASMainTab::ShotList
+                                                    ? FLinearColor(1.f, 0.8f, 0.2f, 1.f)
+                                                    : FLinearColor(0.7f, 0.7f, 0.7f, 1.f);
+                                            })
+                                ]
+                        ]
+
+                    // --- Director View Tab ---
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .VAlign(VAlign_Center)
+                        .Padding(4.f, 0.f)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                .OnClicked_Lambda([this]()
+                                    {
+                                        SetActiveTab(EGASMainTab::DirectorView);
+                                        return FReply::Handled();
+                                    })
+                                [
+                                    SNew(STextBlock)
+                                        .Text(FText::FromString(TEXT("Director View")))
+                                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+                                        .ColorAndOpacity_Lambda([this]()
+                                            {
+                                                return ActiveTab == EGASMainTab::DirectorView
+                                                    ? FLinearColor(1.f, 0.8f, 0.2f, 1.f)
+                                                    : FLinearColor(0.7f, 0.7f, 0.7f, 1.f);
+                                            })
                                 ]
                         ]
 
@@ -300,81 +411,13 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
 
 
                 ]
-                // -------------------------------------------------------
-// VIEW TAB BAR
-// -------------------------------------------------------
-                +SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.f)
-                    [
-                        SNew(SBorder)
-                            .BorderImage(FAppStyle::Get().GetBrush("NoBrush"))
-                            .Padding(FMargin(4.f, 2.f))
-                            [
-                                SNew(SHorizontalBox)
 
-                                    + SHorizontalBox::Slot()
-                                    .AutoWidth()
-                                    .Padding(0.f, 0.f, 2.f, 0.f)
-                                    [
-                                        SNew(SButton)
-                                            .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                                            .OnClicked_Lambda([this]()
-                                                {
-                                                    SetActiveTab(EGASMainTab::Script);
-                                                    return FReply::Handled();
-                                                })
-                                            [
-                                                SNew(STextBlock)
-                                                    .Text(FText::FromString(TEXT("Script")))
-                                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
-                                            ]
-                                    ]
-
-                                + SHorizontalBox::Slot()
-                                    .AutoWidth()
-                                    .Padding(0.f, 0.f, 2.f, 0.f)
-                                    [
-                                        SNew(SButton)
-                                            .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                                            .OnClicked_Lambda([this]()
-                                                {
-                                                    SetActiveTab(EGASMainTab::ShotList);
-                                                    return FReply::Handled();
-                                                })
-                                            [
-                                                SNew(STextBlock)
-                                                    .Text(FText::FromString(TEXT("Shot List")))
-                                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
-                                            ]
-                                    ]
-
-                                + SHorizontalBox::Slot()
-                                    .AutoWidth()
-                                    .Padding(0.f, 0.f, 2.f, 0.f)
-                                    [
-                                        SNew(SButton)
-                                            .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                                            .OnClicked_Lambda([this]()
-                                                {
-                                                    SetActiveTab(EGASMainTab::DirectorView);
-                                                    return FReply::Handled();
-                                                })
-                                            [
-                                                SNew(STextBlock)
-                                                    .Text(FText::FromString(TEXT("Director View")))
-                                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
-                                            ]
-                                    ]
-                            ]
-                    ]
                 + SVerticalBox::Slot()
                     .FillHeight(1.f)
                     .Padding(1.f)
                     [
                         SNew(SOverlay)
 
-                            // --- TINT LAYER ---
                             + SOverlay::Slot()
                             [
                                 SNew(SBorder)
@@ -382,24 +425,27 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                     .BorderBackgroundColor_Lambda([this]()
                                         {
                                             if (GASBlockingAccess::IsBlockingActive())
-                                            {
-                                                return FLinearColor(0.0f, 0.3f, 1.0f, 0.06f); // 6% blue
-                                            }
-
+                                                return FLinearColor(0.0f, 0.3f, 1.0f, 0.06f);
                                             return FLinearColor::Transparent;
                                         })
                             ]
 
-                        // --- CONTENT LAYER ---
                         + SOverlay::Slot()
                             [
-                                SAssignNew(ContentBox, SBox)
+                                SNew(SVerticalBox)
+
+                                // --- CONTENT ---
+                                + SVerticalBox::Slot()
+                                    .FillHeight(1.f)
                                     [
-                                        SAssignNew(ScriptTabWidget, SGAS_ScriptTab)
+                                        SAssignNew(ContentBox, SBox)
+                                            [
+                                                SAssignNew(ScriptTabWidget, SGAS_ScriptTab)
+                                            ]
                                     ]
                             ]
                     ]
-        ];
+                ];
         WeakScriptTab = ScriptTabWidget;
         ScriptTabWidget->SetMainToolWindow(SharedThis(this));
 
