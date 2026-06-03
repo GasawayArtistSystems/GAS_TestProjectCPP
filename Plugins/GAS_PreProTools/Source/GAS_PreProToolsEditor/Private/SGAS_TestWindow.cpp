@@ -1,5 +1,6 @@
 ﻿#include "SGAS_TestWindow.h"
 #include "SGAS_ScriptTab.h"
+#include "SGAS_DirectorView.h"
 #include "GAS_ShotListBuilder.h"
 #include "GAS_ShotListTypes.h"
 #include "SGASScriptPanel.h"
@@ -299,7 +300,74 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
 
 
                 ]
+                // -------------------------------------------------------
+// VIEW TAB BAR
+// -------------------------------------------------------
+                +SVerticalBox::Slot()
+                    .AutoHeight()
+                    .Padding(0.f)
+                    [
+                        SNew(SBorder)
+                            .BorderImage(FAppStyle::Get().GetBrush("NoBrush"))
+                            .Padding(FMargin(4.f, 2.f))
+                            [
+                                SNew(SHorizontalBox)
 
+                                    + SHorizontalBox::Slot()
+                                    .AutoWidth()
+                                    .Padding(0.f, 0.f, 2.f, 0.f)
+                                    [
+                                        SNew(SButton)
+                                            .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                            .OnClicked_Lambda([this]()
+                                                {
+                                                    SetActiveTab(EGASMainTab::Script);
+                                                    return FReply::Handled();
+                                                })
+                                            [
+                                                SNew(STextBlock)
+                                                    .Text(FText::FromString(TEXT("Script")))
+                                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+                                            ]
+                                    ]
+
+                                + SHorizontalBox::Slot()
+                                    .AutoWidth()
+                                    .Padding(0.f, 0.f, 2.f, 0.f)
+                                    [
+                                        SNew(SButton)
+                                            .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                            .OnClicked_Lambda([this]()
+                                                {
+                                                    SetActiveTab(EGASMainTab::ShotList);
+                                                    return FReply::Handled();
+                                                })
+                                            [
+                                                SNew(STextBlock)
+                                                    .Text(FText::FromString(TEXT("Shot List")))
+                                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+                                            ]
+                                    ]
+
+                                + SHorizontalBox::Slot()
+                                    .AutoWidth()
+                                    .Padding(0.f, 0.f, 2.f, 0.f)
+                                    [
+                                        SNew(SButton)
+                                            .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                            .OnClicked_Lambda([this]()
+                                                {
+                                                    SetActiveTab(EGASMainTab::DirectorView);
+                                                    return FReply::Handled();
+                                                })
+                                            [
+                                                SNew(STextBlock)
+                                                    .Text(FText::FromString(TEXT("Director View")))
+                                                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+                                            ]
+                                    ]
+                            ]
+                    ]
                 + SVerticalBox::Slot()
                     .FillHeight(1.f)
                     .Padding(1.f)
@@ -333,6 +401,7 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                     ]
         ];
         WeakScriptTab = ScriptTabWidget;
+        ScriptTabWidget->SetMainToolWindow(SharedThis(this));
 
 
 
@@ -345,31 +414,34 @@ void SGAS_TestWindow::SetActiveTab(EGASMainTab NewTab)
 {
     ActiveTab = NewTab;
 
-    // We no longer swap widgets inside ContentBox.
-    // ContentBox always contains ScriptTabWidget.
-    if (!ScriptTabWidget.IsValid())
-    {
+    if (!ScriptTabWidget.IsValid() || !ContentBox.IsValid())
         return;
-    }
 
-    // For now: only control whether the right-side Shot List panel is visible.
-    // Script is always visible.
     switch (ActiveTab)
     {
     case EGASMainTab::Script:
         ScriptTabWidget->SetShowShotList(false);
+        ContentBox->SetContent(ScriptTabWidget.ToSharedRef());
         break;
 
     case EGASMainTab::ShotList:
         ScriptTabWidget->SetShowShotList(true);
+        ContentBox->SetContent(ScriptTabWidget.ToSharedRef());
+        break;
+
+    case EGASMainTab::DirectorView:
+        ScriptTabWidget->SetShowShotList(false);
+        if (!DirectorViewWidget.IsValid())
+        {
+            SAssignNew(DirectorViewWidget, SGAS_DirectorView);
+        }
+        ContentBox->SetContent(DirectorViewWidget.ToSharedRef());
         break;
 
     default:
-        // We'll wire Shots/Edit later.
         break;
     }
 }
-
 
 
 
@@ -507,5 +579,41 @@ void SGAS_TestWindow::RefreshShotList()
     if (ShotListView.IsValid())
     {
         ShotListView->RequestListRefresh();
+    }
+}
+
+// ================================================================
+// DIRECTOR VIEW
+// ================================================================
+
+void SGAS_TestWindow::SwitchToDirectorView(const FString& SceneId)
+{
+    if (!ContentBox.IsValid())
+        return;
+
+    if (!DirectorViewWidget.IsValid())
+    {
+        SAssignNew(DirectorViewWidget, SGAS_DirectorView);
+    }
+
+    // Pass scene ID AND script pointer
+    if (ScriptTabWidget.IsValid())
+    {
+        DirectorViewWidget->SetActiveScene(
+            SceneId,
+            &ScriptTabWidget->GetScript()
+        );
+        ScriptTabWidget->SetShowShotList(false);
+    }
+
+    ContentBox->SetContent(DirectorViewWidget.ToSharedRef());
+    ActiveTab = EGASMainTab::DirectorView;
+}
+
+void SGAS_TestWindow::RefreshDirectorViewCast()
+{
+    if (DirectorViewWidget.IsValid() && ScriptTabWidget.IsValid())
+    {
+        DirectorViewWidget->RefreshCast(&ScriptTabWidget->GetScript());
     }
 }

@@ -5024,6 +5024,14 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
         return;
     }
 
+    // Switch to Director View immediately — before cast window or map load
+    if (MainToolWindow.IsValid())
+    {
+        MainToolWindow.Pin()->SwitchToDirectorView(SceneId);
+    }
+
+
+
     if (SceneHasBlockingShots(SceneId))
     {
         UE_LOG(
@@ -5659,9 +5667,7 @@ void SGAS_ScriptTab::OpenCastWindowForScene(const FString& SceneId)
 void SGAS_ScriptTab::OnBlockingCastModified()
 {
     UE_LOG(LogGASPrePro, Warning, TEXT("Blocking cast modified — saving"));
-
     bIsUpdatingCast = true;
-
     MarkScriptDirty();
     SaveScriptToJson();
 
@@ -5679,6 +5685,12 @@ void SGAS_ScriptTab::OnBlockingCastModified()
     }
 
     bIsUpdatingCast = false;
+
+    // Refresh Director View cast list
+    if (MainToolWindow.IsValid())
+    {
+        MainToolWindow.Pin()->RefreshDirectorViewCast();
+    }
 }
 
 void SGAS_ScriptTab::SpawnSceneCast(FGASBlock* SceneBlock)

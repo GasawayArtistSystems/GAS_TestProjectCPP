@@ -6,22 +6,20 @@
 #include "SGAS_ScriptTab.h"
 #include "Delegates/Delegate.h"
 
-
-
 enum class EGASMainTab : uint8
 {
     Script,
     ShotList,
+    DirectorView,
     Shots,
     Edit
 };
 
 DECLARE_DELEGATE_OneParam(FOnSceneSelected, int32 /*SceneBlockIndex*/);
 
-
 class UGASPreProProject;
 struct FGASScript;
-
+class SGAS_DirectorView;
 
 class SGAS_TestWindow : public SCompoundWidget
 {
@@ -39,12 +37,15 @@ public:
     FOnSceneSelected OnSceneSelected;
     void RefreshShotList();
 
+    void SwitchToDirectorView(const FString& SceneId);
+    void RefreshDirectorViewCast();
 
 private:
     void SetActiveTab(EGASMainTab NewTab);
 
     TSharedRef<SWidget> CreateScriptTabContent();
     TSharedRef<SWidget> CreateShotListTabContent();
+    TSharedRef<SWidget> CreateDirectorViewContent();
     TSharedRef<SWidget> CreateShotsTabContent();
     TSharedRef<SWidget> CreateEditTabContent();
 
@@ -52,14 +53,11 @@ private:
 
     TWeakPtr<SGAS_ScriptTab> WeakScriptTab;
 
-
-    // Where the active tab's content is placed
     TSharedPtr<class SBox> ContentBox;
 
     FText GetScriptTabLabel() const;
 
     UGASPreProProject* ActiveProject = nullptr;
-
     const FGASScript* Script = nullptr;
 
     TArray<TSharedPtr<FGASShotDefinitionListRow>> ShotListItems;
@@ -69,9 +67,8 @@ private:
     );
 
     TSharedPtr<SGAS_ScriptTab> ScriptTabWidget;
-
+    TSharedPtr<SGAS_DirectorView> DirectorViewWidget;
     TSharedPtr<SListView<TSharedPtr<FGASShotDefinitionListRow>>> ShotListView;
 
     FReply OnSendToRenderQueue();
 };
-
