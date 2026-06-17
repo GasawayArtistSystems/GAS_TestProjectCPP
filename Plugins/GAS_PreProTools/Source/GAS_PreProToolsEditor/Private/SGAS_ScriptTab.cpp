@@ -6642,7 +6642,36 @@ void SGAS_ScriptTab::RebuildShotList()
                 + SHorizontalBox::Slot().AutoWidth()
                     [
                         SNew(SBox).WidthOverride(CW_Notes)
-                            [SNew(STextBlock).Text(FText::GetEmpty())]
+                            [
+                                SNew(SEditableTextBox)
+                                    .Text_Lambda([this, SceneId = Scene.SceneId]()
+                                        {
+                                            for (const FGASBlock& Block : CurrentScript.Blocks)
+                                            {
+                                                if (Block.Id == SceneId)
+                                                {
+                                                    const FString* Found = Block.Metadata.Find(TEXT("EnvNotes"));
+                                                    return Found
+                                                        ? FText::FromString(*Found)
+                                                        : FText::GetEmpty();
+                                                }
+                                            }
+                                            return FText::GetEmpty();
+                                        })
+                                    .OnTextCommitted_Lambda([this, SceneId = Scene.SceneId](const FText& NewText, ETextCommit::Type)
+                                        {
+                                            for (FGASBlock& Block : CurrentScript.Blocks)
+                                            {
+                                                if (Block.Id == SceneId)
+                                                {
+                                                    Block.Metadata.Add(TEXT("EnvNotes"), NewText.ToString());
+                                                    MarkScriptDirty();
+                                                    SaveScriptToJson();
+                                                    break;
+                                                }
+                                            }
+                                        })
+                            ]
                     ]
             ];
 
