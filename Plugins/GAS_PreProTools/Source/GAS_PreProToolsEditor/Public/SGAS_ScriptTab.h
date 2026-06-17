@@ -354,9 +354,6 @@ private:
     FText GetNewProjectShotNumberingText() const;
     void OnSceneStartNumberChanged(int32 NewValue);
     void OnShotStartNumberChanged(int32 NewValue);
-    void OnEnableBlockingChanged(ECheckBoxState NewState);
-    void OnEnableShotLayersChanged(ECheckBoxState NewState);
-    void OnAutoMasterSequenceChanged(ECheckBoxState NewState);
 
     // --------------------------------------------------
     // UI Commands / Interactions

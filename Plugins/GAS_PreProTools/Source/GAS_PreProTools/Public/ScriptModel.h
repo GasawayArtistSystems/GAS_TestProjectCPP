@@ -531,9 +531,6 @@ struct FGASProjectSettings
     bool bEnableBlocking = true;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
-    bool bEnableShotLayers = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
     bool bAutoCreateMasterSequence = true;
 };
 

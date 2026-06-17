@@ -355,23 +355,6 @@ void SGAS_ScriptTab::OnShotStartNumberChanged(int32 NewValue)
     PendingProjectSettings.ShotStartNumber = NewValue;
 }
 
-void SGAS_ScriptTab::OnEnableBlockingChanged(ECheckBoxState NewState)
-{
-    PendingProjectSettings.bEnableBlocking =
-        (NewState == ECheckBoxState::Checked);
-}
-
-void SGAS_ScriptTab::OnEnableShotLayersChanged(ECheckBoxState NewState)
-{
-    PendingProjectSettings.bEnableShotLayers =
-        (NewState == ECheckBoxState::Checked);
-}
-
-void SGAS_ScriptTab::OnAutoMasterSequenceChanged(ECheckBoxState NewState)
-{
-    PendingProjectSettings.bAutoCreateMasterSequence =
-        (NewState == ECheckBoxState::Checked);
-}
 
 // =======================================================
 // FOR BLOCKING SETUP
@@ -3105,8 +3088,7 @@ FReply SGAS_ScriptTab::OnImportScript()
         // ------------------------------------------------------------
         // AUTO CREATE MASTER SEQUENCE
         // ------------------------------------------------------------
-        if (ActiveProject &&
-            ActiveProject->ProjectSettings.bAutoCreateMasterSequence)
+        if (ActiveProject)
         {
             UE_LOG(LogGASPrePro, Warning,
                 TEXT("[AutoMaster] Starting auto master sequence pipeline..."));
@@ -3664,75 +3646,6 @@ void SGAS_ScriptTab::PromptCreateNewProject()
 
 
         + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(10.f, 10.f, 10.f, 8.f)
-            [
-                SNew(SBorder)
-                    .Padding(FMargin(8.f, 6.f))
-                    .BorderImage(FCoreStyle::Get().GetBrush("ToolPanel.GroupBorder"))
-                    [
-                        SNew(STextBlock)
-                            .Text(FText::FromString(TEXT("WORKFLOW")))
-                            .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-                    ]
-            ]
-
-        + SVerticalBox::Slot()
-            .Padding(10.f, 2.f, 10.f, 10.f)
-            .AutoHeight()
-            [
-                SNew(SVerticalBox)
-
-                    + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.f, 2.f)
-                    [
-                        SNew(SCheckBox)
-                            .IsChecked(ECheckBoxState::Checked)
-                            .OnCheckStateChanged(
-                                this,
-                                &SGAS_ScriptTab::OnEnableBlockingChanged
-                            )
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Enable Blocking")))
-                            ]
-                    ]
-
-                + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.f, 2.f)
-                    [
-                        SNew(SCheckBox)
-                            .IsChecked(ECheckBoxState::Checked)
-                            .OnCheckStateChanged(
-                                this,
-                                &SGAS_ScriptTab::OnEnableShotLayersChanged
-                            )
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Enable Shot Layers")))
-                            ]
-                    ]
-
-                + SVerticalBox::Slot()
-                    .AutoHeight()
-                    .Padding(0.f, 2.f)
-                    [
-                        SNew(SCheckBox)
-                            .IsChecked(ECheckBoxState::Checked)
-                            .OnCheckStateChanged(
-                                this,
-                                &SGAS_ScriptTab::OnAutoMasterSequenceChanged
-                            )
-                            [
-                                SNew(STextBlock)
-                                    .Text(FText::FromString(TEXT("Auto Create Master Sequence")))
-                            ]
-                    ]
-            ]
-
-        + SVerticalBox::Slot()
         .Padding(10.f)
         .HAlign(HAlign_Right)
         .AutoHeight()
@@ -3992,14 +3905,8 @@ bool SGAS_ScriptTab::CreateNewProject(
     NewProject->ProjectSettings.ShotStartNumber =
         InProjectSettings.ShotStartNumber;
 
-    NewProject->ProjectSettings.bEnableBlocking =
-        InProjectSettings.bEnableBlocking;
-
-    NewProject->ProjectSettings.bEnableShotLayers =
-        InProjectSettings.bEnableShotLayers;
-
-    NewProject->ProjectSettings.bAutoCreateMasterSequence =
-        InProjectSettings.bAutoCreateMasterSequence;
+    NewProject->ProjectSettings.bEnableBlocking = true;
+    NewProject->ProjectSettings.bAutoCreateMasterSequence = true;
 
     NewProject->MarkPackageDirty();
 
