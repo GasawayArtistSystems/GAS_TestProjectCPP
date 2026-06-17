@@ -311,6 +311,11 @@ public:
     void PublicPromoteNonBlockingShotsToBlocking(const FString& SceneId) { PromoteNonBlockingShotsToBlocking(SceneId); }
     void PublicOnStartBlockingScene(const FString& SceneId) { OnStartBlockingScene(SceneId); }
 
+    void OnStartBlockingScene(const FString& SceneId);
+    void OpenCastWindowForScene(const FString& SceneId);
+
+
+
 private:
 
     // --------------------------------------------------
@@ -396,9 +401,7 @@ private:
         const FString& SceneId
     );
 
-    void OnStartBlockingScene(const FString& SceneId);
     void OnDeleteBlockingScene(const FString& SceneId);
-    void OpenCastWindowForScene(const FString& SceneId);
     void OnBlockingCastModified();
     bool bLoadingBlockingLevel = false;
     bool bPendingAutoOpenCastWindow = false;

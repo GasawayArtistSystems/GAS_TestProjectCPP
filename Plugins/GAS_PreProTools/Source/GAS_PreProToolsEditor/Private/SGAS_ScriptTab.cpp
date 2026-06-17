@@ -4781,16 +4781,6 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
             );
         }
 
-        // Open cast window for existing blocking scene
-        FTSTicker::GetCoreTicker().AddTicker(
-            FTickerDelegate::CreateLambda([this, SceneId](float) -> bool
-                {
-                    OpenCastWindowForScene(SceneId);
-                    return false;
-                }),
-            0.5f
-        );
-
         return;
     }
 

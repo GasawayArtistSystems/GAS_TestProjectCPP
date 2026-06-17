@@ -19,10 +19,16 @@ class SGAS_DirectorView : public SCompoundWidget
 public:
     SLATE_BEGIN_ARGS(SGAS_DirectorView) {}
     SLATE_END_ARGS()
-
     void Construct(const FArguments& InArgs);
     void SetActiveScene(const FString& SceneId, const FGASScript* InScript);
     void RefreshCast(const FGASScript* InScript);
+    const FString& GetActiveSceneId() const { return ActiveSceneId; }
+
+    DECLARE_DELEGATE(FOnBlockingRequested);
+    FOnBlockingRequested OnBlockingRequested;
+
+    DECLARE_DELEGATE(FOnCastButtonClicked);
+    FOnCastButtonClicked OnCastButtonClicked;
 
 private:
     // --------------------------------------------------
@@ -58,6 +64,10 @@ private:
     // Viewport
     // --------------------------------------------------
     TSharedRef<SWidget> GetLevelEditorViewport();
+
+    FVector SavedPerspectiveLocation;
+    FRotator SavedPerspectiveRotation;
+    bool bHasSavedPerspective = false;
 
     // --------------------------------------------------
     // Data

@@ -480,6 +480,28 @@ void SGAS_TestWindow::SetActiveTab(EGASMainTab NewTab)
         if (!DirectorViewWidget.IsValid())
         {
             SAssignNew(DirectorViewWidget, SGAS_DirectorView);
+            DirectorViewWidget->OnBlockingRequested.BindLambda([this]()
+                {
+                    if (ScriptTabWidget.IsValid() && DirectorViewWidget.IsValid())
+                    {
+                        const FString SceneId = DirectorViewWidget->GetActiveSceneId();
+                        if (!SceneId.IsEmpty())
+                        {
+                            ScriptTabWidget->OnStartBlockingScene(SceneId);
+                        }
+                    }
+                });
+            DirectorViewWidget->OnCastButtonClicked.BindLambda([this]()
+                {
+                    if (ScriptTabWidget.IsValid() && DirectorViewWidget.IsValid())
+                    {
+                        const FString SceneId = DirectorViewWidget->GetActiveSceneId();
+                        if (!SceneId.IsEmpty())
+                        {
+                            ScriptTabWidget->OpenCastWindowForScene(SceneId);
+                        }
+                    }
+                });
         }
         ContentBox->SetContent(DirectorViewWidget.ToSharedRef());
         break;
@@ -640,6 +662,28 @@ void SGAS_TestWindow::SwitchToDirectorView(const FString& SceneId)
     if (!DirectorViewWidget.IsValid())
     {
         SAssignNew(DirectorViewWidget, SGAS_DirectorView);
+        DirectorViewWidget->OnBlockingRequested.BindLambda([this]()
+            {
+                if (ScriptTabWidget.IsValid() && DirectorViewWidget.IsValid())
+                {
+                    const FString SceneId = DirectorViewWidget->GetActiveSceneId();
+                    if (!SceneId.IsEmpty())
+                    {
+                        ScriptTabWidget->OnStartBlockingScene(SceneId);
+                    }
+                }
+            });
+        DirectorViewWidget->OnCastButtonClicked.BindLambda([this]()
+            {
+                if (ScriptTabWidget.IsValid() && DirectorViewWidget.IsValid())
+                {
+                    const FString SceneId = DirectorViewWidget->GetActiveSceneId();
+                    if (!SceneId.IsEmpty())
+                    {
+                        ScriptTabWidget->OpenCastWindowForScene(SceneId);
+                    }
+                }
+            });
     }
 
     // Pass scene ID AND script pointer
