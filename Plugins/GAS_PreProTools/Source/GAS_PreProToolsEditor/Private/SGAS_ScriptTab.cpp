@@ -4649,14 +4649,9 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
         );
     }
 
-    UE_LOG(LogTemp, Error,
-        TEXT("[BLOCKING PATH] ExistingPath='%s'"),
-        *SceneBlock->BlockingLevelPath);
 
     if (!SceneBlock->BlockingLevelPath.IsEmpty())
     {
-        UE_LOG(LogTemp, Error,
-            TEXT("[BLOCKING PATH] EXISTING BLOCKING PATH BRANCH"));
 
         // -----------------------------------------------------
         // Only load map if NOT already open
@@ -4787,11 +4782,9 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
         }
 
         // Open cast window for existing blocking scene
-        UE_LOG(LogTemp, Error, TEXT("🔥 [CAST] Scheduling cast window open for SceneId=%s"), *SceneId);
         FTSTicker::GetCoreTicker().AddTicker(
             FTickerDelegate::CreateLambda([this, SceneId](float) -> bool
                 {
-                    UE_LOG(LogTemp, Error, TEXT("🔥 [CAST] Ticker fired — calling OpenCastWindowForScene"));
                     OpenCastWindowForScene(SceneId);
                     return false;
                 }),
@@ -4806,8 +4799,7 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
     // Otherwise show set browser
     OpenSetSelectionWindow(SceneId);
 
-    UE_LOG(LogTemp, Error,
-        TEXT("[BLOCKING PATH] NEW BLOCKING SCENE BRANCH"));
+
 }
 
 void SGAS_ScriptTab::OpenSetSelectionWindow(const FString& SceneId)
@@ -5166,7 +5158,6 @@ void SGAS_ScriptTab::SpawnSelectedSet(const FString& LevelPath)
 
 void SGAS_ScriptTab::OpenCastWindowForScene(const FString& SceneId)
 {
-    UE_LOG(LogTemp, Error, TEXT("🔥 OpenCastWindowForScene CALLED | SceneId=%s"), *SceneId);
 
     // -----------------------------------------------------
     // If window already exists → bring to front (DO NOT destroy)
@@ -7201,7 +7192,6 @@ FVector2D SGAS_ScriptTab::GetPreviewWidgetSize(float InWidth) const
 
 void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
 {
-    UE_LOG(LogTemp, Error, TEXT("🔥 HandleMapOpened FIRED | Filename=%s"), *Filename);
     bLoadingBlockingLevel = false;
 
     // ------------------------------------------------------------
