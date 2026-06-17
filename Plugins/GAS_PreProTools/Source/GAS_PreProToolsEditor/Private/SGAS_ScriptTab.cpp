@@ -2933,13 +2933,18 @@ void SGAS_ScriptTab::OnMapChanged(uint32 MapChangeFlags)
 {
     if (bBlockingActive)
     {
+        // If we're mid-flow creating or loading a blocking level, don't reset
+        if (!PendingBlockingSceneId.IsEmpty() || bLoadingBlockingLevel)
+        {
+            return;
+        }
+
         UE_LOG(LogGASPrePro, Warning, TEXT("Map changed while blocking active — resetting blocking state"));
         bBlockingActive = false;
         ActiveBlockingSceneId = FGuid();
         GASBlockingAccess::SetBlockingActive(false);
         GASBlockingAccess::SetActiveSceneId(FGuid());
         bPendingAutoOpenCastWindow = false;
-
         RebuildShotList();
     }
 }
@@ -4781,40 +4786,17 @@ void SGAS_ScriptTab::OnStartBlockingScene(const FString& SceneId)
             );
         }
 
-        // -----------------------------------------------------
-        // 🔥 FINAL WORLD DUMP (AFTER EVERYTHING)
-        // -----------------------------------------------------
-
-        if (World)
-        {
-            World->GetTimerManager().SetTimerForNextTick([World]()
+        // Open cast window for existing blocking scene
+        UE_LOG(LogTemp, Error, TEXT("🔥 [CAST] Scheduling cast window open for SceneId=%s"), *SceneId);
+        FTSTicker::GetCoreTicker().AddTicker(
+            FTickerDelegate::CreateLambda([this, SceneId](float) -> bool
                 {
-                    UE_LOG(LogTemp, Error, TEXT("===== DELAYED WORLD DUMP ====="));
-
-                    for (TActorIterator<AActor> It(World); It; ++It)
-                    {
-                        AActor* Actor = *It;
-                        if (!Actor) continue;
-
-                        for (UActorComponent* Comp : Actor->GetComponents())
-                        {
-                            if (USkeletalMeshComponent* Skel = Cast<USkeletalMeshComponent>(Comp))
-                            {
-                                if (Skel->GetSkeletalMeshAsset())
-                                {
-                                    UE_LOG(LogTemp, Error,
-                                        TEXT("🔥 FOUND MESH → Actor: %s | Class: %s | Mesh: %s"),
-                                        *Actor->GetName(),
-                                        *Actor->GetClass()->GetName(),
-                                        *Skel->GetSkeletalMeshAsset()->GetName()
-                                    );
-                                }
-                            }
-                        }
-                    }
-                });
-        }
-
+                    UE_LOG(LogTemp, Error, TEXT("🔥 [CAST] Ticker fired — calling OpenCastWindowForScene"));
+                    OpenCastWindowForScene(SceneId);
+                    return false;
+                }),
+            0.5f
+        );
 
         return;
     }
@@ -5758,6 +5740,7 @@ void SGAS_ScriptTab::AssignSetToPendingScene(FName SelectedSetId)
         ActiveSetBrowserWindow.Reset();
     }
 
+    bLoadingBlockingLevel = true;
     PendingBlockingSceneId.Empty();
 }
 
@@ -7219,6 +7202,7 @@ FVector2D SGAS_ScriptTab::GetPreviewWidgetSize(float InWidth) const
 void SGAS_ScriptTab::HandleMapOpened(const FString& Filename, bool bAsTemplate)
 {
     UE_LOG(LogTemp, Error, TEXT("🔥 HandleMapOpened FIRED | Filename=%s"), *Filename);
+    bLoadingBlockingLevel = false;
 
     // ------------------------------------------------------------
     // Pending shot delete after opening the correct blocking level

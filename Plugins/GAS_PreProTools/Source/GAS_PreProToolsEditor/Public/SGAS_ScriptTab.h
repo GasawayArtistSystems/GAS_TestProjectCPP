@@ -400,6 +400,7 @@ private:
     void OnDeleteBlockingScene(const FString& SceneId);
     void OpenCastWindowForScene(const FString& SceneId);
     void OnBlockingCastModified();
+    bool bLoadingBlockingLevel = false;
     bool bPendingAutoOpenCastWindow = false;
     bool bIsUpdatingCast = false;
 
