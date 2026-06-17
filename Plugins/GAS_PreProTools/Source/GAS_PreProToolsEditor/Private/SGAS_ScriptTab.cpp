@@ -6677,42 +6677,6 @@ void SGAS_ScriptTab::RebuildShotList()
                     [
                         SNew(SHorizontalBox)
 
-                            + SHorizontalBox::Slot().AutoWidth()
-                            [
-                                SNew(SBox).WidthOverride(CW_Lock)
-                                    [
-                                        SNew(SCheckBox)
-                                            .IsChecked_Lambda([this, ShotId = Shot.ShotId]()
-                                                {
-                                                    for (const FGASMarker& Marker : CurrentScript.Markers)
-                                                    {
-                                                        FGuid G; FGuid::Parse(Marker.Id, G);
-                                                        if (G == ShotId)
-                                                            return Marker.SpatialState == EGASShotSpatialState::Locked
-                                                            ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
-                                                    }
-                                                    return ECheckBoxState::Unchecked;
-                                                })
-                                            .OnCheckStateChanged_Lambda([this, ShotId = Shot.ShotId](ECheckBoxState NewState)
-                                                {
-                                                    for (FGASMarker& Marker : CurrentScript.Markers)
-                                                    {
-                                                        FGuid G; FGuid::Parse(Marker.Id, G);
-                                                        if (G == ShotId)
-                                                        {
-                                                            if (NewState == ECheckBoxState::Checked)
-                                                                Marker.SetSpatialState(EGASShotSpatialState::Locked);
-                                                            else
-                                                                Marker.SetSpatialState(EGASShotSpatialState::CameraPlaced);
-                                                            MarkScriptDirty();
-                                                            RebuildShotList();
-                                                            break;
-                                                        }
-                                                    }
-                                                })
-                                    ]
-                            ]
-
                         + SHorizontalBox::Slot().AutoWidth()
                             [
                                 SNew(SBox).WidthOverride(CW_Shot)
