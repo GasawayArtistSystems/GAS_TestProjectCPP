@@ -5463,6 +5463,334 @@ void SGAS_ScriptTab::OnExitWatchMode()
     }
 }
 
+void SGAS_ScriptTab::OpenProjectPreferences()
+{
+    if (!ActiveProject)
+    {
+        FMessageDialog::Open(EAppMsgType::Ok,
+            FText::FromString(TEXT("No project is open.")));
+        return;
+    }
+
+    FGASProjectSettings& Settings = ActiveProject->ProjectSettings;
+
+    // --- Build dialog window ---
+    TSharedRef<SWindow> PrefsWindow = SNew(SWindow)
+        .Title(FText::FromString(TEXT("Project Preferences")))
+        .ClientSize(FVector2D(420.f, 520.f))
+        .SupportsMaximize(false)
+        .SupportsMinimize(false);
+
+    // Working copies
+    TSharedPtr<FString> SelectedAspectRatio = MakeShared<FString>(Settings.AspectRatio);
+    TSharedPtr<EGASRenderFormat> SelectedFormat = MakeShared<EGASRenderFormat>(Settings.DefaultRenderFormat);
+    TSharedPtr<EGASRenderQuality> SelectedQuality = MakeShared<EGASRenderQuality>(Settings.RenderQuality);
+    TSharedPtr<bool> bAutoStartBlocking = MakeShared<bool>(Settings.bAutoStartBlocking);
+    TSharedPtr<bool> bAutoAppend = MakeShared<bool>(Settings.bAutoAppendNewScenesToMaster);
+    TSharedPtr<bool> bAutoOpenSeq = MakeShared<bool>(Settings.bAutoOpenSequencerOnBuild);
+
+    TArray<TSharedPtr<FString>> AspectOptions;
+    AspectOptions.Add(MakeShared<FString>(TEXT("16:9")));
+    AspectOptions.Add(MakeShared<FString>(TEXT("2.39:1")));
+    AspectOptions.Add(MakeShared<FString>(TEXT("1.85:1")));
+    AspectOptions.Add(MakeShared<FString>(TEXT("4:3")));
+
+    TArray<TSharedPtr<FString>> FormatOptions;
+    FormatOptions.Add(MakeShared<FString>(TEXT("PNG")));
+    FormatOptions.Add(MakeShared<FString>(TEXT("EXR")));
+
+    TArray<TSharedPtr<FString>> QualityOptions;
+    QualityOptions.Add(MakeShared<FString>(TEXT("Preview (540p)")));
+    QualityOptions.Add(MakeShared<FString>(TEXT("Standard (1080p)")));
+    QualityOptions.Add(MakeShared<FString>(TEXT("Final (4K)")));
+
+    PrefsWindow->SetContent(
+        SNew(SVerticalBox)
+        .Clipping(EWidgetClipping::ClipToBounds)
+
+        // --- PROJECT SETTINGS ---
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 12.f, 12.f, 4.f)
+        [
+            SNew(STextBlock)
+                .Text(FText::FromString(TEXT("PROJECT SETTINGS")))
+                .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+        ]
+
+        // Aspect Ratio
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 4.f)
+        [
+            SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .FillWidth(1.f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("Aspect Ratio")))
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SComboBox<TSharedPtr<FString>>)
+                        .OptionsSource(&AspectOptions)
+                        .InitiallySelectedItem(AspectOptions[0])
+                        .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+                            {
+                                return SNew(STextBlock)
+                                    .Text(FText::FromString(*Item));
+                            })
+                        .OnSelectionChanged_Lambda([SelectedAspectRatio](TSharedPtr<FString> Item, ESelectInfo::Type)
+                            {
+                                if (Item.IsValid())
+                                    *SelectedAspectRatio = *Item;
+                            })
+                        [
+                            SNew(STextBlock)
+                                .Text_Lambda([SelectedAspectRatio]()
+                                    {
+                                        return FText::FromString(*SelectedAspectRatio);
+                                    })
+                        ]
+                ]
+        ]
+
+    // --- WORKFLOW ---
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 12.f, 12.f, 4.f)
+        [
+            SNew(STextBlock)
+                .Text(FText::FromString(TEXT("WORKFLOW")))
+                .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+        ]
+
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 4.f)
+        [
+            SNew(SCheckBox)
+                .IsChecked_Lambda([bAutoStartBlocking]()
+                    {
+                        return *bAutoStartBlocking
+                            ? ECheckBoxState::Checked
+                            : ECheckBoxState::Unchecked;
+                    })
+                .OnCheckStateChanged_Lambda([bAutoStartBlocking](ECheckBoxState State)
+                    {
+                        *bAutoStartBlocking = (State == ECheckBoxState::Checked);
+                    })
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("Auto-start blocking when selecting a scene")))
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 4.f)
+        [
+            SNew(SCheckBox)
+                .IsChecked_Lambda([bAutoAppend]()
+                    {
+                        return *bAutoAppend
+                            ? ECheckBoxState::Checked
+                            : ECheckBoxState::Unchecked;
+                    })
+                .OnCheckStateChanged_Lambda([bAutoAppend](ECheckBoxState State)
+                    {
+                        *bAutoAppend = (State == ECheckBoxState::Checked);
+                    })
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("Auto-append new scenes to master sequence")))
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]
+        ]
+
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 4.f)
+        [
+            SNew(SCheckBox)
+                .IsChecked_Lambda([bAutoOpenSeq]()
+                    {
+                        return *bAutoOpenSeq
+                            ? ECheckBoxState::Checked
+                            : ECheckBoxState::Unchecked;
+                    })
+                .OnCheckStateChanged_Lambda([bAutoOpenSeq](ECheckBoxState State)
+                    {
+                        *bAutoOpenSeq = (State == ECheckBoxState::Checked);
+                    })
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("Auto-open Sequencer when building a scene sequence")))
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]
+        ]
+
+    // --- RENDER ---
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 12.f, 12.f, 4.f)
+        [
+            SNew(STextBlock)
+                .Text(FText::FromString(TEXT("RENDER")))
+                .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+        ]
+
+        // Output Format
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 4.f)
+        [
+            SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .FillWidth(1.f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("Default Output Format")))
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SComboBox<TSharedPtr<FString>>)
+                        .OptionsSource(&FormatOptions)
+                        .InitiallySelectedItem(FormatOptions[0])
+                        .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+                            {
+                                return SNew(STextBlock)
+                                    .Text(FText::FromString(*Item));
+                            })
+                        .OnSelectionChanged_Lambda([SelectedFormat](TSharedPtr<FString> Item, ESelectInfo::Type)
+                            {
+                                if (!Item.IsValid()) return;
+                                *SelectedFormat = (*Item == TEXT("PNG"))
+                                    ? EGASRenderFormat::PNG
+                                    : EGASRenderFormat::EXR;
+                            })
+                        [
+                            SNew(STextBlock)
+                                .Text_Lambda([SelectedFormat]()
+                                    {
+                                        return FText::FromString(
+                                            *SelectedFormat == EGASRenderFormat::PNG
+                                            ? TEXT("PNG") : TEXT("EXR"));
+                                    })
+                        ]
+                ]
+        ]
+
+    // Render Quality
+    + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 4.f)
+        [
+            SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .FillWidth(1.f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(STextBlock)
+                        .Text(FText::FromString(TEXT("Render Quality")))
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SComboBox<TSharedPtr<FString>>)
+                        .OptionsSource(&QualityOptions)
+                        .InitiallySelectedItem(QualityOptions[1])
+                        .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+                            {
+                                return SNew(STextBlock)
+                                    .Text(FText::FromString(*Item));
+                            })
+                        .OnSelectionChanged_Lambda([SelectedQuality](TSharedPtr<FString> Item, ESelectInfo::Type)
+                            {
+                                if (!Item.IsValid()) return;
+                                if (*Item == TEXT("Preview (540p)"))
+                                    *SelectedQuality = EGASRenderQuality::Preview;
+                                else if (*Item == TEXT("Final (4K)"))
+                                    *SelectedQuality = EGASRenderQuality::Final;
+                                else
+                                    *SelectedQuality = EGASRenderQuality::Standard;
+                            })
+                        [
+                            SNew(STextBlock)
+                                .Text_Lambda([SelectedQuality]()
+                                    {
+                                        switch (*SelectedQuality)
+                                        {
+                                        case EGASRenderQuality::Preview:
+                                            return FText::FromString(TEXT("Preview (540p)"));
+                                        case EGASRenderQuality::Final:
+                                            return FText::FromString(TEXT("Final (4K)"));
+                                        default:
+                                            return FText::FromString(TEXT("Standard (1080p)"));
+                                        }
+                                    })
+                        ]
+                ]
+        ]
+
+    // --- SAVE / CANCEL ---
+    + SVerticalBox::Slot()
+        .FillHeight(1.f)
+        [
+            SNew(SSpacer)
+        ]
+
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(12.f, 8.f)
+        [
+            SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .FillWidth(1.f)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .Padding(4.f, 0.f)
+                [
+                    SNew(SButton)
+                        .Text(FText::FromString(TEXT("Save")))
+                        .OnClicked_Lambda([this, &Settings, SelectedAspectRatio, SelectedFormat, SelectedQuality, bAutoStartBlocking, bAutoAppend, bAutoOpenSeq, &PrefsWindow]()
+                            {
+                                Settings.AspectRatio = *SelectedAspectRatio;
+                                Settings.DefaultRenderFormat = *SelectedFormat;
+                                Settings.RenderQuality = *SelectedQuality;
+                                Settings.bAutoStartBlocking = *bAutoStartBlocking;
+                                Settings.bAutoAppendNewScenesToMaster = *bAutoAppend;
+                                Settings.bAutoOpenSequencerOnBuild = *bAutoOpenSeq;
+                                ActiveProject->MarkPackageDirty();
+                                PrefsWindow->RequestDestroyWindow();
+                                return FReply::Handled();
+                            })
+                ]
+            + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SButton)
+                        .Text(FText::FromString(TEXT("Cancel")))
+                        .OnClicked_Lambda([&PrefsWindow]()
+                            {
+                                PrefsWindow->RequestDestroyWindow();
+                                return FReply::Handled();
+                            })
+                ]
+        ]
+        );
+
+    GEditor->EditorAddModalWindow(PrefsWindow);
+}
+
 void SGAS_ScriptTab::LoadSetForBlocking(const FName& SetId)
 {
     if (!GEditor)

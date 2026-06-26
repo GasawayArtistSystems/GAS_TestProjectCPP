@@ -316,6 +316,8 @@ public:
     void OnOpenMasterSequence();
     void OnExitWatchMode();
 
+    void OpenProjectPreferences();
+
 
 private:
 

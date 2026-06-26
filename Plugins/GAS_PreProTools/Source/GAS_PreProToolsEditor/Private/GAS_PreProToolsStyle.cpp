@@ -180,6 +180,15 @@ void FGAS_PreProToolsStyle::Initialize()
         )
     );
 
+    // Register PrefsIcon_40.png
+    StyleInstance->Set(
+        "GAS.PrefsIcon_40",
+        new FSlateImageBrush(
+            StyleInstance->RootToContentDir(TEXT("PrefsIcon_40.png")),
+            FVector2D(40.f, 40.f)
+        )
+    );
+
     // Register SequencerIcon_40.png as a brush
     StyleInstance->Set(
         "GAS.TracksIcon",

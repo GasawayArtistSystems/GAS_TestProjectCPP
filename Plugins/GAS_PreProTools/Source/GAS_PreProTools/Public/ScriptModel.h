@@ -400,8 +400,20 @@ enum class EGASShotNumberBaseStyle : uint8
     Alphabetical   UMETA(DisplayName = "Alphabetical")
 };
 
+UENUM()
+enum class EGASRenderFormat : uint8
+{
+    PNG     UMETA(DisplayName = "PNG"),
+    EXR     UMETA(DisplayName = "EXR")
+};
 
-
+UENUM()
+enum class EGASRenderQuality : uint8
+{
+    Preview     UMETA(DisplayName = "Preview (540p)"),
+    Standard    UMETA(DisplayName = "Standard (1080p)"),
+    Final       UMETA(DisplayName = "Final (4K)")
+};
 
 
 // ------------------------------------------------------------
@@ -532,6 +544,27 @@ struct FGASProjectSettings
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
     bool bAutoCreateMasterSequence = true;
+
+    // ------------------------------------------------------------
+    // Director Preferences
+    // ------------------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bAutoStartBlocking = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bAutoAppendNewScenesToMaster = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    bool bAutoOpenSequencerOnBuild = false;
+
+    // ------------------------------------------------------------
+    // Render Preferences
+    // ------------------------------------------------------------
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    EGASRenderFormat DefaultRenderFormat = EGASRenderFormat::PNG;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GAS")
+    EGASRenderQuality RenderQuality = EGASRenderQuality::Standard;
 };
 
 // ------------------------------------------------------------

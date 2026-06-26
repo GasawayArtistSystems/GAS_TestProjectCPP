@@ -226,6 +226,35 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                         ]
                                 ]
                         ]
+                    // --- Project Preferences ----------------------------
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(2.f, 0.f)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                .HAlign(HAlign_Center)
+                                .VAlign(VAlign_Center)
+                                .ToolTipText(FText::FromString(TEXT("Project Preferences")))
+                                .OnClicked_Lambda([this]()
+                                    {
+                                        if (ScriptTabWidget.IsValid())
+                                        {
+                                            ScriptTabWidget->OpenProjectPreferences();
+                                        }
+                                        return FReply::Handled();
+                                    })
+                                [
+                                    SNew(SBox)
+                                        .WidthOverride(40.f)
+                                        .HeightOverride(40.f)
+                                        [
+                                            SNew(SImage)
+                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.PrefsIcon_40"))
+                                        ]
+                                ]
+                        ]
                     // --- Vertical Separator ---
                     + SHorizontalBox::Slot()
                         .AutoWidth()

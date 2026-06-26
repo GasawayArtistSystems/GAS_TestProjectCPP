@@ -1,13 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ScriptModel.h"
 
-UENUM()
-enum class EGASRenderFormat : uint8
-{
-    PNG,
-    EXR
-};
 
 class ULevelSequence;
 class UGASPreProProject;
