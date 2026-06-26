@@ -24,6 +24,8 @@ public:
     void RefreshCast(const FGASScript* InScript);
     const FString& GetActiveSceneId() const { return ActiveSceneId; }
 
+    void RefreshSceneList(const FGASScript* InScript);
+
     DECLARE_DELEGATE(FOnBlockingRequested);
     FOnBlockingRequested OnBlockingRequested;
 
@@ -35,6 +37,9 @@ public:
 
     DECLARE_DELEGATE(FOnWatchExited);
     FOnWatchExited OnWatchExited;
+
+    DECLARE_DELEGATE_OneParam(FOnDirectorSceneSelected, const FString&);
+    FOnDirectorSceneSelected OnSceneSelected;
 
 private:
     // --------------------------------------------------
@@ -67,6 +72,16 @@ private:
     );
 
     // --------------------------------------------------
+    // Scene list
+    // --------------------------------------------------
+    void RebuildSceneList();
+    TSharedRef<ITableRow> GenerateSceneRow(
+        TSharedPtr<FString> Item,
+        const TSharedRef<STableViewBase>& OwnerTable
+    );
+
+
+    // --------------------------------------------------
     // Viewport
     // --------------------------------------------------
     TSharedRef<SWidget> GetLevelEditorViewport();
@@ -86,6 +101,10 @@ private:
 
     TArray<TSharedPtr<FString>> CastListItems;
     TSharedPtr<SListView<TSharedPtr<FString>>> CastListView;
+
+    TArray<TSharedPtr<FString>> SceneListItems;
+    TSharedPtr<SListView<TSharedPtr<FString>>> SceneListView;
+    TArray<FString> SceneIdList; // parallel array — scene IDs matching SceneListItems
 
     TSharedPtr<SEditorViewport> ViewportWidget;
 

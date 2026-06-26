@@ -501,6 +501,52 @@ void SGAS_TestWindow::SetActiveTab(EGASMainTab NewTab)
                         }
                     }
                 });
+            DirectorViewWidget->OnSceneSelected.BindLambda([this](const FString& SceneId)
+                {
+                    if (!ScriptTabWidget.IsValid() || !DirectorViewWidget.IsValid())
+                        return;
+
+                    const FGASScript& Script = ScriptTabWidget->GetScript();
+
+                    // Find the scene block
+                    const FGASBlock* SceneBlock = nullptr;
+                    for (const FGASBlock& Block : Script.Blocks)
+                    {
+                        if (Block.Id == SceneId && Block.Type == EGASBlockType::SceneHeading)
+                        {
+                            SceneBlock = &Block;
+                            break;
+                        }
+                    }
+
+                    if (!SceneBlock) return;
+
+                    // Update active scene in Director View
+                    DirectorViewWidget->SetActiveScene(SceneId, &Script);
+
+                    // Has blocking — switch to it
+                    if (!SceneBlock->BlockingLevelPath.IsEmpty())
+                    {
+                        ScriptTabWidget->OnStartBlockingScene(SceneId);
+                    }
+                    else
+                    {
+                        // No blocking — prompt
+                        const FText Title = FText::FromString(TEXT("Start Blocking?"));
+                        const FText Message = FText::FromString(TEXT("This scene has no blocking yet.\n\nStart blocking now?"));
+
+                        EAppReturnType::Type Result = FMessageDialog::Open(
+                            EAppMsgType::YesNo,
+                            Message,
+                            &Title
+                        );
+
+                        if (Result == EAppReturnType::Yes)
+                        {
+                            ScriptTabWidget->OnStartBlockingScene(SceneId);
+                        }
+                    }
+                });
             DirectorViewWidget->OnCastButtonClicked.BindLambda([this]()
                 {
                     if (ScriptTabWidget.IsValid() && DirectorViewWidget.IsValid())
@@ -527,6 +573,10 @@ void SGAS_TestWindow::SetActiveTab(EGASMainTab NewTab)
                         ScriptTabWidget->OnExitWatchMode();
                     }
                 });
+        }
+        if (ScriptTabWidget.IsValid())
+        {
+            DirectorViewWidget->RefreshSceneList(&ScriptTabWidget->GetScript());
         }
         ContentBox->SetContent(DirectorViewWidget.ToSharedRef());
         break;
@@ -709,6 +759,52 @@ void SGAS_TestWindow::SwitchToDirectorView(const FString& SceneId)
                     }
                 }
             });
+        DirectorViewWidget->OnSceneSelected.BindLambda([this](const FString& SceneId)
+            {
+                if (!ScriptTabWidget.IsValid() || !DirectorViewWidget.IsValid())
+                    return;
+
+                const FGASScript& Script = ScriptTabWidget->GetScript();
+
+                // Find the scene block
+                const FGASBlock* SceneBlock = nullptr;
+                for (const FGASBlock& Block : Script.Blocks)
+                {
+                    if (Block.Id == SceneId && Block.Type == EGASBlockType::SceneHeading)
+                    {
+                        SceneBlock = &Block;
+                        break;
+                    }
+                }
+
+                if (!SceneBlock) return;
+
+                // Update active scene in Director View
+                DirectorViewWidget->SetActiveScene(SceneId, &Script);
+
+                // Has blocking — switch to it
+                if (!SceneBlock->BlockingLevelPath.IsEmpty())
+                {
+                    ScriptTabWidget->OnStartBlockingScene(SceneId);
+                }
+                else
+                {
+                    // No blocking — prompt
+                    const FText Title = FText::FromString(TEXT("Start Blocking?"));
+                    const FText Message = FText::FromString(TEXT("This scene has no blocking yet.\n\nStart blocking now?"));
+
+                    EAppReturnType::Type Result = FMessageDialog::Open(
+                        EAppMsgType::YesNo,
+                        Message,
+                        &Title
+                    );
+
+                    if (Result == EAppReturnType::Yes)
+                    {
+                        ScriptTabWidget->OnStartBlockingScene(SceneId);
+                    }
+                }
+            });
     }
 
     // Pass scene ID AND script pointer
@@ -718,6 +814,7 @@ void SGAS_TestWindow::SwitchToDirectorView(const FString& SceneId)
             SceneId,
             &ScriptTabWidget->GetScript()
         );
+        DirectorViewWidget->RefreshSceneList(&ScriptTabWidget->GetScript());
         ScriptTabWidget->SetShowShotList(false);
     }
 
