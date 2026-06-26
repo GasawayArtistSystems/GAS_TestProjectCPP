@@ -313,7 +313,8 @@ public:
 
     void OnStartBlockingScene(const FString& SceneId);
     void OpenCastWindowForScene(const FString& SceneId);
-
+    void OnOpenMasterSequence();
+    void OnExitWatchMode();
 
 
 private:

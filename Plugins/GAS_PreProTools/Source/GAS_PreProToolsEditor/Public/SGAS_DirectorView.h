@@ -30,6 +30,12 @@ public:
     DECLARE_DELEGATE(FOnCastButtonClicked);
     FOnCastButtonClicked OnCastButtonClicked;
 
+    DECLARE_DELEGATE(FOnWatchRequested);
+    FOnWatchRequested OnWatchRequested;
+
+    DECLARE_DELEGATE(FOnWatchExited);
+    FOnWatchExited OnWatchExited;
+
 private:
     // --------------------------------------------------
     // Mode

@@ -5386,6 +5386,83 @@ void SGAS_ScriptTab::SpawnSceneCast(FGASBlock* SceneBlock)
     }
 }
 
+void SGAS_ScriptTab::OnOpenMasterSequence()
+{
+    UE_LOG(LogTemp, Warning, TEXT("OnOpenMasterSequence CALLED"));
+    if (!ActiveProject)
+        return;
+
+    const FString MasterPackagePath =
+        FString::Printf(
+            TEXT("/Game/PrePro/Projects/%s/Sequences/MASTER_%s"),
+            *ActiveProject->ProjectName,
+            *ActiveProject->ProjectName
+        );
+
+    ULevelSequence* MasterSequence =
+        LoadObject<ULevelSequence>(nullptr, *MasterPackagePath);
+
+    if (!MasterSequence)
+    {
+        // First time — create and populate
+        CreateOrUpdateMasterSequence();
+
+        MasterSequence =
+            LoadObject<ULevelSequence>(nullptr, *MasterPackagePath);
+    }
+    else
+    {
+        // Check for unappended built scenes
+        // (append logic + prompt comes in next pass)
+    }
+
+    if (!MasterSequence)
+    {
+        FMessageDialog::Open(
+            EAppMsgType::Ok,
+            FText::FromString(TEXT("Could not create master sequence. Make sure at least one scene sequence has been built first."))
+        );
+        return;
+    }
+
+    UAssetEditorSubsystem* AssetEditorSubsystem =
+        GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+
+    if (AssetEditorSubsystem)
+    {
+        AssetEditorSubsystem->OpenEditorForAsset(MasterSequence);
+    }
+}
+
+void SGAS_ScriptTab::OnExitWatchMode()
+{
+    UE_LOG(LogTemp, Warning, TEXT("OnExitWatchMode CALLED"));
+
+    if (!GEditor) return;
+
+    UAssetEditorSubsystem* AssetEditorSubsystem =
+        GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+
+    if (!AssetEditorSubsystem) return;
+
+    if (!ActiveProject) return;
+
+    const FString MasterPackagePath =
+        FString::Printf(
+            TEXT("/Game/PrePro/Projects/%s/Sequences/MASTER_%s"),
+            *ActiveProject->ProjectName,
+            *ActiveProject->ProjectName
+        );
+
+    ULevelSequence* MasterSequence =
+        LoadObject<ULevelSequence>(nullptr, *MasterPackagePath);
+
+    if (MasterSequence)
+    {
+        AssetEditorSubsystem->CloseAllEditorsForAsset(MasterSequence);
+    }
+}
+
 void SGAS_ScriptTab::LoadSetForBlocking(const FName& SetId)
 {
     if (!GEditor)

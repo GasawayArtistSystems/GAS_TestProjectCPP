@@ -179,6 +179,53 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                         .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.LensIcon_40"))
                                 ]
                         ]
+                    // --- Send to Render Queue ----------------------------
+                    + SHorizontalBox::Slot()
+                        .AutoWidth()
+                        .Padding(2.f, 0.f)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
+                                .HAlign(HAlign_Center)
+                                .VAlign(VAlign_Center)
+                                .ToolTipText(FText::FromString(TEXT("Send to Render Queue")))
+                                .OnClicked_Lambda([this]()
+                                    {
+                                        if (!ScriptTabWidget.IsValid())
+                                            return FReply::Handled();
+
+                                        // Ask director for output format
+                                        const FText Title = FText::FromString(TEXT("Choose Output Format"));
+                                        const FText Message = FText::FromString(TEXT("Select render output format:\n\nPNG — standard quality, smaller files\nEXR — maximum quality, larger files"));
+
+                                        EAppReturnType::Type Result = FMessageDialog::Open(
+                                            EAppMsgType::YesNo,
+                                            Message,
+                                            &Title
+                                        );
+
+                                        EGASRenderFormat Format = (Result == EAppReturnType::Yes)
+                                            ? EGASRenderFormat::PNG
+                                            : EGASRenderFormat::EXR;
+
+                                        FGAS_MRQUtils::SendToRenderQueue(
+                                            ScriptTabWidget->GetActiveProject(),
+                                            Format
+                                        );
+
+                                        return FReply::Handled();
+                                    })
+                                [
+                                    SNew(SBox)
+                                        .WidthOverride(40.f)
+                                        .HeightOverride(40.f)
+                                        [
+                                            SNew(SImage)
+                                                .Image(FGAS_PreProToolsStyle::Get().GetBrush("GAS.SequencerIcon"))
+                                        ]
+                                ]
+                        ]
                     // --- Vertical Separator ---
                     + SHorizontalBox::Slot()
                         .AutoWidth()
@@ -369,44 +416,7 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                         ]
                                 ]
 
-                            // --- Send to Render Queue ----------------------------
-                            + SHorizontalBox::Slot()
-                                .AutoWidth()
-                                .Padding(2.f, 0.f)
-                                .VAlign(VAlign_Center)
-                                [
-                                    SNew(SButton)
-                                        .ButtonStyle(&FGAS_PreProToolsStyle::Get().GetWidgetStyle<FButtonStyle>("GAS.ToolButton"))
-                                        .HAlign(HAlign_Center)
-                                        .VAlign(VAlign_Center)
-                                        .ToolTipText(FText::FromString(TEXT("Send to Render Queue")))
-                                        .OnClicked_Lambda([this]()
-                                            {
-                                                if (!ScriptTabWidget.IsValid())
-                                                    return FReply::Handled();
 
-                                                // Ask director for output format
-                                                const FText Title = FText::FromString(TEXT("Choose Output Format"));
-                                                const FText Message = FText::FromString(TEXT("Select render output format:\n\nPNG — standard quality, smaller files\nEXR — maximum quality, larger files"));
-
-                                                EAppReturnType::Type Result = FMessageDialog::Open(
-                                                    EAppMsgType::YesNo,
-                                                    Message,
-                                                    &Title
-                                                );
-
-                                                EGASRenderFormat Format = (Result == EAppReturnType::Yes)
-                                                    ? EGASRenderFormat::PNG
-                                                    : EGASRenderFormat::EXR;
-
-                                                FGAS_MRQUtils::SendToRenderQueue(
-                                                    ScriptTabWidget->GetActiveProject(),
-                                                    Format
-                                                );
-
-                                                return FReply::Handled();
-                                            })
-                                ]
                         ]
 
 
@@ -500,6 +510,21 @@ void SGAS_TestWindow::SetActiveTab(EGASMainTab NewTab)
                         {
                             ScriptTabWidget->OpenCastWindowForScene(SceneId);
                         }
+                    }
+                });
+            DirectorViewWidget->OnWatchRequested.BindLambda([this]()
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("OnWatchRequested LAMBDA FIRED"));
+                    if (ScriptTabWidget.IsValid())
+                    {
+                        ScriptTabWidget->OnOpenMasterSequence();
+                    }
+                });
+            DirectorViewWidget->OnWatchExited.BindLambda([this]()
+                {
+                    if (ScriptTabWidget.IsValid())
+                    {
+                        ScriptTabWidget->OnExitWatchMode();
                     }
                 });
         }
