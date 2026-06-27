@@ -255,6 +255,32 @@ void SGAS_TestWindow::Construct(const FArguments& InArgs)
                                         ]
                                 ]
                         ]
+
+                            // --- Report Bug ---
+                            + SHorizontalBox::Slot()
+                                .AutoWidth()
+                                .Padding(8.f, 0.f, 2.f, 0.f)
+                                .VAlign(VAlign_Center)
+                                [
+                                    SNew(SButton)
+                                        .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                        .ToolTipText(FText::FromString(TEXT("Submit a Bug Report")))
+                                        .OnClicked_Lambda([]()
+                                            {
+                                                FPlatformProcess::LaunchURL(
+                                                    TEXT("https://github.com/GasawayArtistSystems/GAS_TestProjectCPP/issues/new?title=%5BBug%5D+&body=%23%23+GAS+Tools+Version%3A%0A%0A%23%23+Unreal+Engine+Version%3A%0A%0A%23%23+Description%3A%0A%0A%23%23+Steps+to+Reproduce%3A%0A1.+%0A2.+%0A3.+%0A%0A%23%23+Expected+Result%3A%0A%0A%23%23+Actual+Result%3A%0A%0A%23%23+Screenshots+%2F+Logs%3A%0A&labels=bug"),
+                                                    nullptr,
+                                                    nullptr
+                                                );
+                                                return FReply::Handled();
+                                            })
+                                        [
+                                            SNew(STextBlock)
+                                                .Text(FText::FromString(TEXT("Report Bug")))
+                                                .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                                                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f, 1.f))
+                                        ]
+                                ]
                     // --- Vertical Separator ---
                     + SHorizontalBox::Slot()
                         .AutoWidth()
