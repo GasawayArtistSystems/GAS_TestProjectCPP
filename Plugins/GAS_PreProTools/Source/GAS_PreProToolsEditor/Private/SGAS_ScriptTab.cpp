@@ -16,7 +16,6 @@
 #include "ShotList/GAS_ShotListBuilderV2.h"
 #include "GAS_PreProToolsStyle.h"
 #include "GASScriptAsset.h"
-#include "GAS_SetActor.h"
 #include "SGAS_SetBrowser.h"
 #include "GAS_SetDiscovery.h"
 #include "Actors/GAS_StageCenterActor.h"

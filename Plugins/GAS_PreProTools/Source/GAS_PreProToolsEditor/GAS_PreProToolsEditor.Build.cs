@@ -15,7 +15,6 @@ public class GAS_PreProToolsEditor : ModuleRules
         "Slate",
         "SlateCore",
         "InputCore",
-        "GAS_TestProjectCPP",
         "CinematicCamera"
         });
 

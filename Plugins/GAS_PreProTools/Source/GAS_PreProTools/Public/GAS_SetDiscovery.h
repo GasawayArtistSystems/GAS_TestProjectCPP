@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GAS_SetDescriptor.h"
+#include "AssetRegistry/AssetData.h"
 
 class GAS_PREPROTOOLS_API FGASSetDiscovery
 {

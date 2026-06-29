@@ -10,6 +10,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "GAS_StandInTypes.h"
 #include "Misc/Guid.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 
 
 #include "GAS_StandInActor.generated.h"

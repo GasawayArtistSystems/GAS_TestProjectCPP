@@ -38,12 +38,6 @@ public class GAS_PreProTools : ModuleRules
             "MovieSceneTracks"
         });
 
-        PublicIncludePaths.AddRange(
-            new string[]
-            {
-                Path.Combine(ModuleDirectory, "Public"),
-                Path.Combine(ModuleDirectory, "Public/Utils")
-            }
-        );
+
     }
 }

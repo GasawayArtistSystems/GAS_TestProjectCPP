@@ -29,7 +29,7 @@ public:
     FGuid GetCurrentShotID() const;
 
 protected:
-    UPROPERTY(VisibleAnywhere)
+    UPROPERTY(VisibleAnywhere, Category = "GAS Blocking")
     class UArrowComponent* FacingArrow;
 
 private:
